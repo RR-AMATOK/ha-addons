@@ -14,6 +14,8 @@ Money is stored as integer cents; `tracking.py` converts to float dollars at the
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
@@ -1664,6 +1666,100 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
         "exportedAt": exported_at,
         "tables": tables,
     }
+
+
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _csv_safe(text: str) -> str:
+    """Prefix *text* with a leading apostrophe when it starts with a formula-trigger
+    character (=, +, -, @), so opening the export in Excel/Sheets/Numbers never executes
+    a formula built from user-controlled data (description, category, account, tag names).
+    Spreadsheet apps render the leading apostrophe as a plain-text marker, not a visible
+    character, so the cell still reads correctly to a human."""
+    if text and text[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + text
+    return text
+
+
+def export_txns_csv(conn: sqlite3.Connection, date_from: str | None = None, date_to: str | None = None) -> str:
+    """Build a date-ranged CSV of transactions for analysis / tax-prep (read-only, no writes).
+
+    Deliberately NOT a backup: no app tag, no schemaVersion, never accepted by import_all —
+    this is a plain spreadsheet export a human opens in Excel/Sheets/Numbers.
+
+    *date_from* / *date_to* are inclusive ISO ``YYYY-MM-DD`` bounds on ``txn.posted_on``;
+    either or both may be ``None`` for an unbounded side. Raises ``ValueError`` (surfaced by
+    the caller as an HTTP 422) when a bound is not a valid ISO date, or when
+    ``date_from > date_to``.
+
+    One row per transaction, ordered by ``posted_on`` then ``id``. Columns: posted_on,
+    account, direction, amount (dollars, 2 decimals — the DB stores integer cents),
+    bucket, category, description, tags (``|``-joined tag names), status, kind,
+    is_transfer, splits (empty, or ``bucket:category:amount`` legs ``|``-joined when the
+    transaction has txn_split rows). account/tag names come from joins, never raw ids.
+    Every user-controlled text cell (description, category, account, tag names, and the
+    splits cell) is passed through `_csv_safe` to defuse CSV formula injection.
+    """
+    for label, value in (("from", date_from), ("to", date_to)):
+        if value is not None:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(f"{label!r} must be a valid ISO date (YYYY-MM-DD), got {value!r}")
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise ValueError(f"from ({date_from!r}) must not be after to ({date_to!r})")
+
+    sql = "SELECT t.*, a.name AS account_name FROM txn t JOIN account a ON a.id = t.account_id"
+    where, vals = ["1=1"], []
+    if date_from is not None:
+        where.append("t.posted_on >= ?"); vals.append(date_from)
+    if date_to is not None:
+        where.append("t.posted_on <= ?"); vals.append(date_to)
+    sql += " WHERE " + " AND ".join(where) + " ORDER BY t.posted_on, t.id"
+    rows = conn.execute(sql, vals).fetchall()
+
+    ids = [r["id"] for r in rows]
+    tagmap: dict = {}
+    splitmap: dict = {}
+    if ids:                                                  # batch-attach tags + splits (no N+1)
+        ph = ",".join("?" * len(ids))
+        for r in conn.execute(
+            "SELECT jt.txn_id, tg.name FROM txn_tag jt JOIN tag tg ON tg.id = jt.tag_id "
+            f"WHERE jt.txn_id IN ({ph}) ORDER BY tg.name", ids).fetchall():
+            tagmap.setdefault(r["txn_id"], []).append(r["name"])
+        for r in conn.execute(
+            f"SELECT txn_id, bucket, category, amount_cents FROM txn_split WHERE txn_id IN ({ph}) ORDER BY id",
+            ids).fetchall():
+            splitmap.setdefault(r["txn_id"], []).append(r)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\r\n")
+    writer.writerow([
+        "posted_on", "account", "direction", "amount", "bucket", "category",
+        "description", "tags", "status", "kind", "is_transfer", "splits",
+    ])
+    for r in rows:
+        tags = "|".join(tagmap.get(r["id"], []))
+        splits = "|".join(
+            f"{s['bucket'] or ''}:{s['category'] or ''}:{s['amount_cents'] / 100:.2f}"
+            for s in splitmap.get(r["id"], [])
+        )
+        writer.writerow([
+            r["posted_on"],
+            _csv_safe(r["account_name"]),
+            r["direction"],
+            f"{r['amount_cents'] / 100:.2f}",
+            _csv_safe(r["bucket"] or ""),
+            _csv_safe(r["category"] or ""),
+            _csv_safe(r["description"] or ""),
+            _csv_safe(tags),
+            r["status"],
+            r["kind"],
+            "true" if r["is_transfer"] else "false",
+            _csv_safe(splits),
+        ])
+    return buf.getvalue()
 
 
 def _prune_pre_import_backups(db_file: str) -> None:

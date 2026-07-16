@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 import affordability
@@ -1675,3 +1675,28 @@ async def import_backup_endpoint(request: Request) -> dict:
             return tracking_store.import_all(c, payload)
         except tracking_store.RestoreError as e:
             raise HTTPException(status_code=422, detail=str(e))
+
+
+# ----- CSV export (analysis / tax-prep — NOT a backup: no app tag, never importable) -----
+
+@app.get("/api/tracking/export.csv")
+def export_txns_csv_endpoint(date_from: str | None = Query(None, alias="from"),
+                              date_to: str | None = Query(None, alias="to")) -> Response:
+    """Date-ranged transactions CSV for analysis/tax-prep (Content-Disposition: attachment).
+
+    `from`/`to` are optional inclusive ISO date (YYYY-MM-DD) bounds on posted_on; either or
+    both may be omitted for an unbounded side. Plainly a spreadsheet, not a restorable
+    backup — see tracking_store.export_txns_csv for the column contract. 422 for a
+    malformed date or from > to.
+    """
+    with closing(tracking_store.connect()) as c:
+        try:
+            csv_text = tracking_store.export_txns_csv(c, date_from, date_to)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    filename = f"transactions-{date_from or 'all'}_{date_to or 'all'}.csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

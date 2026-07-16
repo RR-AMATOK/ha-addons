@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2
+
+- **One-file backup & restore.** The header's new **Back up** button exports
+  everything (settings + actuals) in a single file; **Restore** accepts it —
+  plus every older backup format (nothing is stranded). Restore applies the
+  database first and only touches browser settings after it succeeds.
+- Backup now includes previously-missed settings: FIRE assumptions, custom
+  categories, projected accounts, and the max-out planner.
+- Selective backups (Actuals only / Settings only) from Actuals → Manage.
+- Transactions **CSV export** with a date range (analysis/tax-prep; not a
+  backup — deliberately not restorable).
+
 ## 0.1.1
 
 - Add-on icon and logo.

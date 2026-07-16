@@ -472,8 +472,8 @@
   <div class="actions no-print">
     <span class="status" id="status">ready</span>
     <button id="btnPrint">Print / PDF</button>
-    <button id="btnExport">Export JSON</button>
-    <button id="btnImport">Import JSON</button>
+    <button id="btnExport">Back up</button>
+    <button id="btnImport">Restore</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none" />
     <button id="btnReset">Reset</button>
     <button id="wi_start_btn" title="Model a what-if change without touching your real numbers">What-If Mode</button>
@@ -1450,10 +1450,28 @@
 
           <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
           <div class="subhead">Backup &amp; restore</div>
-          <div class="mini muted" style="margin:4px 0 8px">Download a full JSON backup of all tracked data, or restore from a previous backup file.</div>
+          <div class="mini muted" style="margin:4px 0 8px">Back up your settings, plan, and actuals in one file — or restore from a previous backup.</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <button class="seed-btn" id="ac_backup_dl" type="button">Download backup</button>
+            <button class="seed-btn" id="ac_backup_full" type="button">Full backup</button>
+            <button class="seed-btn" id="ac_backup_actuals" type="button">Actuals only</button>
+            <button class="seed-btn" id="ac_backup_settings" type="button">Settings only</button>
             <label class="mini">Restore from backup<br><input id="ac_restore_file" type="file" accept="application/json,.json" style="margin-top:4px"></label>
+          </div>
+
+          <div class="subhead" style="margin-top:14px">Transactions CSV (analysis)</div>
+          <div class="mini muted" style="margin:4px 0 8px">A spreadsheet-friendly export of transactions in a date range — not a restorable backup.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <label class="mini">Range<br>
+              <select id="ac_csv_range">
+                <option value="ytd">This year</option>
+                <option value="12mo">Last 12 months</option>
+                <option value="all" selected>All</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label class="mini" id="ac_csv_from_wrap" hidden>From<br><input id="ac_csv_from" type="date"></label>
+            <label class="mini" id="ac_csv_to_wrap" hidden>To<br><input id="ac_csv_to" type="date"></label>
+            <button class="seed-btn" id="ac_csv_dl" type="button">Download CSV</button>
           </div>
         </div>
       </details>
@@ -1730,7 +1748,8 @@ const CAD_LABEL = { annual: '/yr', monthly: '/mo', paycheck: '/pay' };
 const CAD_NEXT  = { annual: 'monthly', monthly: 'paycheck', paycheck: 'annual' };
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
-window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence };
+window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence,
+  sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore };
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -2425,43 +2444,256 @@ function reset() {
   location.reload();
 }
 
-// ---------- Export / Import ----------
-async function exportJSON() {
-  if (wiBlockIfActive('export')) return;
-  let result = null;
-  try { result = await fetchCalc(); } catch (e) {}
-  let budget = null;
-  try { budget = JSON.parse(localStorage.getItem('budgetBuilder_v1')); } catch (e) {}   // full budget builder state
-  const payload = {
-    meta: { app: 'financial-planning-suite', version: 3, generated: new Date().toISOString() },
-    ui: collectState(),     // Tax tab
-    tabs: collectTabs(),    // Invest / Car / Projection + budget-framework inputs
-    budget,                 // budget builder: buckets / groups / items / splits / presets
-    result,
+// ---------- Backup / Restore (fps-backup v1 envelope) ----------
+// Client-side keys eligible for backup — a strict allowlist. Anything not listed here
+// (including the device-local itc.activetab and itc.whatif.* keys) can never be read into a
+// backup file or written back on restore, by construction — not by a denylist that could miss one.
+const BACKUP_CLIENT_KEYS = ['itc.v3', 'itc.tabs.v1', 'budgetBuilder_v1', 'itc.fire.v1', 'itc.categories.v1', 'itc.proj.accts.v1', 'itc.maxout.v1'];
+
+// Read every eligible client key currently in localStorage (parsed JSON). A key with nothing
+// stored is omitted entirely, never written as null — so restoring this object elsewhere never
+// clobbers a key the exporting device had simply never touched.
+function collectBackupClientKeys() {
+  const out = {};
+  BACKUP_CLIENT_KEYS.forEach(k => {
+    const raw = localStorage.getItem(k);
+    if (raw == null) return;
+    try { out[k] = JSON.parse(raw); } catch (e) {}
+  });
+  return out;
+}
+
+// Write back a client-keys object from a restored backup. REPLACE semantics, not merge — the
+// confirm dialog tells the user this replaces their settings & plan, so every allowlisted key is
+// cleared first, then only the keys present in the file are written back. Without the clear-first
+// step, a key the exporting device no longer had (e.g. custom categories deleted after that
+// backup was made) would survive the "replace" untouched. Same allowlist as
+// collectBackupClientKeys guards the write side too — a crafted or corrupted file can't smuggle
+// in itc.activetab or a what-if draft this way, and nothing outside the allowlist is ever cleared.
+function writeBackupClientKeys(keys) {
+  BACKUP_CLIENT_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  if (!keys) return;
+  BACKUP_CLIENT_KEYS.forEach(k => {
+    if (!Object.prototype.hasOwnProperty.call(keys, k)) return;
+    try { localStorage.setItem(k, JSON.stringify(keys[k])); } catch (e) {}
+  });
+}
+
+// Pure envelope assembly — no I/O, so it's directly unit-testable via window.__clientMath.
+// `clientKeys` is whatever collectBackupClientKeys() returned; `serverSection` is the
+// byte-identical payload from GET /api/tracking/export, or null when the scope excludes it.
+function buildBackupEnvelope(kind, clientKeys, serverSection) {
+  const sections = {};
+  if (kind === 'full' || kind === 'client-only') sections.client = { version: 3, keys: clientKeys || {} };
+  if (kind === 'full' || kind === 'actuals-only') sections.server = serverSection;
+  return {
+    format: 'fps-backup',
+    formatVersion: 1,
+    app: 'financial-planning-suite',
+    exportedAt: new Date().toISOString(),
+    scope: { kind: kind },
+    sections: sections,
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+}
+
+// Identify which of the supported backup shapes a parsed JSON file is. Order matters: the
+// fps-backup check MUST run first — a combined backup nests plan/settings data under
+// sections.client, and if the legacy-client check ran first it could misread that nested shape
+// (or stray top-level meta/ui/tabs/budget keys on a combined file) as a legacy plain "ui blob".
+function sniffBackupShape(payload) {
+  if (!payload || typeof payload !== 'object') return 'invalid';
+  if (payload.format === 'fps-backup') return 'fps';
+  if (payload.tables && typeof payload.tables === 'object' && payload.schemaVersion != null) return 'legacy-server';
+  if (payload.meta || payload.ui || payload.tabs || payload.budget) return 'legacy-client';
+  return 'invalid';
+}
+
+const BACKUP_SCOPE_KINDS = new Set(['full', 'actuals-only', 'client-only']);
+// Validate an fps-backup envelope before anything touches storage. Legacy app tag
+// ("income-tax-calculator", the app's name before the planning-suite rename) is accepted.
+function validateFpsEnvelope(payload) {
+  if (!payload || payload.format !== 'fps-backup') return { ok: false, error: 'Not a backup file.' };
+  if (payload.app !== 'financial-planning-suite' && payload.app !== 'income-tax-calculator') {
+    return { ok: false, error: 'This backup was made by a different app.' };
+  }
+  if (payload.formatVersion !== 1) {
+    return { ok: false, error: payload.formatVersion > 1 ? 'This backup was made by a newer version of the app — update the app first.' : 'Unrecognized backup format version.' };
+  }
+  const scope = payload.scope;
+  if (!scope || !BACKUP_SCOPE_KINDS.has(scope.kind)) return { ok: false, error: 'Unrecognized backup scope.' };
+  const sections = payload.sections || {};
+  if ((sections.client && sections.client.partial) || (sections.server && sections.server.partial)) {
+    return { ok: false, error: 'This backup file is incomplete (partial) and cannot be restored.' };
+  }
+  // Required AND disallowed sections per scope. The importer trusts scope.kind alone to decide
+  // what to touch (belt-and-braces with that dispatch — see importFpsEnvelope), so a stray
+  // section that doesn't belong to the declared scope (a crafted or corrupted client-only file
+  // carrying a server section, say) must be refused here rather than silently ignored.
+  if (scope.kind === 'full' && !(sections.client && sections.server)) return { ok: false, error: 'This full backup is missing a section.' };
+  if (scope.kind === 'actuals-only') {
+    if (!sections.server) return { ok: false, error: 'This backup is missing its actuals section.' };
+    if (sections.client) return { ok: false, error: 'This backup claims to be actuals-only but also carries a settings section.' };
+  }
+  if (scope.kind === 'client-only') {
+    if (!sections.client) return { ok: false, error: 'This backup is missing its settings section.' };
+    if (sections.server) return { ok: false, error: 'This backup claims to be settings-only but also carries an actuals section.' };
+  }
+  return { ok: true };
+}
+
+// One-click backup. kind: 'full' (header button + Manage's "Full backup") | 'actuals-only' |
+// 'client-only' (Manage's "Actuals only" / "Settings only"). A full backup that can't reach the
+// actuals server degrades to a client-only backup rather than failing outright — losing the
+// settings/plan half over a transient server hiccup would be worse than a partial-scope file.
+async function doBackup(kind) {
+  if (wiBlockIfActive('back up')) return;
+  let serverSection = null;
+  let degraded = false;
+  if (kind === 'full' || kind === 'actuals-only') {
+    try {
+      const res = await fetch('/api/tracking/export');
+      if (!res.ok) throw new Error('bad status');
+      serverSection = await res.json();
+    } catch (e) {
+      if (kind === 'actuals-only') { showToast('Actuals server unavailable — could not back up actuals'); return; }
+      kind = 'client-only';
+      degraded = true;
+    }
+  }
+  const clientKeys = (kind === 'full' || kind === 'client-only') ? collectBackupClientKeys() : {};
+  const envelope = buildBackupEnvelope(kind, clientKeys, serverSection);
+  const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `finance-${new Date().toISOString().slice(0, 10)}.json`;
+  const suffix = kind === 'actuals-only' ? '-actuals' : (kind === 'client-only' ? '-settings' : '');
+  a.download = `finance-backup-${new Date().toISOString().slice(0, 10)}${suffix}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  if (degraded) showToast('Actuals server unavailable — backed up plan & settings only');
 }
+
+// Write the client half of a restored fps envelope (if the scope calls for one), then tell the
+// user what landed and reload — same ending as the legacy client-restore path, so every tab
+// (including the budget builder, which inits at page load) restores cleanly from storage.
+// hasClient/hasServer are derived from `scope` (scope.kind), NEVER from section presence —
+// importFpsEnvelope does the same. Two independent reads of the same trusted field, rather than
+// trusting whatever sections happen to be sitting on the object at this point.
+function importFpsFinish(scope, sections, summary) {
+  const hasClient = scope === 'full' || scope === 'client-only';
+  const hasServer = scope === 'full' || scope === 'actuals-only';
+  if (hasClient) writeBackupClientKeys((sections.client && sections.client.keys) || {});
+  const total = summary ? Object.values(summary.restored || {}).reduce((s, n) => s + n, 0) : 0;
+  const parts = [];
+  if (hasClient) parts.push('settings + plan');
+  if (hasServer) parts.push(total + ' actuals row' + (total === 1 ? '' : 's'));
+  showToast('Restored ' + parts.join(' + ') + (hasServer && summary && summary.safetyCopy ? ' · safety copy made' : ''));
+  // Brief delay so the toast is actually visible before the reload wipes the DOM.
+  setTimeout(() => location.reload(), 900);
+}
+
+async function importFpsEnvelope(env) {
+  const scope = env.scope.kind;
+  const sections = env.sections || {};
+  // Dispatch strictly on scope.kind, not on which sections happen to be present on the object —
+  // validateFpsEnvelope already refused any envelope where scope.kind and the sections disagree,
+  // but the importer doesn't re-trust that: it re-derives independently (belt-and-braces).
+  const hasServer = scope === 'full' || scope === 'actuals-only';
+  const what = scope === 'full' ? 'both your settings/plan and your actuals data'
+    : scope === 'actuals-only' ? 'your actuals data'
+    : 'your settings & plan';
+  const safetyLine = hasServer ? ' A safety copy of your actuals is made first.' : '';
+  if (!confirm('This will replace ' + what + ' with this backup.' + safetyLine + ' Continue?')) return;
+  if (!hasServer) { importFpsFinish(scope, sections, null); return; }
+  // Server-first: the destructive server write must land before anything client-side changes,
+  // so a failed/aborted restore never leaves the two domains half-swapped.
+  if (window.acWriteGuard && window.acWriteGuard()) return;
+  let res;
+  try {
+    res = await fetch('/api/tracking/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sections.server) });
+  } catch (e) { alert('Restore failed — network error.'); return; }
+  if (!res.ok) {
+    let detail = 'Restore failed';
+    try { const err = await res.json(); detail = err.detail || detail; } catch (e) {}
+    alert(detail);
+    return;   // abort — nothing client-side touched
+  }
+  const summary = await res.json();
+  importFpsFinish(scope, sections, summary);
+}
+
+// Legacy actuals-only backup (top-level tables + schemaVersion, same shape GET
+// /api/tracking/export always produced before the fps-backup envelope existed).
+async function importLegacyServerBackup(rawText, data) {
+  const dateLabel = (data.exportedAt || '').slice(0, 10) || 'this backup';
+  if (!confirm('This REPLACES your current tracked (actuals) data with the backup from ' + dateLabel + '. A safety copy is made first. Continue?')) return;
+  if (window.acWriteGuard && window.acWriteGuard()) return;
+  let res;
+  try {
+    res = await fetch('/api/tracking/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: rawText });
+  } catch (e) { alert('Restore failed — network error.'); return; }
+  if (!res.ok) {
+    let detail = 'Restore failed';
+    try { const err = await res.json(); detail = err.detail || detail; } catch (e) {}
+    alert(detail);
+    return;
+  }
+  const summary = await res.json();
+  const total = Object.values(summary.restored || {}).reduce((s, n) => s + n, 0);
+  showToast('Restored ' + total + ' actuals row' + (total === 1 ? '' : 's') + (summary.safetyCopy ? ' · safety copy made' : ''));
+  setTimeout(() => location.reload(), 900);
+}
+
+// Legacy client export (meta/ui/tabs/budget shape) — unchanged behavior from before the
+// fps-backup envelope existed, so old export files still restore correctly.
+function importLegacyClientBackup(data) {
+  const ui = data.ui || data.inputs || data;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ui)); } catch (e) {}
+  if (data.tabs) { try { localStorage.setItem(TABS_KEY, JSON.stringify(data.tabs)); } catch (e) {} }
+  if (data.budget) { try { localStorage.setItem('budgetBuilder_v1', JSON.stringify(data.budget)); } catch (e) {} }
+  // Reload so every tab — including the budget builder, which inits at page load —
+  // restores cleanly from storage. (Older exports without tabs/budget still load the Tax tab.)
+  location.reload();
+}
+
+// Pure planning step for the restore door: given already-parsed JSON, decides what should
+// happen without performing any I/O (no confirm/fetch/storage) — so it's directly unit-testable
+// via window.__clientMath. Both restore doors (header Restore, and Actuals → Manage →
+// "Restore from backup") execute whatever this returns via restoreBackupFile(), so a file
+// dropped into either door is handled identically — the two doors can never drift apart on
+// what shape maps to what action.
+function planBackupRestore(payload) {
+  const shape = sniffBackupShape(payload);
+  if (shape === 'fps') {
+    const v = validateFpsEnvelope(payload);
+    if (!v.ok) return { action: 'invalid', error: v.error };
+    return { action: 'import-fps', envelope: payload };
+  }
+  if (shape === 'legacy-server') return { action: 'import-legacy-server', payload: payload };
+  if (shape === 'legacy-client') return { action: 'import-legacy-client', payload: payload };
+  return { action: 'invalid', error: 'Invalid JSON file.' };
+}
+
+// Impure executor: parses the raw text, plans (above), then runs the plan's side effects
+// (confirm dialogs, network I/O, storage writes, reload). The single shared route both restore
+// doors call — see planBackupRestore's comment.
+async function restoreBackupFile(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch (e) { alert('Invalid JSON file.'); return; }
+  const plan = planBackupRestore(data);
+  if (plan.action === 'import-fps') { await importFpsEnvelope(plan.envelope); return; }
+  if (plan.action === 'import-legacy-server') { await importLegacyServerBackup(rawText, plan.payload); return; }
+  if (plan.action === 'import-legacy-client') { importLegacyClientBackup(plan.payload); return; }
+  alert(plan.error || 'Invalid JSON file.');
+}
+
+// Restore door (header button). wiBlockIfActive covers every action planBackupRestore can
+// produce, including the legacy-client and fps-client-only paths that never touch the server —
+// see restoreBackupFile.
 function importJSON(file) {
-  if (wiBlockIfActive('import a backup')) return;
+  if (wiBlockIfActive('restore a backup')) return;
   const fr = new FileReader();
-  fr.onload = () => {
-    try {
-      const data = JSON.parse(fr.result);
-      const ui = data.ui || data.inputs || data;
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ui)); } catch (e) {}
-      if (data.tabs) { try { localStorage.setItem(TABS_KEY, JSON.stringify(data.tabs)); } catch (e) {} }
-      if (data.budget) { try { localStorage.setItem('budgetBuilder_v1', JSON.stringify(data.budget)); } catch (e) {} }
-      // Reload so every tab — including the budget builder, which inits at page load —
-      // restores cleanly from storage. (Older exports without tabs/budget still load the Tax tab.)
-      location.reload();
-    } catch (e) { alert('Invalid JSON file.'); }
-  };
+  fr.onload = async () => { await restoreBackupFile(fr.result); };
   fr.readAsText(file);
 }
 
@@ -2568,7 +2800,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateLimitHints();
 
   $('btnPrint').onclick = () => window.print();
-  $('btnExport').onclick = exportJSON;
+  $('btnExport').onclick = () => doBackup('full');
   $('btnReset').onclick = reset;
   $('btnImport').onclick = () => $('fileImport').click();
   $('fileImport').onchange = e => { if (e.target.files[0]) importJSON(e.target.files[0]); };
@@ -5603,60 +5835,63 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { showToast('Could not save balance'); }
   }
 
-  async function acDownloadBackup() {
+  // Resolve the CSV date-range preset to concrete from/to bounds. 'all' returns both blank —
+  // the endpoint treats missing bounds as unbounded.
+  function acCsvRangeDates() {
+    const rangeSel = $('ac_csv_range');
+    const range = rangeSel ? rangeSel.value : 'all';
+    const today = acToday();
+    if (range === 'ytd') return { from: today.slice(0, 4) + '-01-01', to: today };
+    if (range === '12mo') {
+      const d = new Date(); d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1);
+      return { from: d.toISOString().slice(0, 10), to: today };
+    }
+    if (range === 'custom') {
+      return { from: ($('ac_csv_from') && $('ac_csv_from').value) || '', to: ($('ac_csv_to') && $('ac_csv_to').value) || '' };
+    }
+    return { from: '', to: '' };   // 'all'
+  }
+
+  // Root-absolute URLs only work under HA ingress because a boot-time shim wraps window.fetch —
+  // a bare <a href="/api/..."> would bypass that shim, so this downloads via fetch → blob →
+  // objectURL instead, same pattern as acRestoreBackup's sibling backup download used to.
+  async function acDownloadCsv() {
+    if (wiBlockIfActive('download a transactions CSV')) return;
+    const { from, to } = acCsvRangeDates();
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const qs = params.toString();
     try {
-      const res = await fetch('/api/tracking/export');
-      if (!res.ok) { showToast('Backup download failed'); return; }
+      const res = await fetch('/api/tracking/export.csv' + (qs ? '?' + qs : ''));
+      if (!res.ok) { showToast('CSV download failed'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'actuals-backup-' + acToday() + '.json';
+      a.download = 'transactions-' + acToday() + '.csv';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e) { showToast('Backup download failed'); }
+    } catch (e) { showToast('CSV download failed'); }
   }
 
+  // Delegates to the same restoreBackupFile() router the header's Restore button uses (M4:
+  // restoring a backup can REPLACE all real server data — the most destructive write in the
+  // app; must never run from inside a what-if — code-review must-fix #1). This door used to
+  // POST the raw file straight to /api/tracking/import, which meant an fps-backup file (the
+  // shape the three adjacent backup buttons now produce) would sail past this door's confirm
+  // and then 422 on the server — sharing one route makes both doors handle every backup shape
+  // identically. importFpsEnvelope / importLegacyServerBackup each re-check acWriteGuard() right
+  // before their POST, so this door doesn't need its own separate guard for that.
   async function acRestoreBackup(file) {
     if (!file) return;
-    // M4: restoring a backup REPLACES all real server data — the most destructive write in
-    // the app; must never run from inside a what-if (code-review must-fix #1).
-    if (acWriteGuard()) { const inp = $('ac_restore_file'); if (inp) inp.value = ''; return; }
-    let text, parsed;
+    if (wiBlockIfActive('restore a backup')) return;
     try {
-      text = await file.text();
-      parsed = JSON.parse(text);
-    } catch (e) {
-      showToast('Invalid backup file — could not parse JSON');
-      const inp = $('ac_restore_file'); if (inp) inp.value = '';
-      return;
-    }
-    const raw = parsed.exportedAt || '';
-    const dateLabel = raw ? raw.slice(0, 10) : 'this backup';
-    if (!confirm('This REPLACES your current tracked data with the backup from ' + dateLabel + '. A safety copy is made first. Continue?')) {
-      const inp = $('ac_restore_file'); if (inp) inp.value = '';
-      return;
-    }
-    try {
-      const res = await fetch('/api/tracking/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: text,
-      });
-      if (res.ok) {
-        const summary = await res.json();
-        const total = Object.values(summary.restored || {}).reduce((s, n) => s + n, 0);
-        showToast('Restored ' + total + ' row' + (total === 1 ? '' : 's') + (summary.safetyCopy ? ' · safety copy made' : ''));
-        await acLoadAccounts();
-        await acRefresh();
-      } else {
-        let detail = 'Restore failed';
-        try { const err = await res.json(); detail = err.detail || detail; } catch (e) {}
-        showToast(detail);
-      }
-    } catch (e) { showToast('Restore failed — network error'); }
+      const text = await file.text();
+      await restoreBackupFile(text);
+    } catch (e) { showToast('Could not read the backup file'); }
     const inp = $('ac_restore_file'); if (inp) inp.value = '';
   }
 
@@ -6406,8 +6641,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('ac_acct_add').onclick = acAddAccount;
     $('ac_snap_save').onclick = acAddSnapshot;
     $('ac_csv_go').onclick = acImportCsv;
-    $('ac_backup_dl').onclick = acDownloadBackup;
+    $('ac_backup_full').onclick = () => doBackup('full');
+    $('ac_backup_actuals').onclick = () => doBackup('actuals-only');
+    $('ac_backup_settings').onclick = () => doBackup('client-only');
     { const ri = $('ac_restore_file'); if (ri) ri.addEventListener('change', e => { acRestoreBackup(e.target.files[0]); }); }
+    { const cr = $('ac_csv_range'); if (cr) cr.addEventListener('change', () => {
+        const custom = cr.value === 'custom';
+        const fw = $('ac_csv_from_wrap'), tw = $('ac_csv_to_wrap');
+        if (fw) fw.hidden = !custom;
+        if (tw) tw.hidden = !custom;
+      }); }
+    $('ac_csv_dl').onclick = acDownloadCsv;
     $('ac_syncplan').onclick = acSyncPlan;
     $('ac_tpl_save').onclick = acSaveTemplate;
     { const rBtn = $('ac_tx_refund'); if (rBtn) rBtn.onclick = () => { ACT.isRefund = !ACT.isRefund; rBtn.classList.toggle('active', ACT.isRefund); }; }
