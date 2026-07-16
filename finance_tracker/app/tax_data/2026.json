@@ -1,0 +1,51 @@
+{
+  "year": 2026,
+  "filingStatus": "single",
+  "meta": {
+    "description": "IRS / SSA inflation-adjusted figures for tax year 2026 (single filer).",
+    "lastVerified": "2026-06-16",
+    "note": "Editable estimates. Verify against the primary IRS/SSA sources below before relying for filing or withholding. Refresh with: python scripts/update_tax_values.py --year 2026 --write",
+    "generatedBy": "researched + verified against IRS Rev. Proc. 2025-32, the 2026 retirement-limit release, Rev. Proc. 2025-19, and the SSA 2026 wage-base announcement"
+  },
+  "values": {
+    "fedStd": 16100,
+    "ssBase": 184500,
+    "ssRate": 0.062,
+    "medRate": 0.0145,
+    "addlMedThresh": 200000,
+    "addlMedRate": 0.009,
+    "k401Limit": 24500,
+    "iraLimit": 7500,
+    "hsaLimitSelf": 4400,
+    "hsaLimitFamily": 8750,
+    "hsaCatchUp": 1000,
+    "sec415cLimit": 72000,
+    "rothIraLimit": 7500,
+    "rothIraPhaseIn": 153000,
+    "rothIraPhaseOut": 168000,
+    "fedBrackets": [
+      { "upper": 12400, "rate": 0.10 },
+      { "upper": 50400, "rate": 0.12 },
+      { "upper": 105700, "rate": 0.22 },
+      { "upper": 201775, "rate": 0.24 },
+      { "upper": 256225, "rate": 0.32 },
+      { "upper": 640600, "rate": 0.35 },
+      { "upper": null, "rate": 0.37 }
+    ]
+  },
+  "sources": {
+    "fedStd": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+    "fedBrackets": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+    "addlMedThresh": "https://www.irs.gov/taxtopics/tc560",
+    "k401Limit": "https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500",
+    "iraLimit": "https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500",
+    "rothIraLimit": "https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500",
+    "rothIraPhaseIn": "https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500",
+    "rothIraPhaseOut": "https://www.irs.gov/newsroom/401k-limit-increases-to-24500-for-2026-ira-limit-increases-to-7500",
+    "sec415cLimit": "https://www.irs.gov/retirement-plans/cola-increases-for-dollar-limitations-on-benefits-and-contributions",
+    "hsaLimitSelf": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
+    "hsaLimitFamily": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
+    "hsaCatchUp": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
+    "ssBase": "https://www.ssa.gov/oact/cola/cbb.html"
+  }
+}
