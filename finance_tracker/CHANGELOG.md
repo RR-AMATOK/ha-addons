@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Backup controls moved to the header: **Back up** still downloads the full
+  backup in one click; the new **▾** menu next to it holds the selective
+  backups (Actuals only / Settings only) and the transactions CSV export.
+  The copies in Actuals → Manage are gone — one home for everything.
+
 ## 0.1.2
 
 - **One-file backup & restore.** The header's new **Back up** button exports

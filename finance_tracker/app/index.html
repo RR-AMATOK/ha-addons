@@ -33,6 +33,19 @@
   header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: 0.2px; }
   header .sub { color: var(--muted); font-size: 12px; }
   header .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* Header "Back up" split button — main click stays instant full backup; the caret opens a
+     popup with the selective-backup + CSV-analysis options. */
+  .backup-split { position: relative; display: inline-flex; }
+  .backup-split #btnExport { border-radius: 6px 0 0 6px; }
+  #btnBackupMenu { border-radius: 0 6px 6px 0; border-left: none; padding: 7px 8px; }
+  .backup-popup {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 250; width: 260px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  }
+  .backup-popup-radio { display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--text); padding: 3px 0; cursor: pointer; }
+  .backup-popup-radio input { margin: 0; }
   button, .btn {
     background: var(--panel-2); color: var(--text);
     border: 1px solid var(--line); padding: 7px 12px; border-radius: 6px;
@@ -472,7 +485,34 @@
   <div class="actions no-print">
     <span class="status" id="status">ready</span>
     <button id="btnPrint">Print / PDF</button>
-    <button id="btnExport">Back up</button>
+    <span class="backup-split">
+      <button id="btnExport">Back up</button>
+      <button id="btnBackupMenu" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="backup_popup" title="More backup &amp; export options">&#9662;</button>
+      <div id="backup_popup" class="backup-popup" aria-labelledby="backup_popup_h" hidden>
+        <div class="subhead" id="backup_popup_h" style="margin-top:0">Back up &amp; export</div>
+        <label class="backup-popup-radio"><input type="radio" name="backup_scope" value="full" checked> Everything (settings + actuals)</label>
+        <label class="backup-popup-radio"><input type="radio" name="backup_scope" value="actuals-only"> Actuals only</label>
+        <label class="backup-popup-radio"><input type="radio" name="backup_scope" value="client-only"> Settings only</label>
+        <button class="seed-btn" id="backup_dl" type="button" style="margin-top:8px;width:100%">Download backup</button>
+
+        <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
+        <div class="subhead" style="margin-top:0">Analysis export</div>
+        <div class="mini muted" style="margin:2px 0 6px">Transactions CSV for spreadsheets — not a restorable backup.</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+          <label class="mini">Range<br>
+            <select id="backup_csv_range">
+              <option value="ytd">This year</option>
+              <option value="12mo">Last 12 months</option>
+              <option value="all" selected>All</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+          <label class="mini" id="backup_csv_from_wrap" hidden>From<br><input id="backup_csv_from" type="date"></label>
+          <label class="mini" id="backup_csv_to_wrap" hidden>To<br><input id="backup_csv_to" type="date"></label>
+        </div>
+        <button class="seed-btn" id="backup_csv_dl" type="button" style="margin-top:8px;width:100%">Download CSV</button>
+      </div>
+    </span>
     <button id="btnImport">Restore</button>
     <input type="file" id="fileImport" accept="application/json" style="display:none" />
     <button id="btnReset">Reset</button>
@@ -1447,32 +1487,6 @@
             <button class="seed-btn" id="ac_snap_save" type="button">Save balance</button>
           </div>
           <div class="mini muted" style="margin-top:5px">Record each account's balance (liabilities subtract). Net worth = sum of the latest balances → plotted on the cone.</div>
-
-          <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
-          <div class="subhead">Backup &amp; restore</div>
-          <div class="mini muted" style="margin:4px 0 8px">Back up your settings, plan, and actuals in one file — or restore from a previous backup.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <button class="seed-btn" id="ac_backup_full" type="button">Full backup</button>
-            <button class="seed-btn" id="ac_backup_actuals" type="button">Actuals only</button>
-            <button class="seed-btn" id="ac_backup_settings" type="button">Settings only</button>
-            <label class="mini">Restore from backup<br><input id="ac_restore_file" type="file" accept="application/json,.json" style="margin-top:4px"></label>
-          </div>
-
-          <div class="subhead" style="margin-top:14px">Transactions CSV (analysis)</div>
-          <div class="mini muted" style="margin:4px 0 8px">A spreadsheet-friendly export of transactions in a date range — not a restorable backup.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <label class="mini">Range<br>
-              <select id="ac_csv_range">
-                <option value="ytd">This year</option>
-                <option value="12mo">Last 12 months</option>
-                <option value="all" selected>All</option>
-                <option value="custom">Custom</option>
-              </select>
-            </label>
-            <label class="mini" id="ac_csv_from_wrap" hidden>From<br><input id="ac_csv_from" type="date"></label>
-            <label class="mini" id="ac_csv_to_wrap" hidden>To<br><input id="ac_csv_to" type="date"></label>
-            <button class="seed-btn" id="ac_csv_dl" type="button">Download CSV</button>
-          </div>
         </div>
       </details>
     </section>
@@ -1749,7 +1763,7 @@ const CAD_NEXT  = { annual: 'monthly', monthly: 'paycheck', paycheck: 'annual' }
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
 window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence,
-  sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore };
+  sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange };
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -2541,10 +2555,11 @@ function validateFpsEnvelope(payload) {
   return { ok: true };
 }
 
-// One-click backup. kind: 'full' (header button + Manage's "Full backup") | 'actuals-only' |
-// 'client-only' (Manage's "Actuals only" / "Settings only"). A full backup that can't reach the
-// actuals server degrades to a client-only backup rather than failing outright — losing the
-// settings/plan half over a transient server hiccup would be worse than a partial-scope file.
+// One-click backup. kind: 'full' (header "Back up" button, and the popup's default/preselected
+// scope) | 'actuals-only' | 'client-only' (the popup's other two scope choices). A full backup
+// that can't reach the actuals server degrades to a client-only backup rather than failing
+// outright — losing the settings/plan half over a transient server hiccup would be worse than a
+// partial-scope file.
 async function doBackup(kind) {
   if (wiBlockIfActive('back up')) return;
   let serverSection = null;
@@ -2571,6 +2586,49 @@ async function doBackup(kind) {
   a.click();
   URL.revokeObjectURL(url);
   if (degraded) showToast('Actuals server unavailable — backed up plan & settings only');
+}
+
+// Pure: resolve a CSV date-range preset to concrete from/to bounds, given "today" (ISO
+// YYYY-MM-DD) explicitly rather than reading Date.now() internally — deterministic and
+// directly unit-testable via window.__clientMath. 'all' returns both blank; the endpoint
+// treats missing bounds as unbounded.
+function resolveCsvRange(range, todayIso, customFrom, customTo) {
+  if (range === 'ytd') return { from: todayIso.slice(0, 4) + '-01-01', to: todayIso };
+  if (range === '12mo') {
+    const d = new Date(todayIso + 'T00:00:00');
+    d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1);
+    return { from: d.toISOString().slice(0, 10), to: todayIso };
+  }
+  if (range === 'custom') return { from: customFrom || '', to: customTo || '' };
+  return { from: '', to: '' };   // 'all'
+}
+function todayISO() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+// Root-absolute URLs only work under HA ingress because a boot-time shim wraps window.fetch —
+// a bare <a href="/api/..."> would bypass that shim, so this downloads via fetch → blob →
+// objectURL instead, same as doBackup's file download.
+async function downloadTransactionsCsv() {
+  if (wiBlockIfActive('download a transactions CSV')) return;
+  const rangeSel = $('backup_csv_range');
+  const range = rangeSel ? rangeSel.value : 'all';
+  const { from, to } = resolveCsvRange(range, todayISO(), ($('backup_csv_from') || {}).value, ($('backup_csv_to') || {}).value);
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  const qs = params.toString();
+  try {
+    const res = await fetch('/api/tracking/export.csv' + (qs ? '?' + qs : ''));
+    if (!res.ok) { showToast('CSV download failed'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'transactions-' + todayISO() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) { showToast('CSV download failed'); }
 }
 
 // Write the client half of a restored fps envelope (if the scope calls for one), then tell the
@@ -2801,6 +2859,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('btnPrint').onclick = () => window.print();
   $('btnExport').onclick = () => doBackup('full');
+  // Header split-button popup: selective backups (Everything/Actuals/Settings) + CSV analysis
+  // export. The single home for both — Actuals → Manage used to duplicate this UI.
+  { const menuBtn = $('btnBackupMenu'), popup = $('backup_popup');
+    if (menuBtn && popup) {
+      const closeBackupPopup = () => { popup.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); };
+      const openBackupPopup = () => {
+        // "Everything" is preselected every time the popup opens — the scope choice never
+        // carries over from a prior open.
+        const fullRadio = popup.querySelector('input[name="backup_scope"][value="full"]');
+        if (fullRadio) fullRadio.checked = true;
+        popup.hidden = false; menuBtn.setAttribute('aria-expanded', 'true');
+      };
+      menuBtn.onclick = e => { e.stopPropagation(); if (popup.hidden) openBackupPopup(); else closeBackupPopup(); };
+      document.addEventListener('click', e => { if (!popup.hidden && !popup.contains(e.target) && e.target !== menuBtn) closeBackupPopup(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !popup.hidden) { closeBackupPopup(); menuBtn.focus(); } });
+      { const cr = $('backup_csv_range'); if (cr) cr.addEventListener('change', () => {
+          const custom = cr.value === 'custom';
+          const fw = $('backup_csv_from_wrap'), tw = $('backup_csv_to_wrap');
+          if (fw) fw.hidden = !custom;
+          if (tw) tw.hidden = !custom;
+        }); }
+      $('backup_dl').onclick = () => {
+        const sel = popup.querySelector('input[name="backup_scope"]:checked');
+        doBackup(sel ? sel.value : 'full');
+        closeBackupPopup();
+      };
+      $('backup_csv_dl').onclick = () => { downloadTransactionsCsv(); closeBackupPopup(); };
+    }
+  }
   $('btnReset').onclick = reset;
   $('btnImport').onclick = () => $('fileImport').click();
   $('fileImport').onchange = e => { if (e.target.files[0]) importJSON(e.target.files[0]); };
@@ -5835,66 +5922,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { showToast('Could not save balance'); }
   }
 
-  // Resolve the CSV date-range preset to concrete from/to bounds. 'all' returns both blank —
-  // the endpoint treats missing bounds as unbounded.
-  function acCsvRangeDates() {
-    const rangeSel = $('ac_csv_range');
-    const range = rangeSel ? rangeSel.value : 'all';
-    const today = acToday();
-    if (range === 'ytd') return { from: today.slice(0, 4) + '-01-01', to: today };
-    if (range === '12mo') {
-      const d = new Date(); d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1);
-      return { from: d.toISOString().slice(0, 10), to: today };
-    }
-    if (range === 'custom') {
-      return { from: ($('ac_csv_from') && $('ac_csv_from').value) || '', to: ($('ac_csv_to') && $('ac_csv_to').value) || '' };
-    }
-    return { from: '', to: '' };   // 'all'
-  }
-
-  // Root-absolute URLs only work under HA ingress because a boot-time shim wraps window.fetch —
-  // a bare <a href="/api/..."> would bypass that shim, so this downloads via fetch → blob →
-  // objectURL instead, same pattern as acRestoreBackup's sibling backup download used to.
-  async function acDownloadCsv() {
-    if (wiBlockIfActive('download a transactions CSV')) return;
-    const { from, to } = acCsvRangeDates();
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    const qs = params.toString();
-    try {
-      const res = await fetch('/api/tracking/export.csv' + (qs ? '?' + qs : ''));
-      if (!res.ok) { showToast('CSV download failed'); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'transactions-' + acToday() + '.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) { showToast('CSV download failed'); }
-  }
-
-  // Delegates to the same restoreBackupFile() router the header's Restore button uses (M4:
-  // restoring a backup can REPLACE all real server data — the most destructive write in the
-  // app; must never run from inside a what-if — code-review must-fix #1). This door used to
-  // POST the raw file straight to /api/tracking/import, which meant an fps-backup file (the
-  // shape the three adjacent backup buttons now produce) would sail past this door's confirm
-  // and then 422 on the server — sharing one route makes both doors handle every backup shape
-  // identically. importFpsEnvelope / importLegacyServerBackup each re-check acWriteGuard() right
-  // before their POST, so this door doesn't need its own separate guard for that.
-  async function acRestoreBackup(file) {
-    if (!file) return;
-    if (wiBlockIfActive('restore a backup')) return;
-    try {
-      const text = await file.text();
-      await restoreBackupFile(text);
-    } catch (e) { showToast('Could not read the backup file'); }
-    const inp = $('ac_restore_file'); if (inp) inp.value = '';
-  }
-
   // Excel/Sheets put TAB-separated text on the clipboard; CSV uses commas. Detect the
   // delimiter and normalize TSV → properly-quoted CSV (never blindly swap tabs→commas).
   function acParseDelimited(text) {
@@ -6641,17 +6668,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('ac_acct_add').onclick = acAddAccount;
     $('ac_snap_save').onclick = acAddSnapshot;
     $('ac_csv_go').onclick = acImportCsv;
-    $('ac_backup_full').onclick = () => doBackup('full');
-    $('ac_backup_actuals').onclick = () => doBackup('actuals-only');
-    $('ac_backup_settings').onclick = () => doBackup('client-only');
-    { const ri = $('ac_restore_file'); if (ri) ri.addEventListener('change', e => { acRestoreBackup(e.target.files[0]); }); }
-    { const cr = $('ac_csv_range'); if (cr) cr.addEventListener('change', () => {
-        const custom = cr.value === 'custom';
-        const fw = $('ac_csv_from_wrap'), tw = $('ac_csv_to_wrap');
-        if (fw) fw.hidden = !custom;
-        if (tw) tw.hidden = !custom;
-      }); }
-    $('ac_csv_dl').onclick = acDownloadCsv;
     $('ac_syncplan').onclick = acSyncPlan;
     $('ac_tpl_save').onclick = acSaveTemplate;
     { const rBtn = $('ac_tx_refund'); if (rBtn) rBtn.onclick = () => { ACT.isRefund = !ACT.isRefund; rBtn.classList.toggle('active', ACT.isRefund); }; }
