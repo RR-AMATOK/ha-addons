@@ -1495,14 +1495,17 @@
 // pathname (the SPA never mutates the URL, so it's stable). Wrapping window.fetch here —
 // BEFORE any app code — fixes every call site at one choke-point with zero edits.
 (function () {
+  // Guards below are no-ops in any browser (location/fetch always exist); they keep this
+  // boot-time IIFE incapable of throwing — a throw here would kill the whole app script
+  // (and does, in the bare DOM shim of tests/test_client_math.js).
   let base = typeof window.__API_BASE === 'string' ? window.__API_BASE : '';
-  if (!base) {
+  if (!base && typeof location !== 'undefined' && typeof location.pathname === 'string') {
     const p = location.pathname;
     base = p.endsWith('/') ? p.slice(0, -1) : p.replace(/\/[^/]*$/, '');
   }
   base = base.replace(/\/+$/, '');
   window.__API_BASE = base;
-  if (base) {
+  if (base && typeof window.fetch === 'function') {
     const rawFetch = window.fetch.bind(window);
     window.fetch = (url, opts) =>
       rawFetch(typeof url === 'string' && url.startsWith('/') ? base + url : url, opts);
