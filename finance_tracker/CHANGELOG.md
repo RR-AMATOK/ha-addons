@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0
+
+- **New pill-style tab navigation.** The active tab now shows as an accent
+  pill, making the current section clearer at a glance.
+- **Consolidated header.** Brand, tabs, and actions now share a single row.
+  A new **Settings** (gear) menu holds Print/PDF, Restore, Reset, and a
+  Show/Hide-disclaimer toggle; **Back up** and **What-If Mode** stay
+  top-level for quick access.
+- Fixed the header split-button's hover/focus outline: the caret half was
+  missing its left border, so the accent ring never closed around it. Both
+  halves now keep full borders (the caret still overlaps seamlessly) and the
+  hovered/focused half draws its ring on top.
+- **Dismissible disclaimer banner** that remembers you've dismissed it,
+  plus a permanent one-line disclosure in the footer so the notice is
+  never fully gone.
+- **Typography standardization** — a consistent type scale across the app
+  for a cleaner, more readable layout.
+- **Home Assistant theme support.** The add-on now adopts a bundled theme,
+  defaulting to the "Shiro" full-light theme. A new theme picker in
+  Settings lets you switch between Full light, Shiro accent, and Classic
+  dark, and remembers your choice. Falls back to the classic dark palette
+  if no theme is present.
+
 ## 0.1.3
 
 - Backup controls moved to the header: **Back up** still downloads the full

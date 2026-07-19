@@ -21,38 +21,101 @@
     --field: #0f1218;
     --line-faint: #222834;
     --travel: #a77bea;
+    --on-accent: #0b1020;   /* ink on accent fills */
+    --on-accent-strong: #fff; /* ink on --accent-strong fills (.calc-btn); white passes in all presets */
+    --accent-tint: rgba(122,167,255,0.12);                              /* fallback line first */
+    --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent); /* themeable override; keep BOTH lines in this order */
+    --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px;
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px;
+    --warn-surface: #2a210f; --warn-border: #6b531a; --warn-text: #e7c66b; --warn-text-strong: #ffd87a;
+    --danger-tint: rgba(255,122,122,0.12);                                   /* fallback line first */
+    --danger-tint: color-mix(in srgb, var(--bad) 12%, transparent);         /* themeable override; keep BOTH lines in this order */
+    /* DEC-024 HA theme adapter: .warn-box tokens (dark defaults below match today's hardcoded
+       values byte-for-byte; the light/shiro-full preset overrides these three in applyHaTheme). */
+    --warnbox-surface: #2a1414; --warnbox-border: #6b2a2a; --warnbox-text: #f3b0b0;
+    /* Breakdown-bar categorical palette (Shiro v1.2.0 full-light re-validation, part B):
+       dark defaults below are byte-for-byte the prior segments[] hex literals; only the
+       shiro-full override block in applyHaTheme() remaps them to the curated --color-N set. */
+    --cat-takehome: #5fd38b; --cat-trad401k: #7aa7ff; --cat-roth401k: #9f7aff; --cat-rothira: #c29fff;
+    --cat-hsa: #4dd6d6; --cat-eestock: #c78cff; --cat-fedtax: #ff7a7a; --cat-fica: #f0b957;
+    --cat-statetax: #ff9ec4; --cat-statedis: #e66d9a;
+    /* Header background (part C1): byte-for-byte the prior hardcoded header gradient; only the
+       shiro-full override block in applyHaTheme() flips it to a light-surface gradient. */
+    --header-bg: linear-gradient(180deg, #161923 0%, #10131a 100%);
+    /* Input-unit chip ($/%/yr) colors (part C2): dark defaults byte-for-byte the prior
+       .input-pair .unit / .unit.cad:hover literals; shiro-full overrides these three below. */
+    --unit-bg: #1a1e28; --unit-hover-bg: #232a3c;
+    /* Type scale (TODO-230 typography audit): size / weight / family / letter-spacing / line-height tokens.
+       Folds vs the pre-audit sizes are intentional: 15->16 (verdict tiles + .ac-add), 19->18 (composer $ unit),
+       22->24 (composer amount input). */
+    --fs-2xs: 10px; --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 14px;
+    --fs-lg: 16px; --fs-xl: 18px; --fs-2xl: 24px; --fs-3xl: 28px;
+    --fw-normal: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --ls-caps: 0.6px; --ls-tight: 0.2px;
+    --lh-base: 1.45; --lh-tight: 1;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif; }
+    font: var(--fs-base)/var(--lh-base) var(--font-sans); }
+  /* Round-2 header consolidation: header is a 3-column grid (brand | tabs | actions) on
+     desktop so the round-1 pill nav (#tabbar) can live inside the header as one row.
+     Below 1080px it drops to 2 rows: brand+actions on row 1, tabs full-width on row 2. */
   header {
-    padding: 18px 24px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    background: linear-gradient(180deg, #161923 0%, #10131a 100%);
+    display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "brand tabs actions";
+    align-items: center; column-gap: var(--space-4); row-gap: var(--space-2);
+    padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--line);
+    background: var(--header-bg);
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: 0.2px; }
-  header .sub { color: var(--muted); font-size: 12px; }
-  header .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 1079.98px) {
+    header { grid-template-columns: 1fr auto; grid-template-areas: "brand actions" "tabs tabs"; }
+  }
+  header .brand { grid-area: brand; }
+  header h1 { font-size: var(--fs-lg); margin: 0; font-weight: var(--fw-semibold); letter-spacing: var(--ls-tight); }
+  header #tabbar { grid-area: tabs; }
+  header .actions { grid-area: actions; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  /* Header action button hover/press feel. Excludes buttons inside .backup-popup and
+     .settings-popup (the dropdowns' menu-style actions) — those already have their own
+     text-button styling and must not gain a background per the global-hover constraint. */
+  .actions button:not(.backup-popup button):not(.settings-popup button):hover { background: var(--chip); border-color: var(--accent); }
+  .actions button:not(.backup-popup button):not(.settings-popup button):active { background: var(--panel); border-color: var(--accent-strong); }
   /* Header "Back up" split button — main click stays instant full backup; the caret opens a
      popup with the selective-backup + CSV-analysis options. */
   .backup-split { position: relative; display: inline-flex; }
   .backup-split #btnExport { border-radius: 6px 0 0 6px; }
-  #btnBackupMenu { border-radius: 0 6px 6px 0; border-left: none; padding: 7px 8px; }
+  /* Both halves keep all 4 borders; overlap by 1px so the shared divider stays a single line,
+     and lift the hovered/focused half so its accent border draws all the way around. */
+  #btnBackupMenu { border-radius: 0 6px 6px 0; margin-left: -1px; padding: 7px 8px; }
+  .backup-split button:hover, .backup-split button:focus-visible { position: relative; z-index: 1; }
   .backup-popup {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 250; width: 260px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
     padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.45);
   }
-  .backup-popup-radio { display: flex; align-items: center; gap: 6px; font-size: 12px;
+  .backup-popup-radio { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
     color: var(--text); padding: 3px 0; cursor: pointer; }
   .backup-popup-radio input { margin: 0; }
+  .backup-popup select { font-size: var(--fs-sm); }
+  /* Settings popup (gear) — mirrors .backup-split/.backup-popup exactly; reuses
+     .backup-popup for position/surface styling. .settings-popup is only the marker class
+     used by the hover-exclusion rule above and the menu-item layout rule below. */
+  .settings-split { position: relative; display: inline-flex; }
+  .settings-popup button { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
+  .settings-popup button:last-child { margin-bottom: 0; }
+  /* Calc-error indicator (replaces the removed #status text). Hidden by default; setStatus()
+     toggles it alongside showToast() on a failed /api/calculate. */
+  .calc-error-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bad); box-shadow: 0 0 0 4px var(--danger-tint); flex-shrink: 0; }
+  .calc-error-dot[hidden] { display: none; }
   button, .btn {
     background: var(--panel-2); color: var(--text);
-    border: 1px solid var(--line); padding: 7px 12px; border-radius: 6px;
-    font-size: 12px; cursor: pointer; font-weight: 500;
+    border: 1px solid var(--line); padding: 7px 12px; border-radius: var(--radius-sm);
+    font-size: var(--fs-sm); cursor: pointer; font-weight: var(--fw-medium);
+    transition: background-color .12s ease, border-color .12s ease, color .12s ease;
   }
   button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: var(--fw-semibold); }
   main {
     display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
@@ -63,12 +126,12 @@
     padding: 14px 16px 16px; margin-bottom: 14px;
   }
   section.card h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px;
-    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+    font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: var(--ls-caps);
+    color: var(--muted); margin: 0 0 10px; font-weight: var(--fw-semibold);
   }
   .row { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; margin: 6px 0; }
-  .row label { color: var(--muted); font-size: 13px; }
-  .row .hint { color: var(--muted); font-size: 11px; }
+  .row label { color: var(--muted); font-size: var(--fs-md); }
+  .row .hint { color: var(--muted); font-size: var(--fs-xs); }
   .input-pair { display: inline-flex; align-items: stretch; gap: 0;
     border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel-2); }
   .input-pair input {
@@ -77,17 +140,17 @@
   }
   .input-pair .unit {
     display: inline-flex; align-items: center; padding: 0 8px;
-    color: var(--muted); font-size: 12px; border-left: 1px solid var(--line);
-    background: #1a1e28; cursor: pointer; user-select: none;
+    color: var(--muted); font-size: var(--fs-sm); border-left: 1px solid var(--line);
+    background: var(--unit-bg); cursor: pointer; user-select: none;
   }
   .input-pair .unit:hover { color: var(--text); }
   .input-cluster { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-  .cad-hint { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 12px; }
+  .cad-hint { font-size: var(--fs-2xs); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 12px; }
   .input-pair .unit.cad {
-    font-size: 11px; min-width: 38px; justify-content: center;
-    color: var(--accent); font-weight: 600;
+    font-size: var(--fs-xs); min-width: 38px; justify-content: center;
+    color: var(--accent); font-weight: var(--fw-semibold);
   }
-  .input-pair .unit.cad:hover { color: #fff; background: #232a3c; }
+  .input-pair .unit.cad:hover { color: var(--unit-hover-ink, #fff); background: var(--unit-hover-bg); }
 
   /* Linked salary grid (3-up: annual / monthly / per paycheck) */
   .salary-grid {
@@ -97,12 +160,12 @@
   }
   .salary-grid .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .salary-grid .field .lbl {
-    font-size: 10px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: 0.6px; font-weight: 600;
+    font-size: var(--fs-2xs); color: var(--muted); text-transform: uppercase;
+    letter-spacing: var(--ls-caps); font-weight: var(--fw-semibold);
   }
   .salary-grid .field .input-pair { width: 100%; }
   /* fit the formatted (comma + cents) value into the 3-up grid */
-  .salary-grid .field .input-pair input { width: 100%; min-width: 0; font-size: 13px; padding: 6px 5px; }
+  .salary-grid .field .input-pair input { width: 100%; min-width: 0; font-size: var(--fs-md); padding: 6px 5px; }
   .salary-grid .field .input-pair .unit { padding: 0 6px; }
   .salary-grid .field.active .input-pair { border-color: var(--accent); }
   .salary-grid .field.active .lbl { color: var(--accent); }
@@ -123,7 +186,7 @@
   td input.ac-ed::placeholder { color: var(--muted); opacity: 1; }
   /* Actuals ledger — row action icons (edit ✎ / delete ✕ / save ✓ / cancel) were faint UA links. */
   td a.ac-act-edit, td a.ac-act-del {
-    text-decoration: none; display: inline-block; padding: 2px 5px; border-radius: 6px; line-height: 1; font-size: 13px;
+    text-decoration: none; display: inline-block; padding: 2px 5px; border-radius: 6px; line-height: var(--lh-tight); font-size: var(--fs-md);
   }
   td a.ac-act-edit { color: var(--accent); }                              /* primary action */
   td a.ac-act-edit:hover { color: var(--text); background: var(--chip); }
@@ -142,10 +205,10 @@
   .gl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* Tag chips (per-row + filter bar): explicit readable text + hairline (the --chip fill alone is ~1.2:1). */
   .ac-tag {
-    color: var(--muted); background: var(--chip); border: 1px solid rgba(230,232,239,.12);
-    border-radius: 8px; padding: 1px 7px; font-size: 10px; text-decoration: none; white-space: nowrap;
+    color: var(--muted); background: var(--chip); border: 1px solid var(--line);
+    border-radius: 8px; padding: 1px 7px; font-size: var(--fs-2xs); text-decoration: none; white-space: nowrap;
   }
-  a.ac-tag:hover { color: var(--text); border-color: rgba(230,232,239,.22); }
+  a.ac-tag:hover { color: var(--text); border-color: var(--line); filter: brightness(1.25); }
   a.ac-tag.is-active { color: var(--text); outline: 1px solid var(--accent); border-color: transparent; }
   .ac-catlink { color: inherit; text-decoration: none; cursor: pointer; }
   .ac-catlink:hover { color: var(--accent); }
@@ -153,20 +216,20 @@
   .ac-catlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* Per-category plan-vs-actual rows (WS1) */
   .pcat { margin:4px 0 6px; }
-  .pcat-summary { cursor:pointer; letter-spacing:.3px; padding:10px 14px; }
+  .pcat-summary { cursor:pointer; letter-spacing:var(--ls-tight); padding:10px 14px; }
   .pcat-summary:hover { color:var(--text); }
   .pcat-list { padding:6px 14px 12px; }
   .pcat-row { display:grid; grid-template-columns:1fr auto auto; grid-template-areas:"name amt badge" "bar bar bar"; column-gap:10px; row-gap:5px; align-items:center; padding:6px 0; border-top:1px solid var(--line-faint); }
   .pcat-row:first-child { border-top:none; }
   .pcat-row.is-zero { opacity:.5; }
   .pcat-row.is-zero:hover, .pcat-row.is-zero:focus-within { opacity:1; }
-  .pcat-name { grid-area:name; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .pcat-name { grid-area:name; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-sm); }
   .pcat-amt { grid-area:amt; display:flex; flex-direction:column; align-items:flex-end; gap:1px; font-variant-numeric:tabular-nums; }
-  .pcat-amt-main { font-size:12px; }
-  .pcat-actual { color:var(--text); font-weight:600; }
+  .pcat-amt-main { font-size:var(--fs-sm); }
+  .pcat-actual { color:var(--text); font-weight:var(--fw-semibold); }
   .pcat-plan { color:var(--muted); }
-  .pcat-partner { font-size:10px; color:var(--muted); }
-  .pcat-badge { grid-area:badge; display:inline-block; min-width:46px; text-align:center; padding:1px 7px; border-radius:999px; font-size:10px; font-weight:600; font-variant-numeric:tabular-nums; background:var(--chip); color:var(--muted); }
+  .pcat-partner { font-size:var(--fs-2xs); color:var(--muted); }
+  .pcat-badge { grid-area:badge; display:inline-block; min-width:46px; text-align:center; padding:1px 7px; border-radius:999px; font-size:var(--fs-2xs); font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; background:var(--chip); color:var(--muted); }
   .pcat-row.is-good .pcat-badge { color:var(--good); }
   .pcat-row.is-warn .pcat-badge { color:var(--warn); }
   .pcat-row.is-over .pcat-badge { color:var(--bg); background:var(--bad); }
@@ -181,48 +244,48 @@
   .pcat-bar-partner { height:100%; opacity:.6; background:repeating-linear-gradient(45deg, var(--muted) 0 2px, transparent 2px 6px); }
   @media (max-width:480px) { .pcat-row { grid-template-columns:1fr auto; grid-template-areas:"name name" "amt badge" "bar bar"; } .pcat-amt { align-items:flex-start; } }
   /* Category-alias manager (Budget) + Unplanned fixer (Actuals) */
-  .bgb-alias-ui      { font-size:12px; padding:8px 14px 12px; }
+  .bgb-alias-ui      { font-size:var(--fs-sm); padding:8px 14px 12px; }
   .bgb-alias-groups  { display:flex; flex-direction:column; gap:6px; margin:10px 0 2px; }
   .bgb-alias-row     { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-  .bgb-alias-canon   { font-weight:600; color:var(--text); font-size:12px; }
+  .bgb-alias-canon   { font-weight:var(--fw-semibold); color:var(--text); font-size:var(--fs-sm); }
   .bgb-alias-arrow   { color:var(--muted); }
   .bgb-alias-add     { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
   .bgb-alias-spell   { min-width:140px; }
   .bgb-alias-target  { max-width:220px; }
   /* Uniform compact height + 12px text across the alias controls AND chips, to keep them in line with each other */
   .bgb-alias-add input.bgb-alias-spell,
-  .bgb-alias-add select.bgb-alias-target { height:28px; box-sizing:border-box; padding:0 8px; font-size:12px; font-weight:400; border-radius:6px; }
-  .bgb-alias-add .seed-btn { height:28px; box-sizing:border-box; padding:0 12px; margin-left:0; font-size:12px; }
-  .bgb-alias-row .bgb-preset-chip { height:28px; display:inline-flex; align-items:center; gap:2px; font-size:12px; padding:0 4px 0 10px; margin:0; }
+  .bgb-alias-add select.bgb-alias-target { height:28px; box-sizing:border-box; padding:0 8px; font-size:var(--fs-sm); font-weight:var(--fw-normal); border-radius:6px; }
+  .bgb-alias-add .seed-btn { height:28px; box-sizing:border-box; padding:0 12px; margin-left:0; font-size:var(--fs-sm); }
+  .bgb-alias-row .bgb-preset-chip { height:28px; display:inline-flex; align-items:center; gap:2px; font-size:var(--fs-sm); padding:0 4px 0 10px; margin:0; }
   .bgb-alias-empty   { color:var(--muted); }
   .pcat-unplanned-det          { margin:2px 0 0; }
-  .pcat-unplanned-det>summary  { cursor:pointer; color:var(--muted); font-size:11px; padding:4px 0; list-style:none; }
+  .pcat-unplanned-det>summary  { cursor:pointer; color:var(--muted); font-size:var(--fs-xs); padding:4px 0; list-style:none; }
   .pcat-unplanned-det>summary:hover { color:var(--text); }
   .pcat-unplanned-list { display:flex; flex-direction:column; gap:5px; padding:4px 0 2px; }
-  .pcat-uprow   { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:12px; }
+  .pcat-uprow   { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:var(--fs-sm); }
   .pcat-upname  { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pcat-upamt   { color:var(--muted); font-variant-numeric:tabular-nums; }
   .pcat-countsel{ max-width:180px; }
-  .bgb-alias-accept       { background:transparent; color:var(--good); border:1px solid var(--line); border-radius:999px; padding:2px 9px; cursor:pointer; font-size:11px; }
+  .bgb-alias-accept       { background:transparent; color:var(--good); border:1px solid var(--line); border-radius:999px; padding:2px 9px; cursor:pointer; font-size:var(--fs-xs); }
   .bgb-alias-accept:hover { border-color:var(--good); }
   /* Scenario planner (TODO-219): what-if comp + catch-up ledger, Budget tab */
-  .sc-badge { display:inline-flex; align-items:center; height:18px; padding:0 8px; border-radius:999px; font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; border:1px solid var(--line); color:var(--muted); }
+  .sc-badge { display:inline-flex; align-items:center; height:18px; padding:0 8px; border-radius:999px; font-size:var(--fs-2xs); font-weight:var(--fw-semibold); letter-spacing:var(--ls-caps); text-transform:uppercase; border:1px solid var(--line); color:var(--muted); }
   .sc-badge.is-active { color:var(--good); border-color:var(--good); background:rgba(80,220,140,.08); }
   .sc-list { display:flex; flex-direction:column; gap:6px; margin:8px 0 4px; }
-  .sc-row  { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:12px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; }
+  .sc-row  { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:var(--fs-sm); padding:6px 10px; border:1px solid var(--line); border-radius:8px; }
   .sc-row.is-active { border-color:var(--good); }
-  .sc-row .sc-name { font-weight:600; }
+  .sc-row .sc-name { font-weight:var(--fw-semibold); }
   .sc-row .sc-meta { color:var(--muted); }
   .sc-row .sc-actions { margin-left:auto; display:flex; gap:6px; }
   .sc-grid { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin:8px 0; }
-  .sc-tbl input[type="text"], .sc-tbl input[type="number"], .sc-tbl input[type="month"] { height:26px; box-sizing:border-box; font-size:12px; padding:0 6px; max-width:120px; }
+  .sc-tbl input[type="text"], .sc-tbl input[type="number"], .sc-tbl input[type="month"] { height:26px; box-sizing:border-box; font-size:var(--fs-sm); padding:0 6px; max-width:120px; }
   .sc-tbl input[type="text"].sc-lbl { max-width:170px; }
   .sc-sandbox { border:1px dashed var(--line); border-radius:10px; padding:10px 12px; margin-top:8px; }
   /* Card payment earmark UI (WS2) */
   .ac-pay-earmark { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 12px; margin-top:10px; padding:10px 12px; background:var(--panel-2); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; }
   .ac-pay-earmark .ac-field { flex:1 1 160px; min-width:0; }
-  .ac-lbl-strong { color:var(--accent); font-weight:700; font-size:11px; }
-  .ac-earmark-chip { display:inline-flex; align-items:center; gap:6px; margin:8px 0 0; padding:4px 11px; border-radius:999px; font-size:11px; font-weight:600; background:var(--chip); white-space:nowrap; }
+  .ac-lbl-strong { color:var(--accent); font-weight:var(--fw-bold); font-size:var(--fs-xs); }
+  .ac-earmark-chip { display:inline-flex; align-items:center; gap:6px; margin:8px 0 0; padding:4px 11px; border-radius:999px; font-size:var(--fs-xs); font-weight:var(--fw-semibold); background:var(--chip); white-space:nowrap; }
   .ac-earmark-chip.is-cat { color:var(--good); border:1px solid var(--good); }
   .ac-earmark-chip.is-whole { color:var(--warn); border:1px solid var(--warn); }
   .ac-pay-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:10px; }
@@ -230,53 +293,53 @@
   /* Actuals "Log it" composer (Direction A — quiet, tiered, one accent on amount + Add) */
   .ac-compose { display: flex; flex-direction: column; gap: 11px; margin-top: 10px; }
   .ac-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .ac-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .ac-lbl { font-size: var(--fs-2xs); color: var(--muted); text-transform: uppercase; letter-spacing: var(--ls-caps); }
   .ac-field > input, .ac-field > select { width: 100%; }
   .ac-field .input-pair { width: 100%; display: inline-flex; align-items: center; }
   .ac-amt .input-pair { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 2px 10px; }
   .ac-amt .input-pair:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,167,255,.25); }
   .ac-amt .unit, #ac_tx_partner_wrap .unit { background: none; border-left: none; padding: 0 4px 0 2px; }
-  .ac-amt .unit { font-size: 19px; color: var(--muted); }
-  .ac-amt input { flex: 1; min-width: 0; font-size: 22px; font-weight: 600; background: none; border: none; padding: 7px 4px; outline: none; }
+  .ac-amt .unit { font-size: var(--fs-xl); color: var(--muted); }
+  .ac-amt input { flex: 1; min-width: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); background: none; border: none; padding: 7px 4px; outline: none; font-variant-numeric: tabular-nums; }
   .ac-row { display: flex; gap: 12px; align-items: flex-end; }
   .ac-tools { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
-  .ac-tool { background: none; border: none; color: var(--muted); cursor: pointer; padding: 2px 0; font-size: 12px; }
+  .ac-tool { background: none; border: none; color: var(--muted); cursor: pointer; padding: 2px 0; font-size: var(--fs-sm); }
   .ac-tool:hover { color: var(--accent); border-color: transparent; }
-  .ac-add { width: 100%; font-size: 15px; padding: 11px; }
-  details.ac-manage > summary { cursor: pointer; list-style: none; color: var(--muted); font-size: 12px; }
+  .ac-add { width: 100%; font-size: var(--fs-lg); padding: 11px; }
+  details.ac-manage > summary { cursor: pointer; list-style: none; color: var(--muted); font-size: var(--fs-sm); }
   details.ac-manage > summary::-webkit-details-marker { display: none; }
   details.ac-manage > summary::before { content: '\25B8\00a0'; }
   details.ac-manage[open] > summary::before { content: '\25BE\00a0'; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chip {
     padding: 4px 10px; border-radius: 999px; background: var(--chip);
-    border: 1px solid var(--line); cursor: pointer; font-size: 12px; color: var(--muted);
+    border: 1px solid var(--line); cursor: pointer; font-size: var(--fs-sm); color: var(--muted);
   }
-  .chip.active { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }
+  .chip.active { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: var(--fw-semibold); }
 
   /* Results */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
   .tile {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   }
-  .tile .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
-  .tile .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
-  .tile .s { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .tile .k { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-caps); }
+  .tile .v { font-size: var(--fs-xl); font-weight: var(--fw-semibold); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .s { color: var(--muted); font-size: var(--fs-xs); margin-top: 2px; }
   .tile.good .v { color: var(--good); }
   .tile.bad .v { color: var(--bad); }
   .tile.warn .v { color: var(--warn); }
 
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-  th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+  th { color: var(--muted); font-weight: var(--fw-medium); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-caps); }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tr.total td { font-weight: 700; border-top: 1px solid var(--line); border-bottom: none; }
-  tr.sub td { color: var(--muted); font-size: 12px; }
+  tr.total td { font-weight: var(--fw-bold); border-top: 1px solid var(--line); border-bottom: none; }
+  tr.sub td { color: var(--muted); font-size: var(--fs-sm); }
 
   details { border: 1px solid var(--line); border-radius: 8px; padding: 0; margin-top: 10px; background: var(--panel-2); }
   details > summary {
-    cursor: pointer; padding: 10px 12px; color: var(--muted); font-size: 12px;
-    text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
+    cursor: pointer; padding: 10px 12px; color: var(--muted); font-size: var(--fs-sm);
+    text-transform: uppercase; letter-spacing: var(--ls-caps); font-weight: var(--fw-semibold);
   }
   details[open] > summary { border-bottom: 1px solid var(--line); }
   details .body { padding: 12px; }
@@ -291,28 +354,44 @@
     background: var(--panel-2); border: 1px solid var(--line); margin: 6px 0 10px;
   }
   .bar > div { height: 100%; }
-  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--fs-sm); color: var(--muted); }
   .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 
-  .status { font-size: 11px; color: var(--muted); padding: 4px 0; }
-  .status.err { color: var(--bad); }
 
   .limit-hint {
-    font-size: 11px; color: var(--muted); margin: 4px 0 0;
+    font-size: var(--fs-xs); color: var(--muted); margin: 4px 0 0;
     font-variant-numeric: tabular-nums;
   }
-  .limit-hint.flash { color: var(--warn); font-weight: 600; }
+  .limit-hint.flash { color: var(--warn); font-weight: var(--fw-semibold); }
   .limit-hint.full { color: var(--warn); }
 
-  footer { color: var(--muted); font-size: 11px; padding: 16px 24px; text-align: center; }
+  footer { color: var(--muted); font-size: var(--fs-xs); padding: 16px 24px; text-align: center; }
   .muted { color: var(--muted); }
   .mono { font-variant-numeric: tabular-nums; }
+  .mini { font-size: var(--fs-xs); }
 
   /* ---- Tabs & feature panels (budget / invest / auto) ---- */
   .tabbar { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 14px; padding:0 24px; }
   .tab-btn { background:var(--panel); color:var(--muted); border:1px solid var(--line); padding:8px 14px;
-             border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; }
-  .tab-btn.active { color:#fff; border-color:var(--accent-strong); background:#1c2433; }
+             border-radius:8px; cursor:pointer; font-size:var(--fs-md); font-weight:var(--fw-semibold); }
+  /* #tabbar-scoped nav pill styling. Scoped by id (not the bare .tab-btn class) because
+     .tab-btn is reused by the Actuals month-nav ‹/› buttons, which must keep their
+     original bordered appearance untouched. */
+  /* padding-inline:0 overrides the base .tabbar's 0 24px — header already supplies the
+     horizontal gutter (var(--space-5)) now that #tabbar lives inside it; without this the
+     tabs row would get a doubled left/right inset relative to the brand/actions row. */
+  #tabbar { gap:var(--space-2); margin:0; padding-block:var(--space-1); padding-inline:0; }
+  #tabbar .tab-btn {
+    background:transparent; color:var(--muted);
+    border:1px solid transparent;                 /* geometry spacer, never shown */
+    border-radius:var(--radius-md); padding:10px 16px;
+    font-size:var(--fs-md); font-weight:var(--fw-semibold);
+    transition:background-color .12s ease, color .12s ease;
+  }
+  #tabbar .tab-btn:hover { background:var(--accent-tint); color:var(--text); }
+  #tabbar .tab-btn.active,
+  #tabbar .tab-btn.active:hover { background:var(--accent); color:var(--on-accent); }
+  #tabbar .tab-btn:active { transform:translateY(1px); }
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
   main.tab-panel.active { display:grid; }     /* preserve the Tax view's 2-column grid */
@@ -324,28 +403,34 @@
   }
   .panel-inner { display:grid; grid-template-columns: minmax(300px,380px) 1fr; gap:16px; }
   @media (max-width:900px){ .panel-inner { grid-template-columns:1fr; } }
-  .disclaimer { background:#2a210f; border:1px solid #6b531a; color:#e7c66b; border-radius:8px;
-                padding:10px 14px; font-size:12px; margin:0 0 14px; line-height:1.45; }
-  .disclaimer b { color:#ffd87a; }
+  .disclaimer { display:flex; align-items:flex-start; gap:10px;
+                background:var(--warn-surface); border:1px solid var(--warn-border); color:var(--warn-text); border-radius:8px;
+                padding:10px 14px; font-size:var(--fs-sm); margin:0 0 14px; line-height:var(--lh-base); }
+  .disclaimer[hidden] { display:none !important; }   /* .disclaimer's own display:flex would otherwise beat the plain [hidden] attribute */
+  .disclaimer b { color:var(--warn-text-strong); }
+  .disclaimer-text { flex:1; }
+  .disclaimer-x { background:transparent; border:none; color:var(--warn-text); font-size:var(--fs-lg);
+                  line-height:var(--lh-tight); padding:0 2px; cursor:pointer; flex-shrink:0; }
+  .disclaimer-x:hover { color:var(--warn-text-strong); border-color:transparent; background:transparent; }
   .result-list { list-style:none; padding:0; margin:0; }
   .result-list li { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--line-faint); }
-  .result-list li span:last-child { font-variant-numeric:tabular-nums; font-weight:600; }
-  .warn-box { background:#2a1414; border:1px solid #6b2a2a; color:#f3b0b0; border-radius:8px; padding:8px 12px; font-size:12px; margin:6px 0; line-height:1.4; }
-  .note-box { color:var(--muted); font-size:11px; margin:6px 0; line-height:1.45; }
+  .result-list li span:last-child { font-variant-numeric:tabular-nums; font-weight:var(--fw-semibold); }
+  .warn-box { background:var(--warnbox-surface); border:1px solid var(--warnbox-border); color:var(--warnbox-text); border-radius:8px; padding:8px 12px; font-size:var(--fs-sm); margin:6px 0; line-height:1.4; }
+  .note-box { color:var(--muted); font-size:var(--fs-xs); margin:6px 0; line-height:var(--lh-base); }
   /* Accessibility: visible keyboard focus (inputs deliberately clear outline otherwise) */
   .input-pair input:focus-visible, select:focus-visible, button:focus-visible,
   .chip:focus-visible, .tab-btn:focus-visible, .unit:focus-visible, [data-cad-toggle]:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px;
+    outline: 2px solid var(--accent); outline-offset: 2px;
   }
   /* Toast for cross-tab actions */
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(8px);
     background: var(--panel-2); border: 1px solid var(--accent-strong); color: var(--text);
-    padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    padding: 10px 16px; border-radius: 8px; font-size: var(--fs-md); box-shadow: 0 8px 28px rgba(0,0,0,0.45);
     opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 200; max-width: 90vw; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   /* What-If Mode — minimal banner (TODO-221 P0; full violet chrome is P1) */
   .wi-banner { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    padding:8px 24px; font-size:12px; border-bottom:1px solid var(--wi-accent, #7c5cff); }
+    padding:8px 24px; font-size:var(--fs-sm); border-bottom:1px solid var(--wi-accent, #7c5cff); }
   .wi-banner[hidden] { display:none !important; }
   /* P1 chrome (DEC-018 M5): full-viewport violet frame — the peripheral "not reality" signal
      that survives any scroll or tab switch. Flips green while hold-to-peek shows live numbers. */
@@ -358,7 +443,7 @@
   .wi-banner-icon { color: var(--wi-accent, #7c5cff); }
   .wi-banner-label { color: var(--text); }
   .wi-banner-actions { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
-  .wi-banner-actions button { font-size:11px; padding:5px 10px; }
+  .wi-banner-actions button { font-size:var(--fs-xs); padding:5px 10px; }
   #wi_banner { background: rgba(124,92,255,0.12); }
   #wi_resume_banner, #wi_broken_banner { background: rgba(124,92,255,0.06); }
   body.whatif-active header { border-bottom-color: var(--wi-accent, #7c5cff); }
@@ -372,12 +457,22 @@
   #ov_out .subhead { margin:16px 0 6px; }
   #ov_out .bar { margin:0 0 8px; }
   #ov_out .legend { margin:0 0 4px; }
-  .nw-field { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); }
+  .nw-field { display:flex; flex-direction:column; gap:3px; font-size:var(--fs-xs); color:var(--muted); }
   .nw-field input { width:128px; }
-  .calc-btn { background:var(--accent-strong); color:#fff; border:none; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; margin-top:10px; }
-  .calc-btn:hover { background:#2f5ad0; }
-  .tab-panel select { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 8px; font-size:13px; min-width:120px; }
-  .tab-panel .row label { font-size:13px; }
+  /* DEC-024 HA theme adapter (shiro-full only): the net-worth cone's fill-opacity/stroke-opacity
+     are tuned for a dark background and read as near-invisible on light. html.theme-shiro-full
+     is set by applyHaTheme() only in full (light) presentation — accent-only stays dark and never
+     matches this selector, so its cone is byte-for-byte unchanged. */
+  html.theme-shiro-full .nw-cone-fill { fill-opacity: 0.30; }
+  html.theme-shiro-full .nw-cone-line { stroke: var(--accent-strong); opacity: 0.75; }
+  /* DEC-024 HA theme adapter (shiro-full only, part B companion): the curated --color-N
+     palette is luminance-flat, so adjacent breakdown-bar segments need a structural hairline
+     to stay distinguishable on light. Dark/accent never match html.theme-shiro-full. */
+  html.theme-shiro-full #barBreakdown > div:not(:last-child) { box-shadow: inset -1px 0 0 var(--panel); }
+  .calc-btn { background:var(--accent-strong); color:var(--on-accent-strong); border:none; border-radius:8px; padding:10px 16px; font-weight:var(--fw-semibold); cursor:pointer; margin-top:10px; }
+  .calc-btn:hover { background:var(--accent-strong); filter:brightness(1.15); }
+  .tab-panel select { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 8px; font-size:var(--fs-md); min-width:120px; }
+  .tab-panel .row label { font-size:var(--fs-md); }
   .tab-panel input[type=checkbox] { width:auto; }
   .borrower-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px 8px; align-items:end; margin:4px 0; }
   .borrower-grid input { width:100%; }
@@ -385,30 +480,30 @@
   /* Dynamic budget builder */
   .bgb-bucket { border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0; }
   .bgb-bhead { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
-  .bgb-bname { background:transparent; border:none; color:#fff; font-weight:700; font-size:14px; width:140px; }
-  .bgb-bkind { background:var(--field); border:1px solid var(--line); color:#9fb4d8; border-radius:5px; padding:2px 4px; font-size:10px; text-transform:uppercase; letter-spacing:.4px; }
+  .bgb-bname { background:transparent; border:none; color:var(--text); font-weight:var(--fw-bold); font-size:var(--fs-base); width:140px; }
+  .bgb-bkind { background:var(--field); border:1px solid var(--line); color:var(--muted); border-radius:5px; padding:2px 4px; font-size:var(--fs-2xs); text-transform:uppercase; letter-spacing:var(--ls-caps); }
   .bgb-bsum { font-variant-numeric:tabular-nums; margin-left:auto; }
-  .bgb-x { background:transparent; border:none; color:#a04545; cursor:pointer; font-size:13px; }
-  .bgb-x:hover { color:#f06a6a; }
+  .bgb-x { background:transparent; border:none; color:var(--bad); cursor:pointer; font-size:var(--fs-md); }
+  .bgb-x:hover { filter:brightness(1.3); }
   .bgb-items td { padding:4px 6px; border-bottom:1px solid var(--line-faint); }
-  .bgb-items input[type=text], .bgb-items input[type=number] { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 6px; font-size:12px; }
+  .bgb-items input[type=text], .bgb-items input[type=number] { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 6px; font-size:var(--fs-sm); }
   .bgb-iname { width:150px; }
   .good-text { color:var(--good); } .bad-text { color:var(--bad); }
-  .mi { width:46px; background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px; font-size:12px; }
+  .mi { width:46px; background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px; font-size:var(--fs-sm); }
   .bgb-group { margin:6px 0 6px 6px; padding-left:10px; border-left:2px solid var(--line); }
   .bgb-ghead { display:flex; align-items:center; gap:8px; }
-  .bgb-gname { background:transparent; border:none; color:#9fb4d8; font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.5px; width:150px; }
-  .bgb-gsum { font-variant-numeric:tabular-nums; margin-left:auto; font-size:12px; color:var(--muted); }
+  .bgb-gname { background:transparent; border:none; color:var(--muted); font-weight:var(--fw-semibold); font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); width:150px; }
+  .bgb-gsum { font-variant-numeric:tabular-nums; margin-left:auto; font-size:var(--fs-sm); color:var(--muted); }
   .bgb-addgroup { margin-top:2px; }
   .bgb-grip { cursor:grab; color:#5a6473; user-select:none; width:14px; text-align:center; padding-right:0 !important; }
   .bgb-grip:active { cursor:grabbing; }
   .bgb-items tr { transition:background .1s; }
   .bgb-isplit { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 3px; }
-  .bgb-ipreset { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:3px 4px; font-size:11px; max-width:130px; }
-  .bgb-preset-chip { display:inline-block; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 3px 1px 8px; margin:2px; font-size:11px; white-space:nowrap; }
-  .seed-btn { background:transparent; color:var(--accent); border:1px solid #3a4660; border-radius:6px; padding:5px 10px; font-size:12px; cursor:pointer; margin-left:6px; }
-  .subhead { font-size:11px; text-transform:uppercase; letter-spacing:.6px; font-weight:600; color:var(--muted); margin:10px 0 4px; }
-  .res-table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  .bgb-ipreset { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:3px 4px; font-size:var(--fs-xs); max-width:130px; }
+  .bgb-preset-chip { display:inline-block; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1px 3px 1px 8px; margin:2px; font-size:var(--fs-xs); white-space:nowrap; }
+  .seed-btn { background:transparent; color:var(--accent); border:1px solid #3a4660; border-radius:6px; padding:5px 10px; font-size:var(--fs-sm); cursor:pointer; margin-left:6px; }
+  .subhead { font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); font-weight:var(--fw-semibold); color:var(--muted); margin:10px 0 4px; }
+  .res-table { width:100%; border-collapse:collapse; font-size:var(--fs-md); margin-top:6px; }
   .res-table th, .res-table td { text-align:right; padding:6px 6px; border-bottom:1px solid var(--line-faint); }
   .res-table th:first-child, .res-table td:first-child { text-align:left; }
   .res-table .num { font-variant-numeric:tabular-nums; }
@@ -426,24 +521,24 @@
   .ac-cards-table thead .ac-col-total { z-index: 3; }
   .ac-card-toggle {
     background: none; border: none; color: var(--text); cursor: pointer;
-    font-size: 13px; text-align: left; padding: 0; width: 100%; font: inherit;
+    font-size: var(--fs-md); text-align: left; padding: 0; width: 100%; font: inherit;
   }
   .ac-card-toggle:hover { color: var(--accent); }
-  .ac-card-toggle::before { content: '▶\00a0'; font-size: 10px; }
+  .ac-card-toggle::before { content: '▶\00a0'; font-size: var(--fs-2xs); }
   .ac-card-toggle[aria-expanded="true"]::before { content: '▼\00a0'; }
   .ac-pay-form { margin-top:10px; border:1px solid var(--line); border-radius:8px; padding:10px; background:var(--field); }
   .ac-pay-figs { display:grid; grid-template-columns:auto auto; gap:1px 8px; justify-content:end; align-items:baseline; font-variant-numeric:tabular-nums; }
-  .ac-pay-figs .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); text-align:right; }
-  .ac-pay-figs .charged { font-size:11px; color:var(--muted); }
-  .ac-pay-figs .paid { font-size:11px; color:var(--good); }
+  .ac-pay-figs .lbl { font-size:var(--fs-2xs); text-transform:uppercase; letter-spacing:var(--ls-caps); color:var(--muted); text-align:right; }
+  .ac-pay-figs .charged { font-size:var(--fs-xs); color:var(--muted); }
+  .ac-pay-figs .paid { font-size:var(--fs-xs); color:var(--good); }
   .ac-pay-figs .rem-lbl { color:var(--text); }
-  .ac-pay-figs .remaining { font-size:13px; font-weight:700; color:var(--text); }
-  .ac-pay-paidoff { font-size:11px; font-weight:600; color:var(--good); white-space:nowrap; }
-  .ac-pay-credit { font-size:10px; color:var(--good); white-space:nowrap; }
+  .ac-pay-figs .remaining { font-size:var(--fs-md); font-weight:var(--fw-bold); color:var(--text); }
+  .ac-pay-paidoff { font-size:var(--fs-xs); font-weight:var(--fw-semibold); color:var(--good); white-space:nowrap; }
+  .ac-pay-credit { font-size:var(--fs-2xs); color:var(--good); white-space:nowrap; }
   .ac-pay-coming { color: var(--warn); }
   /* Status pills — shared between per-card detail and main ledger */
   .ac-status-pill {
-    display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 10px;
+    display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: var(--fs-2xs);
     cursor: pointer; border: 1px solid transparent; font: inherit; white-space: nowrap;
     background: transparent;
   }
@@ -458,14 +553,16 @@
   /* Refund toggle chip (in composer .ac-tools) */
   .ac-refund-toggle {
     background: none; border: none; color: var(--muted); cursor: pointer;
-    padding: 2px 0; font: inherit; font-size: 12px;
+    padding: 2px 0; font: inherit; font-size: var(--fs-sm);
   }
   .ac-refund-toggle:hover { color: var(--good); border-color: transparent; }
-  .ac-refund-toggle.active { color: var(--good); font-weight: 600; }
+  .ac-refund-toggle.active { color: var(--good); font-weight: var(--fw-semibold); }
 
   @media print {
     .tabbar { display:none; }
     .disclaimer { border:1px solid #999; background:#fff; color:#000; }
+    .disclaimer-x { display:none; }
+    footer { color:#555; }
     body { background: white; color: black; }
     header, .actions, .no-print, details { display: none !important; }
     main, #tab-budget, #tab-invest, #tab-auto, #tab-actuals { grid-template-columns: 1fr; padding: 0; max-width: none; }
@@ -473,18 +570,28 @@
     .tile { background: white; border: 1px solid #ccc; color: black; }
     .tile .k, th, .muted { color: #555; }
   }
+  @media (prefers-reduced-motion:reduce) {
+    #tabbar .tab-btn, button, .btn { transition:none; }
+    #tabbar .tab-btn:active { transform:none; }
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <div>
-    <h1>Income Tax Calculator</h1>
-    <div class="sub">Tax year 2026 · Single filer · Federal + Texas · Python backend</div>
+  <div class="brand">
+    <h1>Finance</h1>
   </div>
+  <nav class="tabbar" id="tabbar">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="fire">FIRE</button>
+    <button class="tab-btn" data-tab="tax">Tax</button>
+    <button class="tab-btn" data-tab="budget">Budget</button>
+    <button class="tab-btn" data-tab="actuals">Actuals</button>
+    <button class="tab-btn" data-tab="invest">Invest</button>
+    <button class="tab-btn" data-tab="auto">Car</button>
+  </nav>
   <div class="actions no-print">
-    <span class="status" id="status">ready</span>
-    <button id="btnPrint">Print / PDF</button>
     <span class="backup-split">
       <button id="btnExport">Back up</button>
       <button id="btnBackupMenu" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="backup_popup" title="More backup &amp; export options">&#9662;</button>
@@ -513,10 +620,27 @@
         <button class="seed-btn" id="backup_csv_dl" type="button" style="margin-top:8px;width:100%">Download CSV</button>
       </div>
     </span>
-    <button id="btnImport">Restore</button>
-    <input type="file" id="fileImport" accept="application/json" style="display:none" />
-    <button id="btnReset">Reset</button>
     <button id="wi_start_btn" title="Model a what-if change without touching your real numbers">What-If Mode</button>
+    <span id="calcErrorDot" class="calc-error-dot" hidden aria-hidden="true" title="Calculation error — see notification"></span>
+    <span class="settings-split">
+      <button id="btnSettings" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings_popup" aria-label="Settings" title="Settings">&#9881;</button>
+      <div id="settings_popup" class="backup-popup settings-popup" aria-labelledby="settings_popup_h" hidden>
+        <div class="subhead" id="settings_popup_h" style="margin-top:0">Settings</div>
+        <button id="btnPrint">Print / PDF</button>
+        <button id="btnImport">Restore</button>
+        <button id="btnDisclaimerToggle">Hide disclaimer</button>
+        <div id="settings_theme_group" hidden>
+          <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+          <div class="mini muted" style="margin-bottom:4px">Theme</div>
+          <label class="backup-popup-radio"><input type="radio" name="theme_choice" value="shiro-full"> Full light (Shiro)</label>
+          <label class="backup-popup-radio"><input type="radio" name="theme_choice" value="shiro-accent"> Shiro accent</label>
+          <label class="backup-popup-radio"><input type="radio" name="theme_choice" value="dark"> Classic dark</label>
+        </div>
+        <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+        <button id="btnReset">Reset</button>
+      </div>
+    </span>
+    <input type="file" id="fileImport" accept="application/json" style="display:none" />
   </div>
 </header>
 
@@ -553,16 +677,10 @@
   <div id="wi_drafts_list" class="mini" style="width:100%">Loading&hellip;</div>
 </div>
 
-<nav class="tabbar" id="tabbar">
-  <button class="tab-btn active" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="fire">FIRE</button>
-  <button class="tab-btn" data-tab="tax">Tax</button>
-  <button class="tab-btn" data-tab="budget">Budget</button>
-  <button class="tab-btn" data-tab="actuals">Actuals</button>
-  <button class="tab-btn" data-tab="invest">Invest</button>
-  <button class="tab-btn" data-tab="auto">Car</button>
-</nav>
-<div class="disclaimer" id="disclaimer"><b>Not financial, tax, or legal advice.</b> Educational rules-of-thumb and arithmetic. Figures indexed yearly (contribution limits, tax brackets, SALT cap, property-tax rates) are editable estimates — verify before relying on them. Consult a CFP/CPA.</div>
+<div class="disclaimer" id="disclaimer">
+  <span class="disclaimer-text"><b>Not financial, tax, or legal advice.</b> Educational rules-of-thumb and arithmetic. Figures indexed yearly (contribution limits, tax brackets, SALT cap, property-tax rates) are editable estimates — verify before relying on them. Consult a CFP/CPA.</span>
+  <button type="button" id="btnDisclaimerX" class="disclaimer-x" aria-label="Dismiss disclaimer" title="Dismiss">&times;</button>
+</div>
 
 <div class="tab-panel active" id="tab-overview">
   <div id="ov_out" style="padding:16px 24px 0;max-width:1100px;margin:0 auto">Calculating your money picture…</div>
@@ -601,7 +719,7 @@
     <div class="tiles" style="margin-bottom:14px">
       <div class="tile" id="fire-coast-tile">
         <div class="k">% to Coast FI</div>
-        <div class="v" id="fire-coast-pct" style="font-size:28px">—</div>
+        <div class="v" id="fire-coast-pct" style="font-size:var(--fs-3xl);font-variant-numeric:tabular-nums">—</div>
         <div class="s" id="fire-coast-line">—</div>
       </div>
       <div class="tile">
@@ -614,9 +732,9 @@
     <!-- 3. Assumptions block -->
     <section class="card" style="margin-bottom:14px">
       <h2>Assumptions</h2>
-      <div id="fire-resolved" style="font-size:13px;margin-bottom:10px;line-height:1.5;color:var(--muted)">Open the Tax and Budget tabs to seed values.</div>
+      <div id="fire-resolved" style="font-size:var(--fs-md);margin-bottom:10px;line-height:1.5;color:var(--muted)">Open the Tax and Budget tabs to seed values.</div>
       <details id="fire-assumptions-details">
-        <summary style="cursor:pointer;color:var(--accent);font-size:12px;user-select:none">Edit assumptions</summary>
+        <summary style="cursor:pointer;color:var(--accent);font-size:var(--fs-sm);user-select:none">Edit assumptions</summary>
         <div style="margin-top:10px">
           <div class="row">
             <label>Current net worth</label>
@@ -656,7 +774,7 @@
           </div>
           <div class="row">
             <label>Real return <span class="mini muted">(computed)</span></label>
-            <span id="fire-real-return" style="font-size:13px;color:var(--muted)">—</span>
+            <span id="fire-real-return" style="font-size:var(--fs-md);color:var(--muted)">—</span>
           </div>
           <div class="row">
             <label>Lean multiplier</label>
@@ -719,7 +837,7 @@
     <section class="card">
       <h2>Compensation</h2>
 
-      <label class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:600">Gross salary (cash) — fill any one</label>
+      <label class="muted" style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:var(--ls-caps);font-weight:var(--fw-semibold)">Gross salary (cash) — fill any one</label>
       <div class="salary-grid">
         <div class="field" id="salaryField_yr">
           <span class="lbl">Annual</span>
@@ -765,13 +883,13 @@
           <option value="52">Weekly (52)</option>
         </select>
       </div>
-      <p class="muted" style="font-size:11px;margin:8px 0 0">Tip: each deduction below has its own <span style="color:var(--accent);font-weight:600">/yr</span> chip — click to cycle through <b>/yr</b> → <b>/mo</b> → <b>/pay</b>.</p>
+      <p class="muted" style="font-size:var(--fs-xs);margin:8px 0 0">Tip: each deduction below has its own <span style="color:var(--accent);font-weight:var(--fw-semibold)">/yr</span> chip — click to cycle through <b>/yr</b> → <b>/mo</b> → <b>/pay</b>.</p>
     </section>
 
     <!-- Investment income (taxed at filing) + §415(c) -->
     <section class="card">
       <details>
-        <summary>Investment income &amp; §415(c) <span class="mini" style="text-transform:none;font-weight:400">(taxed at filing — not withheld)</span></summary>
+        <summary>Investment income &amp; §415(c) <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(taxed at filing — not withheld)</span></summary>
         <div class="body">
           <div class="row"><label class="mini">Long-term capital gains</label><span class="input-pair"><input id="inv_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
           <div class="row"><label class="mini">Short-term capital gains</label><span class="input-pair"><input id="inv_stg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
@@ -787,7 +905,7 @@
     <!-- Equity sales (ESPP/RSU) + estimated tax -->
     <section class="card">
       <details>
-        <summary>Equity sales &amp; estimated tax <span class="mini" style="text-transform:none;font-weight:400">(only if you sold shares or want a safe-harbor check)</span></summary>
+        <summary>Equity sales &amp; estimated tax <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(only if you sold shares or want a safe-harbor check)</span></summary>
         <div class="body">
           <div class="subhead">ESPP shares sold</div>
           <div class="row"><label class="mini">Shares sold</label><span class="input-pair"><input id="espp_shares" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">sh</span></span></div>
@@ -929,14 +1047,14 @@
       <div class="body">
         <p class="muted" style="margin-top:0">Defaults come from the Python backend (<code>/api/defaults</code>) — 2026 federal IRS projections. Brackets always stay in annual dollars regardless of entry cadence.</p>
 
-        <h3 style="font-size:12px;margin:10px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Federal — Single 2026</h3>
+        <h3 style="font-size:var(--fs-sm);margin:10px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">Federal — Single 2026</h3>
         <div class="row">
           <label>Standard deduction</label>
           <span class="input-pair"><input id="fedStd" type="text" inputmode="decimal" data-fmt="usd" value="16,100" /><span class="unit">$</span></span>
         </div>
         <div id="fedBrackets"></div>
 
-        <h3 style="font-size:12px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">FICA 2026</h3>
+        <h3 style="font-size:var(--fs-sm);margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">FICA 2026</h3>
         <div class="row">
           <label>Social Security wage base</label>
           <span class="input-pair"><input id="ssBase" type="text" inputmode="decimal" data-fmt="usd" value="184,500" /><span class="unit">$</span></span>
@@ -1024,7 +1142,7 @@
     <!-- Bonus (one-time, taxed separately) -->
     <section class="card" id="bonusCard" style="display:none">
       <h2>Bonus — one-time, taxed separately</h2>
-      <p class="muted" style="font-size:11px;margin-top:0">A supplemental payment taxed at your marginal rate on top of regular wages. <b>Not</b> part of take-home or per-paycheck pay.</p>
+      <p class="muted" style="font-size:var(--fs-xs);margin-top:0">A supplemental payment taxed at your marginal rate on top of regular wages. <b>Not</b> part of take-home or per-paycheck pay.</p>
       <div class="tiles">
         <div class="tile"><div class="k">Gross bonus</div><div class="v mono" id="b_gross">—</div></div>
         <div class="tile bad"><div class="k">Bonus tax</div><div class="v mono" id="b_tax">—</div><div class="s" id="b_rate"></div></div>
@@ -1034,7 +1152,7 @@
 
     <!-- Owed at filing: investment tax + supplemental under-withholding + §415(c) -->
     <section class="card" id="filingCard" style="display:none">
-      <h2>Owed at filing <span class="mini" style="text-transform:none;font-weight:400">(not withheld from your paycheck)</span></h2>
+      <h2>Owed at filing <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(not withheld from your paycheck)</span></h2>
       <div class="tiles">
         <div class="tile bad"><div class="k">Investment tax</div><div class="v mono" id="f_invtax">—</div><div class="s" id="f_invtax_sub"></div></div>
         <div class="tile"><div class="k">Bonus under-withholding</div><div class="v mono" id="f_uw">—</div><div class="s">22% flat vs. your marginal</div></div>
@@ -1109,9 +1227,9 @@
     <div class="row"><label class="mini">Net take-home</label><span class="input-pair"><input id="bg_net" type="text" inputmode="decimal" data-fmt="usd" value="120000"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Pre-tax 401(k)</label><span class="input-pair"><input id="bg_t401" type="text" inputmode="decimal" data-fmt="usd" value="24500"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Pre-tax HSA</label><span class="input-pair"><input id="bg_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax health premiums <span class="muted" style="font-size:10px">(medical/dental/vision — a Need, NOT an investment)</span></label><span class="input-pair"><input id="bg_prem" type="text" inputmode="decimal" data-fmt="usd" value="3600"/><span class="unit">$/yr</span></span></div>
+    <div class="row"><label class="mini">Pre-tax health premiums <span class="muted" style="font-size:var(--fs-2xs)">(medical/dental/vision — a Need, NOT an investment)</span></label><span class="input-pair"><input id="bg_prem" type="text" inputmode="decimal" data-fmt="usd" value="3600"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Post-tax savings (Roth/ESPP)</label><span class="input-pair"><input id="bg_post" type="text" inputmode="decimal" data-fmt="usd" value="7500"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:10px">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
+    <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:var(--fs-2xs)">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Gross income (50/15/5)</label><span class="input-pair"><input id="bg_gross" type="text" inputmode="decimal" data-fmt="usd" value="180000"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Employer 401(k) match</label><span class="mini">Match <input id="bg_mrate" class="mi" type="number" step="5" value="50"/>% of first <input id="bg_mpct" class="mi" type="number" step="1" value="6"/>% of salary</span></div>
     <div id="bg_match_out" class="mini" style="margin:4px 0 8px"></div>
@@ -1152,7 +1270,7 @@
         <button class="seed-btn" id="hp_tobudget" type="button" style="margin-top:8px">→ Send payment to Needs › Housing</button>
       </div>
     </details>
-    <details class="card" style="margin-top:16px"><summary>Framework targets <span class="mini" style="font-weight:400">(50/30/20 etc. — just a guide)</span></summary><div class="body"><div id="bg_out" class="mini">Enter your numbers and calculate.</div></div></details>
+    <details class="card" style="margin-top:16px"><summary>Framework targets <span class="mini" style="font-weight:var(--fw-normal)">(50/30/20 etc. — just a guide)</span></summary><div class="body"><div id="bg_out" class="mini">Enter your numbers and calculate.</div></div></details>
   </div>
 </div>
 <section class="card" style="margin-top:16px">
@@ -1353,7 +1471,7 @@
   <!-- Zone A: month context -->
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <button class="tab-btn" id="ac_prev" type="button" aria-label="previous month">‹</button>
-    <span id="ac_monthlabel" style="font-size:16px;font-weight:600;min-width:140px;text-align:center">—</span>
+    <span id="ac_monthlabel" style="font-size:var(--fs-lg);font-weight:var(--fw-semibold);min-width:140px;text-align:center">—</span>
     <button class="tab-btn" id="ac_next" type="button" aria-label="next month">›</button>
     <span id="ac_monthstatus" class="mini muted" aria-live="polite"></span>
     <button class="seed-btn" id="ac_syncplan" type="button" style="margin-left:auto">↻ Sync plan from Budget</button>
@@ -1366,7 +1484,7 @@
       <div class="mini muted" style="margin:-4px 0 8px">Money in / out / invested. Stored in your <b>own private database</b> — it never leaves your network.</div>
 
       <!-- QUICK: one-tap templates -->
-      <div id="ac_tpl_wrap" class="ac-quick" style="font-size:12px">
+      <div id="ac_tpl_wrap" class="ac-quick" style="font-size:var(--fs-sm)">
         <span class="mini muted">Quick:</span> <span id="ac_tpl_chips"></span>
         <button class="ac-tool" id="ac_tpl_save" type="button" title="save the current form as a template">★ Save current</button>
       </div>
@@ -1408,7 +1526,7 @@
         <label class="ac-field">
           <span class="ac-lbl"># Tags</span>
           <span id="ac_tx_tags" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--field)">
-            <input id="ac_tx_tags_in" list="ac_tags_list" type="text" placeholder="add…" style="border:none;background:transparent;flex:1;min-width:64px;outline:none;color:var(--text);font-size:13px;padding:1px">
+            <input id="ac_tx_tags_in" list="ac_tags_list" type="text" placeholder="add…" style="border:none;background:transparent;flex:1;min-width:64px;outline:none;color:var(--text);font-size:var(--fs-md);padding:1px">
           </span>
         </label>
         <datalist id="ac_tags_list"></datalist>
@@ -1422,7 +1540,7 @@
 
         <!-- Partner-split reveal (hidden until toggled) -->
         <div class="ac-field" id="ac_tx_partner_wrap" style="display:none">
-          <span class="ac-lbl">She owes you <span id="ac_tx_partner_pct" class="muted" style="text-transform:none;font-weight:400"></span></span>
+          <span class="ac-lbl">She owes you <span id="ac_tx_partner_pct" class="muted" style="text-transform:none;font-weight:var(--fw-normal)"></span></span>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span class="input-pair" style="max-width:128px"><span class="unit">$</span><input id="ac_tx_partner" type="text" inputmode="decimal" data-fmt="usd2" placeholder="0"></span>
             <button class="ac-tool" type="button" data-pshare="50">50/50</button>
@@ -1475,7 +1593,7 @@
 
           <div class="subhead" style="margin-top:14px">Paste from Excel / import CSV</div>
           <div class="mini muted" style="margin:4px 0">Paste rows straight from <b>Excel / Google Sheets</b> (tab-separated) or CSV. Header row required, columns: <span class="mono">date,account,direction,amount,bucket,category,description</span></div>
-          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px;font-size:12px;font-family:monospace" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
+          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px;font-size:var(--fs-sm);font-family:var(--font-mono)" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
           <button class="seed-btn" id="ac_csv_go" type="button" style="margin-top:6px">Preview & import</button>
           <div id="ac_csv_out" class="mini" style="margin-top:6px"></div>
 
@@ -1513,10 +1631,8 @@
   </section>
 </div>
 
-<footer class="no-print">
-  Math: Python backend (<code>calculator.py</code>) · UI state saved locally (localStorage).
-  <br />
-  Federal brackets are 2026 IRS projections. Verify with a CPA before relying on these for withholding decisions.
+<footer>
+  Not financial, tax, or legal advice — educational estimates. Figures use 2026 IRS projections; verify with a CPA before relying on them.
 </footer>
 
 <script>
@@ -1541,6 +1657,175 @@
     const rawFetch = window.fetch.bind(window);
     window.fetch = (url, opts) =>
       rawFetch(typeof url === 'string' && url.startsWith('/') ? base + url : url, opts);
+  }
+})();
+
+// ---------- HA theme adapter (DEC-024; shipping default + persistent picker) ----------
+// server.py's index() route optionally injects window.__HA_THEME (see load_theme() /
+// normalize_theme() there) — a verbatim passthrough of the user's Home Assistant theme's
+// custom-property tokens: {available, name, mode, source, vars:{<key>: <string value>}}.
+// This adapter maps that data onto OUR --token names, in one of two presentations
+// ('shiro-accent' or 'shiro-full'). The presentation is resolved once at boot with this
+// precedence (highest first):
+//   1) an explicit `?theme=` URL param — a test/share override, always wins
+//   2) the user's persisted choice, localStorage[HA_THEME_CHOICE_KEY]: 'shiro-full' |
+//      'shiro-accent' | 'dark' ('dark' = explicit opt-out of an available theme)
+//   3) the shipping default — 'shiro-full' whenever window.__HA_THEME.available === true
+//      and nothing has been persisted yet; otherwise nothing (classic dark, unchanged)
+// Runs here — before any render — so there is no flash of the wrong palette.
+//
+// Ironclad fallback (every branch below is deliberately conservative): no window.__HA_THEME,
+// theme.available !== true, a missing/non-object theme.vars, or a resolved presentation that
+// isn't exactly 'shiro-accent' or 'shiro-full' all resolve to "do nothing" — the app keeps
+// today's dark palette, unchanged, with zero console errors. The whole function is wrapped in
+// try/catch so a malformed theme object can never break boot.
+const HA_THEME_CHOICE_KEY = 'itc.themeChoice.v1';
+function applyHaTheme(theme, presentation) {
+  try {
+    if (!theme || theme.available !== true) return;                 // no theme (or {available:false})
+    if (!theme.vars || typeof theme.vars !== 'object') return;       // malformed transport contract
+    if (presentation !== 'shiro-accent' && presentation !== 'shiro-full') return;
+
+    const root = document.documentElement.style;
+
+    // 1) PASSTHROUGH — every Shiro token becomes a --<key> custom property on <html>, so the
+    // theme's own var(...) chains (e.g. primary-color: var(--md-sys-color-primary)) resolve
+    // natively in the browser, exactly as they do inside Home Assistant.
+    for (const key in theme.vars) {
+      if (!Object.prototype.hasOwnProperty.call(theme.vars, key)) continue;
+      const val = theme.vars[key];
+      if (typeof val !== 'string') continue;
+      root.setProperty('--' + key, val);
+    }
+
+    if (presentation === 'shiro-accent') {
+      // ACCENT-ONLY: the app stays dark; only the accent family shifts to the theme's gold.
+      // --on-accent is left at its dark default on purpose (0b1020 ink on #9a7a40 gold =
+      // 4.72:1, AA — @designer confirmed no flip needed for this preset).
+      root.setProperty('--accent', 'var(--md-sys-color-secondary, #9a7a40)');
+      root.setProperty('--accent-strong', 'var(--dark-primary-color, #765d31)');
+      root.setProperty('--accent-tint', 'color-mix(in srgb, var(--accent) 12%, transparent)');
+    } else {
+      // FULL: the app becomes light. Surfaces/text reference the Shiro vars (so they track
+      // the live theme); accent + semantic colors are AA-vetted literals hand-tuned for light
+      // per @designer (the theme's own gold/blue/red are calibrated for a dark ink, not a
+      // light one, so they can't be reused verbatim here).
+      document.documentElement.classList.add('theme-shiro-full');
+      root.setProperty('--bg', 'var(--primary-background-color)');
+      root.setProperty('--panel', 'var(--card-background-color)');
+      root.setProperty('--panel-2', 'var(--md-sys-color-surface-container-high)');
+      root.setProperty('--field', 'var(--md-sys-color-surface-container-lowest)');
+      root.setProperty('--chip', 'var(--md-sys-color-surface-variant)');
+      root.setProperty('--line', 'var(--divider-color)');
+      root.setProperty('--line-faint', 'var(--md-sys-color-surface-container-high)');
+      root.setProperty('--text', 'var(--primary-text-color)');
+      root.setProperty('--muted', 'var(--secondary-text-color)');
+
+      root.setProperty('--accent', '#7d6535');
+      root.setProperty('--accent-strong', '#765d31');
+      root.setProperty('--on-accent', '#f5f2ec');
+      root.setProperty('--accent-tint', 'color-mix(in srgb, #7d6535 18%, transparent)');
+
+      root.setProperty('--good', '#186a3a');
+      root.setProperty('--warn', '#845c0a');
+      root.setProperty('--bad', '#b3261e');
+      root.setProperty('--travel', '#6a4878');
+
+      root.setProperty('--warn-surface', '#faf0d8');
+      root.setProperty('--warn-border', '#a8781f');
+      root.setProperty('--warn-text', '#6e4f0e');
+      root.setProperty('--warn-text-strong', '#5a4008');
+      root.setProperty('--danger-tint', 'color-mix(in srgb, #b3261e 16%, transparent)');
+
+      // .warn-box trio (TODO-220-style pocket cleanup): dark defaults live on :root, this is
+      // the only place they're overridden.
+      root.setProperty('--warnbox-surface', '#fcefea');
+      root.setProperty('--warnbox-border', '#e0a88f');
+      root.setProperty('--warnbox-text', '#7a1010');
+
+      // Breakdown-bar categorical palette (Shiro v1.2.0 re-validation, part B): maps our
+      // --cat-* tokens onto the curated --color-N subset passed through above in step 1 —
+      // all AA-vetted >=3:1 on light surfaces per @designer. Dark/accent stay on the :root
+      // defaults (byte-for-byte the old hex literals) since this only runs in shiro-full.
+      root.setProperty('--cat-takehome', 'var(--color-3)');
+      root.setProperty('--cat-trad401k', 'var(--color-4)');
+      root.setProperty('--cat-roth401k', 'var(--color-13)');
+      root.setProperty('--cat-rothira', 'var(--color-6)');
+      root.setProperty('--cat-hsa', 'var(--color-7)');
+      root.setProperty('--cat-eestock', 'var(--color-11)');
+      root.setProperty('--cat-fedtax', 'var(--color-2)');
+      root.setProperty('--cat-fica', 'var(--color-5)');
+      root.setProperty('--cat-statetax', 'var(--color-8)');
+      root.setProperty('--cat-statedis', 'var(--color-12)');
+
+      // Header background (part C1): Rice Paper -> Warm Linen gradient tracks the live theme.
+      root.setProperty('--header-bg', 'linear-gradient(180deg, var(--card-background-color), var(--primary-background-color))');
+
+      // Input-unit chip ($/%/yr) colors (part C2): Warm Linen chip, Bone hover, Ebony ink.
+      root.setProperty('--unit-bg', 'var(--chip)');
+      root.setProperty('--unit-hover-bg', 'var(--md-sys-color-surface-container-highest)');
+      root.setProperty('--unit-hover-ink', 'var(--text)');
+    }
+  } catch (e) {
+    // A malformed/unexpected theme object must never break boot — fall through silently,
+    // leaving whatever custom properties were already set (today's dark :root defaults).
+  }
+}
+
+(function () {
+  try {
+    const params = new URLSearchParams(location.search);
+    const urlParam = params.get('theme');
+    let presentation = null;
+    if (urlParam !== null) {
+      // Explicit test/share override always wins, regardless of any persisted choice.
+      presentation = urlParam;
+    } else {
+      let persisted = null;
+      try { persisted = localStorage.getItem(HA_THEME_CHOICE_KEY); } catch (e) {}
+      if (persisted === 'shiro-full' || persisted === 'shiro-accent') {
+        presentation = persisted;
+      } else if (persisted === 'dark') {
+        presentation = null;   // explicit opt-out of an available theme
+      } else if (window.__HA_THEME && window.__HA_THEME.available === true) {
+        presentation = 'shiro-full';   // shipping default: theme present, no choice made yet
+      }
+    }
+    applyHaTheme(window.__HA_THEME, presentation);
+  } catch (e) {
+    // Same ironclad guarantee as applyHaTheme itself — never let theme switching break boot.
+  }
+})();
+
+// Settings-menu theme picker: a real, persistent control (no longer preview-only). Lives inside
+// the existing Settings popup; selecting an option writes HA_THEME_CHOICE_KEY to localStorage
+// and reloads, so the boot-time precedence above picks it up on next paint. Hidden entirely
+// (stays `hidden`) when no HA theme is available, so nothing changes for a normal HA install
+// without a theme file.
+(function () {
+  try {
+    if (!window.__HA_THEME || window.__HA_THEME.available !== true) return;
+    const group = document.getElementById('settings_theme_group');
+    if (!group) return;
+    group.hidden = false;
+
+    let persisted = null;
+    try { persisted = localStorage.getItem(HA_THEME_CHOICE_KEY); } catch (e) {}
+    const active = (persisted === 'shiro-full' || persisted === 'shiro-accent' || persisted === 'dark')
+      ? persisted
+      : 'shiro-full';   // nothing persisted yet -> reflect the shipping default
+
+    const radios = group.querySelectorAll('input[name="theme_choice"]');
+    radios.forEach((r) => {
+      r.checked = (r.value === active);
+      r.addEventListener('change', () => {
+        if (!r.checked) return;
+        try { localStorage.setItem(HA_THEME_CHOICE_KEY, r.value); } catch (e) {}
+        location.reload();
+      });
+    });
+  } catch (e) {
+    // Non-critical UI affordance — never let it break boot.
   }
 })();
 
@@ -1774,6 +2059,22 @@ function showToast(msg) {
   const t = $('toast'); if (!t) return;
   t.textContent = msg; t.classList.add('show');
   clearTimeout(_toastTimer); _toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// Dismissible header disclaimer (round-2 header consolidation). All localStorage access is
+// try/catch'd — this must never throw and take the boot sequence down with it.
+const DISCLAIMER_DISMISSED_KEY = 'itc.disclaimerDismissed.v1';
+function isDisclaimerDismissed() {
+  try { return localStorage.getItem(DISCLAIMER_DISMISSED_KEY) === '1'; } catch (e) { return false; }
+}
+function setDisclaimerDismissed(v) {
+  try {
+    if (v) localStorage.setItem(DISCLAIMER_DISMISSED_KEY, '1');
+    else localStorage.removeItem(DISCLAIMER_DISMISSED_KEY);
+  } catch (e) {}
+}
+function applyDisclaimerVisibility() {
+  const el = $('disclaimer'); if (el) el.hidden = isDisclaimerDismissed();
 }
 
 function payFreq() { return +$('payFreq').value || 24; }
@@ -2126,10 +2427,16 @@ async function fetchCalc() {
   return await resp.json();
 }
 
+// Round-2: the header no longer shows a status string. Errors surface via the toast +
+// #calcErrorDot; success/computing just clears the dot (callers/messages unchanged).
 function setStatus(msg, isErr = false) {
-  const el = $('status');
-  el.textContent = msg;
-  el.className = 'status' + (isErr ? ' err' : '');
+  const dot = $('calcErrorDot');
+  if (isErr) {
+    if (dot) dot.hidden = false;
+    showToast(msg);
+  } else if (dot) {
+    dot.hidden = true;
+  }
 }
 
 // ---------- Render ----------
@@ -2305,7 +2612,7 @@ function render(r) {
     const extraPP = cu.contribPP - cu.levelPP;                 // heavier (+) / lighter (−) than level, per remaining paycheck
     const cuTakeHomePP = cu.maxedTakePP - extraPP;             // take-home per remaining paycheck during the sprint
     const sep = document.createElement('tr'); sep.className = 'sub';
-    sep.innerHTML = `<td colspan="4" style="padding-top:10px;color:var(--muted);font-size:12px">Catch-up to year-end — ${cu.nLeft} paycheck${cu.nLeft===1?'':'s'} left (this year only; steady state is above)</td>`;
+    sep.innerHTML = `<td colspan="4" style="padding-top:10px;color:var(--muted);font-size:var(--fs-sm)">Catch-up to year-end — ${cu.nLeft} paycheck${cu.nLeft===1?'':'s'} left (this year only; steady state is above)</td>`;
     ct.appendChild(sep);
     const trX = document.createElement('tr'); trX.className = 'sub';
     trX.innerHTML = `<td>↳ Retirement, catch-up pace</td><td class="num mono">—</td><td class="num mono">${fmt$(-cu.contribPP * pf / 12)}</td><td class="num mono">${fmt$(-cu.contribPP)}</td>`;
@@ -2317,18 +2624,18 @@ function render(r) {
 
   // Breakdown bar
   const segments = [
-    { label: 'Take-home',   value: r.cash.takeHome,  color: '#5fd38b' },
-    { label: '401(k) Trad', value: r.cash.trad401k,  color: '#7aa7ff' },
-    { label: '401(k) Roth', value: r.cash.roth401k,  color: '#9f7aff' },
-    { label: 'Roth IRA',    value: r.cash.rothIra || 0, color: '#c29fff' },
-    { label: 'HSA',         value: r.cash.hsa,       color: '#4dd6d6' },
-    { label: 'EE Stock',    value: r.cash.eeStock,   color: '#c78cff' },
-    { label: 'Fed tax',     value: r.taxes.fedTax,   color: '#ff7a7a' },
-    { label: 'FICA',        value: r.taxes.ssTax + r.taxes.medTax + r.taxes.addlMedTax, color: '#f0b957' },
-    { label: 'CA tax',      value: r.taxes.stateTax, color: '#ff9ec4' },
-    { label: 'CA SDI',      value: r.taxes.sdiTax,   color: '#e66d9a' },
-    { label: 'WA PFML',     value: r.taxes.waPfmlTax || 0,  color: '#ff9ec4' },
-    { label: 'WA Cares',    value: r.taxes.waCaresTax || 0, color: '#e66d9a' },
+    { label: 'Take-home',   value: r.cash.takeHome,  color: 'var(--cat-takehome)' },
+    { label: '401(k) Trad', value: r.cash.trad401k,  color: 'var(--cat-trad401k)' },
+    { label: '401(k) Roth', value: r.cash.roth401k,  color: 'var(--cat-roth401k)' },
+    { label: 'Roth IRA',    value: r.cash.rothIra || 0, color: 'var(--cat-rothira)' },
+    { label: 'HSA',         value: r.cash.hsa,       color: 'var(--cat-hsa)' },
+    { label: 'EE Stock',    value: r.cash.eeStock,   color: 'var(--cat-eestock)' },
+    { label: 'Fed tax',     value: r.taxes.fedTax,   color: 'var(--cat-fedtax)' },
+    { label: 'FICA',        value: r.taxes.ssTax + r.taxes.medTax + r.taxes.addlMedTax, color: 'var(--cat-fica)' },
+    { label: 'CA tax',      value: r.taxes.stateTax, color: 'var(--cat-statetax)' },
+    { label: 'CA SDI',      value: r.taxes.sdiTax,   color: 'var(--cat-statedis)' },
+    { label: 'WA PFML',     value: r.taxes.waPfmlTax || 0,  color: 'var(--cat-statetax)' },
+    { label: 'WA Cares',    value: r.taxes.waCaresTax || 0, color: 'var(--cat-statedis)' },
   ].filter(s => s.value > 0);
   const tot = segments.reduce((a, s) => a + s.value, 0) || 1;
   $('barBreakdown').innerHTML = segments.map(s =>
@@ -2856,15 +3163,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   updateLimitHints();
+  applyDisclaimerVisibility();
 
   $('btnPrint').onclick = () => window.print();
   $('btnExport').onclick = () => doBackup('full');
+  // Mutual exclusion for the two header popups (backup caret + settings gear): opening one
+  // must close the other. Both toggle buttons call e.stopPropagation(), so a click that opens
+  // one never reaches the other popup's own outside-click listener — without this, both could
+  // be open at once. Looked up by id rather than shared closures so it works regardless of
+  // which popup's init block runs first; each popup's own stopPropagation/Escape/outside-click/
+  // focus-return handling is untouched.
+  function closeAllHeaderPopups() {
+    const bp = $('backup_popup'), bm = $('btnBackupMenu');
+    if (bp && bm && !bp.hidden) { bp.hidden = true; bm.setAttribute('aria-expanded', 'false'); }
+    const sp = $('settings_popup'), sg = $('btnSettings');
+    if (sp && sg && !sp.hidden) { sp.hidden = true; sg.setAttribute('aria-expanded', 'false'); }
+  }
   // Header split-button popup: selective backups (Everything/Actuals/Settings) + CSV analysis
   // export. The single home for both — Actuals → Manage used to duplicate this UI.
   { const menuBtn = $('btnBackupMenu'), popup = $('backup_popup');
     if (menuBtn && popup) {
       const closeBackupPopup = () => { popup.hidden = true; menuBtn.setAttribute('aria-expanded', 'false'); };
       const openBackupPopup = () => {
+        closeAllHeaderPopups();
         // "Everything" is preselected every time the popup opens — the scope choice never
         // carries over from a prior open.
         const fullRadio = popup.querySelector('input[name="backup_scope"][value="full"]');
@@ -2891,6 +3212,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btnReset').onclick = reset;
   $('btnImport').onclick = () => $('fileImport').click();
   $('fileImport').onchange = e => { if (e.target.files[0]) importJSON(e.target.files[0]); };
+  // Settings popup (gear): mirrors the backup-popup pattern above exactly, with two deltas —
+  // DELTA 1: outside-click uses gear.contains(e.target) (not e.target !== gear) so clicks on
+  // an icon/child inside the gear button don't fall through and close it. DELTA 2: any button
+  // click inside the popup closes it (menu-style dismissal) since every item here is a
+  // one-shot action (Print/Restore/disclaimer toggle/Reset), unlike the backup popup's
+  // multi-step scope selection.
+  { const gear = $('btnSettings'), spopup = $('settings_popup');
+    if (gear && spopup) {
+      const closeSettingsPopup = () => { spopup.hidden = true; gear.setAttribute('aria-expanded', 'false'); };
+      const openSettingsPopup = () => {
+        closeAllHeaderPopups();
+        const dt = $('btnDisclaimerToggle');
+        if (dt) dt.textContent = isDisclaimerDismissed() ? 'Show disclaimer' : 'Hide disclaimer';
+        spopup.hidden = false; gear.setAttribute('aria-expanded', 'true');
+      };
+      gear.onclick = e => { e.stopPropagation(); if (spopup.hidden) openSettingsPopup(); else closeSettingsPopup(); };
+      document.addEventListener('click', e => { if (!spopup.hidden && !spopup.contains(e.target) && !gear.contains(e.target)) closeSettingsPopup(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !spopup.hidden) { closeSettingsPopup(); gear.focus(); } });
+      spopup.addEventListener('click', e => { if (e.target.closest('button')) closeSettingsPopup(); });
+    }
+  }
+  { const x = $('btnDisclaimerX'); if (x) x.onclick = () => { setDisclaimerDismissed(true); applyDisclaimerVisibility(); }; }
+  { const t = $('btnDisclaimerToggle'); if (t) t.onclick = () => { setDisclaimerDismissed(!isDisclaimerDismissed()); applyDisclaimerVisibility(); }; }
   { const b = document.getElementById('wi_broken_discard_btn'); if (b) b.onclick = () => {
       try { localStorage.removeItem(WI_SESSION_KEY); } catch (e) {}
       const el = document.getElementById('wi_broken_banner'); if (el) el.hidden = true;
@@ -3002,7 +3346,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const bs = window.__budgetSummary, pj = window.__projResult, au = window.__autoResult;
 
     let h = '<h2 style="margin:0 0 12px">Your money picture</h2>';
-    h += '<div class="tiles"><div class="tile good"><div class="k">Annual take-home</div><div class="v" style="font-size:24px">' + f$(take) + '</div><div class="s">' + f$(take / 12) + '/mo · from ' + f$(comp) + ' total comp</div></div></div>';
+    h += '<div class="tiles"><div class="tile good"><div class="k">Annual take-home</div><div class="v" style="font-size:var(--fs-2xl);font-variant-numeric:tabular-nums">' + f$(take) + '</div><div class="s">' + f$(take / 12) + '/mo · from ' + f$(comp) + ' total comp</div></div></div>';
     h += '<div class="tiles">'
       + '<div class="tile"><div class="k">Total comp</div><div class="v">' + f$(comp) + '</div></div>'
       + '<div class="tile"><div class="k">Taxes</div><div class="v">' + f$(taxTot) + '</div><div class="s">' + (eff * 100).toFixed(1) + '% effective</div></div>'
@@ -3011,7 +3355,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             : '<div class="tile"><div class="k">Net worth</div><div class="v muted">—</div><div class="s"><a href="#" data-go="invest">project it →</a></div></div>')
       + '</div>';
 
-    h += '<div class="note-box" style="font-size:13px">You earn <b>' + f$(comp) + '</b> → keep <b>' + f$(take) + '</b> after <b>' + f$(taxTot) + '</b> tax → invest <b>' + f$(invest) + '</b>/yr'
+    h += '<div class="note-box" style="font-size:var(--fs-md)">You earn <b>' + f$(comp) + '</b> → keep <b>' + f$(take) + '</b> after <b>' + f$(taxTot) + '</b> tax → invest <b>' + f$(invest) + '</b>/yr'
       + (pj ? ' → about <b>' + f$(pj.totals.futureValue) + '</b> in ' + pj.years + ' years.' : '.') + '</div>';
 
     const base3 = (take + taxTot + invest) || 1;
@@ -3114,8 +3458,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const fadeCol = (p.verdict === 'over' || p.verdict === 'over_budget') ? 'var(--bad)' : 'var(--good)';
     const hatch = 'repeating-linear-gradient(45deg,rgba(138,146,166,.5) 0,rgba(138,146,166,.5) 2px,transparent 2px,transparent 7px)';
     const cul = p.culprit ? ' · biggest driver: <span style="color:' + (KINDS[p.culprit.bucket] ? KINDS[p.culprit.bucket].color : 'var(--muted)') + '">●</span> ' + esc(KINDS[p.culprit.bucket] ? KINDS[p.culprit.bucket].label : p.culprit.bucket) + ' (~' + r25(p.culprit.gap) + ' over)' : '';
-    el.innerHTML = '<div class="subhead" style="display:flex;justify-content:space-between"><span>Am I on track this month?</span><span class="mini muted" style="font-weight:400">' + (typeof acMonthLabel === 'function' ? acMonthLabel(month) : month) + ' · day ' + p.day + '/' + p.daysInMonth + '</span></div>'
-      + '<div class="tiles" style="margin-bottom:8px"><div class="tile ' + tileClass + '"><div class="v" style="font-size:15px">' + head + '</div><div class="s" style="font-size:12px;line-height:1.5">' + sub + '</div></div></div>'
+    el.innerHTML = '<div class="subhead" style="display:flex;justify-content:space-between"><span>Am I on track this month?</span><span class="mini muted" style="font-weight:var(--fw-normal)">' + (typeof acMonthLabel === 'function' ? acMonthLabel(month) : month) + ' · day ' + p.day + '/' + p.daysInMonth + '</span></div>'
+      + '<div class="tiles" style="margin-bottom:8px"><div class="tile ' + tileClass + '"><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + head + '</div><div class="s" style="font-size:var(--fs-sm);line-height:1.5">' + sub + '</div></div></div>'
       + '<div style="position:relative;height:14px;background:var(--chip);border-radius:5px;overflow:hidden;display:flex">'
       + '<span style="width:' + wSolid + '%;background:' + fadeCol + '"></span>'
       + '<span style="width:' + wHatch + '%;background:' + hatch + '"></span>'
@@ -3175,10 +3519,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">'
       + ticks
-      + '<path d="' + cone + '" fill="var(--accent)" fill-opacity="0.16" stroke="none"/>'
-      + '<polyline points="' + pts('high') + '" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>'
-      + '<polyline points="' + pts('low') + '" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>'
-      + '<polyline points="' + pts('mid') + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>'
+      + '<path class="nw-cone-fill" d="' + cone + '" fill="var(--accent)" fill-opacity="0.16" stroke="none"/>'
+      + '<polyline class="nw-cone-line" points="' + pts('high') + '" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>'
+      + '<polyline class="nw-cone-line" points="' + pts('low') + '" fill="none" stroke="var(--accent)" stroke-width="1" opacity="0.5"/>'
+      + '<polyline class="nw-cone-line" points="' + pts('mid') + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>'
       + '<circle cx="' + x(0) + '" cy="' + Y(yby[0].mid) + '" r="3.5" fill="var(--good)"/>'
       + realSvg
       + targetLineSvg
@@ -3213,7 +3557,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<div class="legend" style="margin:8px 0 2px"><span><span class="sw" style="background:var(--good)"></span>Today ' + f$(cur) + '</span><span><span class="sw" style="background:var(--accent)"></span>Forecast (dotted)</span><span>Shaded band = ' + (ret * 100 - band * 100).toFixed(1) + '%–' + (ret * 100 + band * 100).toFixed(1) + '% returns</span></div>';
       h += '<div class="tiles" style="margin-top:8px">'
         + '<div class="tile good"><div class="k">In ' + yrs + ' yr</div><div class="v">' + f$(f.mid) + '</div><div class="s">expected</div></div>'
-        + '<div class="tile"><div class="k">Range</div><div class="v" style="font-size:13px">' + f$(f.low) + ' – ' + f$(f.high) + '</div></div>'
+        + '<div class="tile"><div class="k">Range</div><div class="v" style="font-size:var(--fs-md);font-variant-numeric:tabular-nums">' + f$(f.low) + ' – ' + f$(f.high) + '</div></div>'
         + '<div class="tile"><div class="k">You put in</div><div class="v">' + f$(cur + r.totalContributed) + '</div><div class="s">' + f$(ann) + '/yr from ' + f$(cur) + '</div></div>'
         + '<div class="tile good"><div class="k">Growth</div><div class="v">' + f$(r.totalGrowthMid) + '</div></div>'
         + '</div>';
@@ -3480,10 +3824,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = VN.ventures.map(v => {
       const r = v.roi || {};
       const link = v.tag != null
-        ? '<span class="chip" style="font-size:11px">#' + esc(v.tag) + ' · ' + v.txnCount + ' txns</span>'
+        ? '<span class="chip" style="font-size:var(--fs-xs)">#' + esc(v.tag) + ' · ' + v.txnCount + ' txns</span>'
         : v.accountId != null
-          ? '<span class="chip" style="font-size:11px">' + esc(vnAcctName(v.accountId)) + ' · ' + v.txnCount + ' txns</span>'
-          : '<span class="chip bad-text" style="font-size:11px">link broken — the linked account was removed</span>';
+          ? '<span class="chip" style="font-size:var(--fs-xs)">' + esc(vnAcctName(v.accountId)) + ' · ' + v.txnCount + ' txns</span>'
+          : '<span class="chip bad-text" style="font-size:var(--fs-xs)">link broken — the linked account was removed</span>';
       const pct = Math.round(Math.max(0, Math.min(1, r.pct || 0)) * 100);
       const tm = (v.byMonth || {})[nowMonth] || { revenue: 0, cost: 0 };
       const items = v.items.map(i => esc(i.label) + ' ' + vnMoney(i.amount)).join(' · ');
@@ -3499,7 +3843,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<div class="mini muted" style="margin-top:3px">' + items + '</div>'
         + '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'
         + '<div style="flex:1;height:6px;background:var(--line);border-radius:4px;overflow:hidden"><div style="height:6px;width:' + pct + '%;background:var(--good)"></div></div>'
-        + '<span style="font-size:11px;white-space:nowrap">' + vnMoney(Math.max(0, r.recovered || 0)) + ' / ' + vnMoney(r.invested || v.invested) + ' (' + pct + '%)</span></div>'
+        + '<span style="font-size:var(--fs-xs);white-space:nowrap">' + vnMoney(Math.max(0, r.recovered || 0)) + ' / ' + vnMoney(r.invested || v.invested) + ' (' + pct + '%)</span></div>'
         + '<div style="overflow-x:auto"><table class="res-table" style="margin-top:6px;max-width:430px"><tr><th></th><th class="num">This month</th><th class="num">Total</th></tr>'
         + '<tr><td>Revenue</td><td class="num good-text">+' + vnMoney(tm.revenue) + '</td><td class="num good-text">+' + vnMoney(r.revenue || 0) + '</td></tr>'
         + '<tr><td>Running costs</td><td class="num">−' + vnMoney(tm.cost) + '</td><td class="num">−' + vnMoney(r.costs || 0) + '</td></tr>'
@@ -3589,8 +3933,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const src = g.accountId != null ? (glAcctName(g.accountId) || ('account #' + g.accountId)) : 'manual';
       const pace = p.onPace == null ? ''
         : p.onPace
-          ? ' <span class="good-text" style="font-size:11px">▲ ' + glMoney(Math.abs(p.aheadOfPace)) + ' ahead</span>'
-          : ' <span class="bad-text" style="font-size:11px">▼ ' + glMoney(Math.abs(p.aheadOfPace)) + ' behind</span>';
+          ? ' <span class="good-text" style="font-size:var(--fs-xs)">▲ ' + glMoney(Math.abs(p.aheadOfPace)) + ' ahead</span>'
+          : ' <span class="bad-text" style="font-size:var(--fs-xs)">▼ ' + glMoney(Math.abs(p.aheadOfPace)) + ' behind</span>';
       const ask = !g.progress ? '<span class="muted">progress unavailable</span>'
         : p.done ? '<span class="good-text">reached ✓</span>'
         : p.overdue ? '<span class="bad-text">past due — ' + glMoney(p.remaining) + ' still to save</span>'
@@ -3604,7 +3948,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<a href="#" class="gl-act gl-act-del" data-gl-del="' + g.id + '" title="delete">✕</a></span></div>'
         + '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'
         + '<div style="flex:1;height:6px;background:var(--line);border-radius:4px;overflow:hidden"><div style="height:6px;width:' + pct + '%;background:var(--good)"></div></div>'
-        + '<span style="font-size:11px;white-space:nowrap">' + glMoney(p.saved != null ? p.saved : g.saved) + ' / ' + glMoney(g.target) + ' (' + pct + '%)' + pace + '</span></div>'
+        + '<span style="font-size:var(--fs-xs);white-space:nowrap">' + glMoney(p.saved != null ? p.saved : g.saved) + ' / ' + glMoney(g.target) + ' (' + pct + '%)' + pace + '</span></div>'
         + '<div class="mini" style="margin-top:5px">' + ask + '</div>'
         + '</div>';
     }).join('');
@@ -3654,8 +3998,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let h = '<div style="overflow-x:auto"><table class="res-table"><tr><th></th><th class="num">' + esc(r.inputs.txRegionLabel) + '</th><th class="num">' + esc(r.inputs.waRegionLabel) + '</th><th class="num">Δ WA−TX</th></tr>';
     r.lines.forEach(ln => {
       let lab = esc(ln.label);
-      if (ln.key === 'payroll' && ln.wa > 0) lab += '<br><span class="muted" style="font-size:11px">PFML ' + sxMoney(ln.detail.pfml) + ' + WA Cares ' + sxMoney(ln.detail.waCares) + '</span>';
-      if (ln.key === 'salesTax' || ln.key === 'propertyTax') lab += ' <span class="muted" style="font-size:11px">(' + sxPct(ln.detail.txRate) + ' / ' + sxPct(ln.detail.waRate) + ')</span>';
+      if (ln.key === 'payroll' && ln.wa > 0) lab += '<br><span class="muted" style="font-size:var(--fs-xs)">PFML ' + sxMoney(ln.detail.pfml) + ' + WA Cares ' + sxMoney(ln.detail.waCares) + '</span>';
+      if (ln.key === 'salesTax' || ln.key === 'propertyTax') lab += ' <span class="muted" style="font-size:var(--fs-xs)">(' + sxPct(ln.detail.txRate) + ' / ' + sxPct(ln.detail.waRate) + ')</span>';
       const cls = ln.delta > 0.005 ? 'bad-text' : (ln.delta < -0.005 ? 'good-text' : '');
       h += '<tr><td>' + lab + '</td><td class="num">' + sxMoney(ln.tx) + '</td><td class="num">' + sxMoney(ln.wa) + '</td><td class="num ' + cls + '">' + (ln.delta >= 0 ? '+' : '') + sxMoney(ln.delta) + '</td></tr>';
     });
@@ -3728,7 +4072,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       let h = '';
       if (r.plan && r.plan.length) {
         const first = r.plan[0];
-        h += '<div class="tiles"><div class="tile good"><div class="k">Next best dollar</div><div class="v" style="font-size:15px">' + first.bucket + ' · ' + f$(first.amount) + '</div><div class="s">' + (first.rationale || first.accountType || '') + '</div></div></div>';
+        h += '<div class="tiles"><div class="tile good"><div class="k">Next best dollar</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + first.bucket + ' · ' + f$(first.amount) + '</div><div class="s">' + (first.rationale || first.accountType || '') + '</div></div></div>';
         h += '<table class="res-table"><tr><th>Step</th><th>Amount</th><th>Account</th></tr>';
         r.plan.forEach((p, i) => { h += '<tr><td>' + (i + 1) + '. ' + p.bucket + '</td><td class="num">' + f$(p.amount) + '</td><td>' + p.accountType + ' (' + p.taxTreatment + ')</td></tr>'; });
         h += '</table><div class="note-box">' + r.plan.map(p => '<b>' + p.bucket + ':</b> ' + p.rationale).join('<br>') + '</div>';
@@ -3737,7 +4081,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const tr = r.tradVsRoth;
       if (tr && tr.recommend) {
         const basis = tr.retireRateBasis === 'effective' ? 'effective' : 'marginal';
-        h += '<div class="subhead">Traditional vs Roth</div><div class="tile ' + (tr.recommend === 'roth' ? 'good' : '') + '" style="margin:4px 0"><div class="k">Recommended</div><div class="v" style="font-size:15px;text-transform:capitalize">' + tr.recommend + '</div><div class="s">now ' + (tr.nowMarginal * 100).toFixed(0) + '% marginal vs retirement ' + (tr.retireRate * 100).toFixed(0) + '% ' + basis + '</div></div>'
+        h += '<div class="subhead">Traditional vs Roth</div><div class="tile ' + (tr.recommend === 'roth' ? 'good' : '') + '" style="margin:4px 0"><div class="k">Recommended</div><div class="v" style="font-size:var(--fs-lg);text-transform:capitalize;font-variant-numeric:tabular-nums">' + tr.recommend + '</div><div class="s">now ' + (tr.nowMarginal * 100).toFixed(0) + '% marginal vs retirement ' + (tr.retireRate * 100).toFixed(0) + '% ' + basis + '</div></div>'
           + '<div class="note-box">' + tr.rationale + '</div>';
       }
       h += warns((r.warnings || []).map(w => w.rationale || JSON.stringify(w)));
@@ -4423,19 +4767,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       let h = '<div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px">';
       cats.forEach(c => {
         if (c.key === catEditKey && !c.locked) {
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0">'
+          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(c.color) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
             + '<input id="' + esc(id) + '_editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '" style="flex:1;min-width:0">'
-            + '<button class="bgb-x" data-savecat="' + esc(id) + '" title="save" aria-label="save" style="font-size:11px;padding:1px 6px;color:var(--accent)">&#10003;</button>'
-            + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:11px;padding:1px 6px">&#10005;</button>'
+            + '<button class="bgb-x" data-savecat="' + esc(id) + '" title="save" aria-label="save" style="font-size:var(--fs-xs);padding:1px 6px;color:var(--accent)">&#10003;</button>'
+            + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:var(--fs-xs);padding:1px 6px">&#10005;</button>'
             + '</div>';
         } else {
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;padding:2px 0">'
+          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
             + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + c.color + ';vertical-align:middle"></span>'
             + '<span style="flex:1">' + esc(c.label) + '</span>'
-            + (c.locked ? '<span style="font-size:10px;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)">built-in</span>' : '')
-            + (c.locked ? '' : '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="edit ' + esc(c.label) + '" aria-label="edit ' + esc(c.label) + '" style="font-size:11px;padding:1px 6px">&#9998;</button>')
-            + (c.locked ? '' : '<button class="bgb-x" data-delcat="' + esc(c.key) + '" title="delete ' + esc(c.label) + '" style="font-size:11px;padding:1px 6px">&#215;</button>')
+            + (c.locked ? '<span style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)">built-in</span>' : '')
+            + (c.locked ? '' : '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="edit ' + esc(c.label) + '" aria-label="edit ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#9998;</button>')
+            + (c.locked ? '' : '<button class="bgb-x" data-delcat="' + esc(c.key) + '" title="delete ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#215;</button>')
             + '</div>';
         }
       });
@@ -4763,9 +5107,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.__budgetPlan = { kindMonthly: { ...kindT }, lines: planLines, aliases: bgb.catAliases || {}, incomeBase: incomeBase, savingsTarget: _invTgt, strategy: bgb.strategy,
         partnerSplits: { household: Math.round(household * 100) / 100, yourShare: Math.round(allocated * 100) / 100, partner: Math.round(Math.max(0, partner) * 100) / 100 } };
       bgbRenderAliasGroups(); bgbFillAliasTargets();
-      let cs = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:15px">Investing ' + (_invPct * 100).toFixed(0) + '% of after-tax income — ' + (_invPct >= _invTgt ? 'at or above' : 'below') + ' the ' + (_invTgt * 100).toFixed(0) + '% target</div><div class="s">vs ' + esc(bgb.strategy) + '</div></div></div>';
+      let cs = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Investing ' + (_invPct * 100).toFixed(0) + '% of after-tax income — ' + (_invPct >= _invTgt ? 'at or above' : 'below') + ' the ' + (_invTgt * 100).toFixed(0) + '% target</div><div class="s">vs ' + esc(bgb.strategy) + '</div></div></div>';
       // 1) By type vs the selected strategy — per-paycheck + monthly + yearly + target + Δ
-      cs += '<div class="subhead">By type vs <b>' + esc(bgb.strategy) + '</b> <span class="mini" style="font-weight:400">(% of after-tax income · pp = per paycheck, ' + pf + '×/yr)</span></div>'
+      cs += '<div class="subhead">By type vs <b>' + esc(bgb.strategy) + '</b> <span class="mini" style="font-weight:var(--fw-normal)">(% of after-tax income · pp = per paycheck, ' + pf + '×/yr)</span></div>'
         + '<table class="res-table"><tr><th>Type</th><th>/ pp</th><th>/ mo</th><th>/ yr</th><th>%</th><th>Target</th><th>Δ</th></tr>';
       order.forEach(k => {
         const tot = kindT[k] || 0; if (tot <= 0 && T[k] == null) return;
@@ -4789,7 +5133,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       order.forEach(k => {
         const tot = kindT[k] || 0; if (tot <= 0) return;
         const w = incomeBase > 0 ? Math.min(100, tot / incomeBase * 100) : 0;
-        cs += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px">'
+        cs += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-xs)">'
           + '<span style="width:74px;color:var(--muted)">' + esc(KINDS[k].label) + '</span>'
           + '<span style="flex:1;background:var(--chip);border-radius:4px;overflow:hidden"><span style="display:block;height:11px;width:' + w + '%;background:' + KINDS[k].color + '"></span></span>'
           + '<span style="width:48px;text-align:right">' + pctOf(tot) + '</span></div>';
@@ -5521,7 +5865,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '</table>';
       const yy = r.yearByYear, maxv = yy.length ? yy[yy.length - 1].value : 1;
       if (yy.length) { h += '<div class="subhead">Growth over time</div>';
-        [5, 10, 15, 20, 25, 30, 35, 40].filter(y => y <= yy.length).forEach(y => { const v = yy[y - 1].value, w = Math.max(1, Math.round(100 * v / maxv)); h += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:11px"><span style="width:40px;color:var(--muted)">Yr ' + y + '</span><span style="display:inline-block;height:9px;background:var(--accent);border-radius:3px;width:' + w + '%"></span><span>' + f$(v) + '</span></div>'; }); }
+        [5, 10, 15, 20, 25, 30, 35, 40].filter(y => y <= yy.length).forEach(y => { const v = yy[y - 1].value, w = Math.max(1, Math.round(100 * v / maxv)); h += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:var(--fs-xs)"><span style="width:40px;color:var(--muted)">Yr ' + y + '</span><span style="display:inline-block;height:9px;background:var(--accent);border-radius:3px;width:' + w + '%"></span><span>' + f$(v) + '</span></div>'; }); }
       $('pj_out').innerHTML = h;
     } catch (e) { $('pj_out').innerHTML = '<div class="warn-box">Error: ' + (e.message || e) + '</div>'; }
   }
@@ -5737,7 +6081,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ACT.tagState.forEach(t => {
       const chip = document.createElement('span');
       chip.className = 'ac-tagchip';
-      chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:var(--chip);border-radius:10px;padding:1px 7px;font-size:11px';
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:var(--chip);border-radius:10px;padding:1px 7px;font-size:var(--fs-xs)';
       chip.innerHTML = esc(t) + ' <a href="#" data-untag="' + esc(t) + '" style="text-decoration:none;color:var(--muted)">×</a>';
       box.insertBefore(chip, input);
     });
@@ -5806,7 +6150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acSplitRow(t) {
     const legs = t.splits.map(s => '<span style="white-space:nowrap"><span style="color:' + ((KINDS[s.bucket] || {}).color || 'var(--muted)') + '">●</span> ' + esc(KINDS[s.bucket] ? KINDS[s.bucket].label : (s.bucket || '—')) + ' ' + acAmt(s.amount) + '</span>').join(' · ');
     const tagHtml = (t.tags && t.tags.length) ? ' ' + t.tags.map(tg => '<span class="ac-tag">' + esc(tg) + '</span>').join(' ') : '';
-    const partnerBadge = t.partnerOwed > 0 ? ' <span class="muted" style="font-size:10px;border:1px solid var(--line);border-radius:4px;padding:0 4px">&#8617; ' + acAmt(t.partnerOwed) + '</span>' : '';
+    const partnerBadge = t.partnerOwed > 0 ? ' <span class="muted" style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:4px;padding:0 4px">&#8617; ' + acAmt(t.partnerOwed) + '</span>' : '';
     return '<tr data-row-tx="' + t.id + '"><td>' + t.postedOn.slice(5) + '</td><td>out</td>'
       + '<td><span class="muted">split</span></td>'
       + '<td>' + (t.category ? esc(t.category) + ' ' : '') + '<span class="mini">' + legs + '</span>' + tagHtml + '</td>'
@@ -6155,7 +6499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const amt = m.count > 0 ? acAmt(m.actual) : (planned ? acAmt(planned) : '—');
         const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
         rows += '<tr><td><span class="' + cls + '">' + icon + '</span> ' + esc(r.category) + ' <span class="mini muted">' + where + '</span></td>'
-          + '<td class="num">' + amt + sub + '</td><td class="' + cls + '" style="font-size:11px">' + label + '</td></tr>';
+          + '<td class="num">' + amt + sub + '</td><td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td></tr>';
       });
       el.innerHTML = '<div class="mini" style="margin-bottom:6px"><span class="good-text">✓ ' + recv + '</span> came through · <span class="muted">⏳ ' + pend + '</span> pending · <span class="bad-text">⚠ ' + miss + '</span> missing</div>'
         + '<table class="res-table">' + rows + '</table>';
@@ -6178,7 +6522,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<div class="subhead" style="margin-top:8px"><span style="color:' + (KINDS[kind] ? KINDS[kind].color : '') + '">●</span> ' + esc(KINDS[kind] ? KINDS[kind].label : kind) + '</div>';
       lines.forEach(o => {
         const r = recByKey['out|' + kind + '|' + o.name.toLowerCase()], tracked = !!r;
-        h += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px;flex-wrap:wrap">'
+        h += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-sm);flex-wrap:wrap">'
           + '<label style="display:flex;align-items:center;gap:5px;min-width:150px;cursor:pointer"><input type="checkbox" data-rectoggle="' + esc(kind) + '|' + esc(o.name) + '" data-planned="' + o.planned + '"' + (tracked ? ' checked' : '') + ' style="width:auto"> ' + esc(o.name) + '</label>'
           + '<span class="mini muted">' + acAmt(o.planned) + '/mo</span>'
           + (tracked ? ' · due day <input type="number" min="1" max="31" value="' + (r.dueDay || '') + '" data-recday="' + r.id + '" style="width:48px">' : '')
@@ -6202,7 +6546,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const c = data.comparison, sr = c.savingsRate;
     const ok = sr.actual >= sr.planned * 0.95;
-    let h = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (ok ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:15px">Invested ' + acAmt(c.buckets.investment.actual) + ' of ' + acAmt(c.buckets.investment.planned) + ' — saved ' + (sr.actual * 100).toFixed(0) + '% vs ' + (sr.planned * 100).toFixed(0) + '% plan</div><div class="s">' + acMonthLabel(ACT.month) + (data.planStatus === 'draft' ? ' · draft plan' : '') + '</div></div></div>';
+    let h = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (ok ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Invested ' + acAmt(c.buckets.investment.actual) + ' of ' + acAmt(c.buckets.investment.planned) + ' — saved ' + (sr.actual * 100).toFixed(0) + '% vs ' + (sr.planned * 100).toFixed(0) + '% plan</div><div class="s">' + acMonthLabel(ACT.month) + (data.planStatus === 'draft' ? ' · draft plan' : '') + '</div></div></div>';
     // Compute each bucket's partner total from local txns (same apportionment logic as acActualByCat).
     const partnerByBucket = {};
     (ACT.txns || []).forEach(t => {
@@ -6238,10 +6582,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const yourVariance = k === 'investment' ? yourBucketActual - b.planned : b.planned - yourBucketActual;
       const dcls = k === 'investment' ? (yourVariance >= 0 ? 'good-text' : 'bad-text') : (yourVariance <= 0 ? 'good-text' : 'bad-text');
       const pct = b.planned > 0 ? (yourBucketActual / b.planned * 100).toFixed(0) + '%' : (yourBucketActual > 0 ? 'no budget' : '—');
-      const partnerNote = bucketPartner > 0 ? ' <span class="muted" style="font-size:10px">· partner covers ' + acAmt(bucketPartner) + '</span>' : '';
+      const partnerNote = bucketPartner > 0 ? ' <span class="muted" style="font-size:var(--fs-2xs)">· partner covers ' + acAmt(bucketPartner) + '</span>' : '';
       const dotSpan = bucketPartner > 0 ? '<span style="display:block;height:8px;width:' + partnerW + '%;background:repeating-linear-gradient(45deg,rgba(138,146,166,0.55) 0,rgba(138,146,166,0.55) 2px,transparent 2px,transparent 7px)"></span>' : '';
       h += '<div style="margin:6px 0">'
-        + '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px"><span><span style="color:' + kc + '">●</span> ' + klabel + '</span><span>' + acAmt(yourBucketActual) + partnerNote + ' / ' + acAmt(b.planned) + ' · ' + pct + ' · <span class="' + dcls + '">' + (yourVariance >= 0 ? '+' : '') + acAmt(yourVariance) + '</span></span></div>'
+        + '<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);margin-bottom:2px"><span><span style="color:' + kc + '">●</span> ' + klabel + '</span><span>' + acAmt(yourBucketActual) + partnerNote + ' / ' + acAmt(b.planned) + ' · ' + pct + ' · <span class="' + dcls + '">' + (yourVariance >= 0 ? '+' : '') + acAmt(yourVariance) + '</span></span></div>'
         + '<span style="display:flex;background:var(--chip);border-radius:4px;overflow:hidden;height:8px"><span style="display:block;height:8px;width:' + solidW + '%;background:' + fill + '"></span>' + dotSpan + '</span>'
         + (k === 'uncategorized' ? '' : acLineRows(k))
         + '</div>';
@@ -6394,7 +6738,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!(Math.abs(net) > EPS || ear > EPS)) return;
         const color = colorForBucket(b);
         const label = KINDS[b] ? KINDS[b].label : b;
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;padding:2px 0;border-bottom:1px solid var(--line-faint)">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
         h += '<span><span style="color:' + color + '">●</span> ' + esc(label) + '</span>';
         if (net < -EPS) {
           h += '<span class="ac-pay-credit">' + acAmt(-net) + ' credit</span>';
@@ -6403,32 +6747,32 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         h += '</div>';
         if (ear > EPS) {
-          h += '<div style="display:flex;justify-content:space-between;font-size:11px;padding:1px 0 3px 12px;border-bottom:1px solid var(--line-faint)">';
+          h += '<div style="display:flex;justify-content:space-between;font-size:var(--fs-xs);padding:1px 0 3px 12px;border-bottom:1px solid var(--line-faint)">';
           h += '<span style="color:var(--muted)">− earmarked payment</span>';
           h += '<span style="color:var(--good)">−' + acAmt(ear) + '</span>';
           h += '</div>';
         }
       });
       if (uncatOwed > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;padding:2px 0;border-bottom:1px solid var(--line-faint)">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
         h += '<span style="color:var(--muted)">Uncategorized</span>';
         h += '<span>' + acAmt(uncatOwed) + '</span>';
         h += '</div>';
       }
       if (generalPaidPrior > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;padding:2px 0;border-bottom:1px solid var(--line-faint)">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
         h += '<span style="color:var(--muted)">− whole-card payments (earlier)</span>';
         h += '<span style="color:var(--good)">−' + acAmt(generalPaidPrior) + '</span>';
         h += '</div>';
       }
       if (generalPaidMonth > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;padding:2px 0;border-bottom:1px solid var(--line-faint)">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
         h += '<span style="color:var(--muted)">− whole-card payment (this month)</span>';
         h += '<span style="color:var(--good)">−' + acAmt(generalPaidMonth) + '</span>';
         h += '</div>';
       }
       // Net owed (bold summary row)
-      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;padding:4px 0;font-weight:700">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:4px 0;font-weight:var(--fw-bold)">';
       h += '<span>Net owed</span>';
       if (rc > EPS) {
         h += '<span><span class="ac-pay-paidoff">✓ Paid off</span> <span class="ac-pay-credit">' + acAmt(rc) + ' credit</span></span>';
@@ -6459,7 +6803,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           const earmarkLabel = pmt.bucket ? (KINDS[pmt.bucket] ? KINDS[pmt.bucket].label : pmt.bucket) : 'whole card';
           const fundingLeg = (ACT.txns || []).find(t => pmt.transferGroup && t.transferGroup === pmt.transferGroup && t.direction === 'out');
           const fundingName = fundingLeg ? acAcctName(fundingLeg.accountId) : null;
-          h += '<div id="ac_pay_row_' + pmt.id + '" style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--line-faint)">';
+          h += '<div id="ac_pay_row_' + pmt.id + '" style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:3px 0;border-bottom:1px solid var(--line-faint)">';
           h += '<span style="color:var(--muted);min-width:38px;flex-shrink:0">' + (pmt.postedOn || '').slice(5) + '</span>';
           h += '<span style="flex:1;min-width:0"><b>' + acAmt(pmt.amount) + '</b>';
           h += ' <span style="color:var(--muted)">· ' + esc(earmarkLabel) + (fundingName ? ' · from ' + esc(fundingName) : '') + '</span></span>';
@@ -6552,14 +6896,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const allTags = [...new Set(txns.flatMap(t => t.tags || []))].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
     let bar = '';
     if (ACT.acctFilter != null) {
-      bar = '<div style="margin-bottom:8px;font-size:11px"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-acctclear="1">' + esc('Card: ' + acAcctName(ACT.acctFilter)) + ' ✕</a></div>';
+      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-acctclear="1">' + esc('Card: ' + acAcctName(ACT.acctFilter)) + ' ✕</a></div>';
     } else if (ACT.catFilter) {
       const cf = ACT.catFilter;
       const kindLabel = KINDS[cf.kind] ? KINDS[cf.kind].label : cf.kind;
       const chipLabel = cf.name ? 'Category: ' + cf.name : 'Unplanned (' + kindLabel + ')';
-      bar = '<div style="margin-bottom:8px;font-size:11px"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-catclear="1">' + esc(chipLabel) + ' ✕</a></div>';
+      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-catclear="1">' + esc(chipLabel) + ' ✕</a></div>';
     } else if (allTags.length) {
-      bar = '<div style="margin-bottom:8px;font-size:11px"><span class="muted">Filter by tag:</span> '
+      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter by tag:</span> '
         + '<a href="#" data-tagfilter="" class="ac-tag' + (!ACT.tagFilter ? ' is-active' : '') + '" style="margin:0 4px">all</a>'
         + allTags.map(tg => '<a href="#" data-tagfilter="' + esc(tg) + '" class="ac-tag' + (ACT.tagFilter === tg ? ' is-active' : '') + '" style="margin:0 2px">' + esc(tg) + '</a>').join('')
         + '</div>';
@@ -6583,11 +6927,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acBucketPill(bucket) {
     if (!bucket) return '<span class="muted">—</span>';
     const c = KINDS[bucket] ? KINDS[bucket].color : 'var(--muted)', lab = KINDS[bucket] ? KINDS[bucket].label : bucket;
-    return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;color:' + c + ';background:color-mix(in srgb,' + c + ' 16%,transparent);border:1px solid color-mix(in srgb,' + c + ' 45%,transparent)">' + esc(lab) + '</span>';
+    return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);color:' + c + ';background:color-mix(in srgb,' + c + ' 16%,transparent);border:1px solid color-mix(in srgb,' + c + ' 45%,transparent)">' + esc(lab) + '</span>';
   }
   function acLedgerRow(t) {
     if (t.splits && t.splits.length) return acSplitRow(t);
-    const partnerBadge = t.partnerOwed > 0 ? ' <span class="muted" style="font-size:10px;border:1px solid var(--line);border-radius:4px;padding:0 4px">&#8617; ' + acAmt(t.partnerOwed) + '</span>' : '';
+    const partnerBadge = t.partnerOwed > 0 ? ' <span class="muted" style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:4px;padding:0 4px">&#8617; ' + acAmt(t.partnerOwed) + '</span>' : '';
     const tagHtml = (t.tags && t.tags.length) ? ' ' + t.tags.map(tg => '<span class="ac-tag">' + esc(tg) + '</span>').join(' ') : '';
     const cat = (t.category ? esc(t.category) : (tagHtml ? '' : '<span class="muted">—</span>')) + tagHtml;
     const payee = t.description ? esc(t.description) : '<span class="muted">—</span>';
@@ -6621,10 +6965,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     tr.innerHTML = '<td><input type="date" class="ac-ed" data-f="postedOn" value="' + t.postedOn + '" style="width:122px"></td>'
       + '<td>' + (t.direction === 'in' ? 'in' : 'out') + '</td>'
       + '<td><select class="ac-ed" data-f="bucket">' + bopts + '</select></td>'
-      + '<td><input type="text" class="ac-ed" data-f="category" value="' + esc(t.category || '') + '" style="width:96px" placeholder="category"><br><input type="text" class="ac-ed" data-f="tags" value="' + esc((t.tags || []).join(', ')) + '" style="width:96px;margin-top:3px;font-size:11px" placeholder="tags, comma"></td>'
+      + '<td><input type="text" class="ac-ed" data-f="category" value="' + esc(t.category || '') + '" style="width:96px" placeholder="category"><br><input type="text" class="ac-ed" data-f="tags" value="' + esc((t.tags || []).join(', ')) + '" style="width:96px;margin-top:3px;font-size:var(--fs-xs)" placeholder="tags, comma"></td>'
       + '<td><input type="text" class="ac-ed" data-f="description" value="' + esc(t.description || '') + '" style="width:110px" placeholder="payee / note"></td>'
       + '<td><select class="ac-ed" data-f="accountId" style="max-width:130px">' + aopts + '</select></td>'
-      + '<td class="num"><input type="text" inputmode="decimal" class="ac-ed" data-f="amount" value="' + acMoneyEdit(t.amount) + '" style="width:78px;text-align:right">' + (t.direction === 'in' ? '' : '<br><input type="text" inputmode="decimal" class="ac-ed" data-f="partnerOwed" value="' + (t.partnerOwed ? acMoneyEdit(t.partnerOwed) : '') + '" style="width:78px;text-align:right;margin-top:3px;font-size:11px" placeholder="she owes $">') + '</td>'
+      + '<td class="num"><input type="text" inputmode="decimal" class="ac-ed" data-f="amount" value="' + acMoneyEdit(t.amount) + '" style="width:78px;text-align:right">' + (t.direction === 'in' ? '' : '<br><input type="text" inputmode="decimal" class="ac-ed" data-f="partnerOwed" value="' + (t.partnerOwed ? acMoneyEdit(t.partnerOwed) : '') + '" style="width:78px;text-align:right;margin-top:3px;font-size:var(--fs-xs)" placeholder="she owes $">') + '</td>'
       + '<td><select class="ac-ed" data-f="status" style="width:90px"><option value="settled"' + (t.status !== 'pending' ? ' selected' : '') + '>✓ settled</option><option value="pending"' + (t.status === 'pending' ? ' selected' : '') + '>● pending</option></select></td>'
       + '<td style="white-space:nowrap"><a href="#" class="ac-act-edit" data-save-tx="' + t.id + '" title="save">✓</a> <a href="#" class="ac-act-del" data-cancel-tx="' + t.id + '" title="cancel">✕</a></td>';
     const fc = tr.querySelector('[data-f="postedOn"]'); if (fc) fc.focus();
@@ -6740,7 +7084,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const catOpts = '<option value="">Whole card</option>'
           + getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '"' + (pmt.bucket === c.key ? ' selected' : '') + '>' + esc(c.label) + '</option>').join('');
         row.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:3px 0">'
-          + '<span style="color:var(--muted);font-size:12px;flex-shrink:0">$</span>'
+          + '<span style="color:var(--muted);font-size:var(--fs-sm);flex-shrink:0">$</span>'
           + '<input type="text" inputmode="decimal" class="ac-ed" data-ep-amt="' + pmtId + '" value="' + acMoneyEdit(pmt.amount) + '" style="width:80px;text-align:right">'
           + '<select class="ac-ed" data-ep-cat="' + pmtId + '" style="flex:1;min-width:130px">' + catOpts + '</select>'
           + '<a href="#" class="ac-act-edit" data-save-payment="' + pmtId + '" title="Save" aria-label="Save payment edit">✓</a>'
@@ -7027,7 +7371,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + ' · Spend: <b>' + f$(annualSpend) + '/yr</b>'
         + ' · Savings: <b>' + f$(annualSavings) + '/yr</b>'
         + (income ? ' · Income: <b>' + f$(income) + '/yr</b>' : '')
-        + (spendNote ? ' <span style="color:var(--warn);font-size:11px">' + spendNote + '</span>' : '');
+        + (spendNote ? ' <span style="color:var(--warn);font-size:var(--fs-xs)">' + spendNote + '</span>' : '');
     }
 
     const body = {

@@ -26,6 +26,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+try:  # Soft import (DEC-024): requirements.txt ships no PyYAML (DEC-021 --only-binary
+    # posture keeps the add-on image dependency-free) — the production container has no
+    # yaml module. Dev/sandbox envs typically have PyYAML installed. When absent, YAML
+    # theme candidates are simply skipped (never a crash); JSON theme files always work
+    # via the stdlib json module regardless of this import's outcome.
+    import yaml
+except ImportError:
+    yaml = None
+
 import affordability
 import calculator as calc
 import budgeting
@@ -448,6 +457,224 @@ def _to_auto_dict(m: AutoModel) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# HA theme adapter (DEC-024 v1, file-based)
+#
+# Reads an optional Home Assistant theme file and hands the frontend a small, verbatim
+# passthrough of its custom-property tokens so the app can visually match the user's HA
+# theme. Every step is best-effort: no theme file, an unparseable one, or a missing YAML
+# parser all resolve to "no theme" (never an exception) so the app renders its existing
+# dark palette exactly as before this feature existed.
+# ---------------------------------------------------------------------------
+
+_VAR_REF_RE = re.compile(r"^var\(--([\w-]+)\)$")
+
+# Module-level constant (not a literal inline in load_theme()) purely so tests can
+# monkeypatch it to a tmp path and exercise the "/data override wins over the bundled
+# default" precedence without touching the real HA add-on volume at /data.
+_DATA_THEME_PATH = Path("/data/theme.json")
+
+
+def load_theme() -> tuple[dict, str] | None:
+    """Locate + parse the HA theme file. Search order (first hit wins):
+
+      1. `FINANCE_THEME_FILE` env var (explicit override — if it points at a missing or
+         unparseable file, this is treated as "no theme", not a fall-through).
+      2. `/data/theme.json`                        — HA add-on volume; a user-provided
+         device override always wins over the bundled default (#4 below).
+      3. `./theme.local.json`                      — repo-local JSON override for dev.
+      4. `<server.py dir>/theme.json`               — the BUNDLED default (DEC-025):
+         addon/build_bundle.sh pre-converts homeassistant/theme/masai.yaml to JSON at
+         build time (on a machine with PyYAML) and places it next to server.py in the
+         deploy bundle, so the no-PyYAML production image (DEC-021) still boots with a
+         theme present with zero runtime YAML parsing. `ROOT` is `Path(__file__).resolve
+         ().parent`, so this resolves to `/app/theme.json` on the device and to the repo
+         root in the sandbox (normally absent there — masai.yaml (#5) covers the sandbox).
+      5. `./homeassistant/theme/masai.yaml`         — the shipped sandbox theme (works
+         out of the box in dev, where PyYAML is installed).
+      6. `./theme.local.yaml`                       — repo-local YAML override for dev.
+
+    JSON candidates always parse (stdlib `json`, no optional dependency). YAML candidates
+    require the soft-imported `yaml` module; when it's unavailable (production add-on
+    image, DEC-021) a YAML candidate is simply skipped rather than raising. Returns
+    (raw_dict, source_path_str) on success, or None when no candidate yields a usable
+    dict — never raises to the caller.
+    """
+    log = logging.getLogger("finance")
+    env_path = os.environ.get("FINANCE_THEME_FILE")
+    candidates = [Path(env_path)] if env_path else [
+        _DATA_THEME_PATH,
+        ROOT / "theme.local.json",
+        ROOT / "theme.json",
+        ROOT / "homeassistant" / "theme" / "masai.yaml",
+        ROOT / "theme.local.yaml",
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            suffix = path.suffix.lower()
+            if suffix == ".json":
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            elif suffix in (".yaml", ".yml"):
+                if yaml is None:
+                    log.debug("theme candidate %s is YAML but PyYAML is unavailable; skipping", path)
+                    continue
+                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+            else:
+                log.debug("theme candidate %s has an unrecognized extension; skipping", path)
+                continue
+            if not isinstance(raw, dict) or not raw:
+                log.debug("theme candidate %s parsed to an empty/invalid structure; skipping", path)
+                continue
+            log.info("HA theme loaded from %s", path)
+            return raw, str(path)
+        except Exception:
+            log.debug("failed to read/parse theme candidate %s", path, exc_info=True)
+            continue
+    log.debug("no HA theme file found (checked %d candidate(s)); using built-in dark palette", len(candidates))
+    return None
+
+
+def _resolve_hex(value: object, table: dict, _depth: int = 0) -> str | None:
+    """Resolve a literal '#hex' color, or one level of 'var(--x)' indirection against
+    `table`, to a literal hex string. Follows short var() chains (up to 6 hops) but never
+    evaluates arbitrary CSS — anything else (e.g. rgba()/hsl() expressions) returns None
+    since we deliberately do not resolve CSS at parse time (that's the browser's job)."""
+    if not isinstance(value, str) or _depth > 6:
+        return None
+    v = value.strip()
+    if v.startswith("#"):
+        return v
+    m = _VAR_REF_RE.match(v)
+    if m:
+        return _resolve_hex(table.get(m.group(1)), table, _depth + 1)
+    return None
+
+
+def _relative_luminance(hex_color: str) -> float | None:
+    """WCAG relative luminance of a '#rgb' or '#rrggbb' color, or None if unparseable."""
+    h = hex_color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return None
+    try:
+        r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+    def _lin(c: float) -> float:
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def _detect_mode(base: dict, modes: dict) -> str:
+    """light/dark rule: resolve a background-ish token (md-sys-color-background, then
+    md-sys-color-surface, then primary-background-color) to a literal hex — trying the
+    'light' mode block first if present, else whichever mode block exists — and compute
+    its relative luminance. L >= 0.5 -> 'light', else 'dark'. If nothing resolves to a
+    literal hex (unusual/custom theme shape), default to 'light': that's an explicit,
+    documented fallback rather than a silent guess, and matches the one theme (Shiro /
+    masai.yaml) this adapter ships against today."""
+    mode_names = ["light"] if "light" in modes else (list(modes.keys()) or [None])
+    for mode_name in mode_names:
+        block = modes.get(mode_name) if mode_name is not None else {}
+        table = {**base, **(block if isinstance(block, dict) else {})}
+        for key in ("md-sys-color-background", "md-sys-color-surface", "primary-background-color"):
+            hexval = _resolve_hex(table.get(key), table)
+            if hexval is not None:
+                lum = _relative_luminance(hexval)
+                if lum is not None:
+                    return "light" if lum >= 0.5 else "dark"
+    return "light"
+
+
+def _looks_pre_normalized(raw: dict) -> bool:
+    return "available" in raw and isinstance(raw.get("vars"), dict)
+
+
+def normalize_theme(raw: dict, source: str = "file") -> dict | None:
+    """Pure transform: raw parsed theme file -> the transport contract:
+
+        {"available": True, "name": <top-level theme key>, "mode": "light"|"dark",
+         "source": source, "vars": {<every theme token>: <string value>, ...}}
+
+    Accepts two input shapes:
+      - A raw HA theme-YAML mapping: {<theme name>: {...tokens..., modes: {light: {...}}}}.
+        `name` is read from the FILE's top-level key (never the filename — a theme file
+        named e.g. masai.yaml may define a theme called "Shiro"). `modes.<active mode>`
+        is merged OVER the base tokens (mode-specific values win) per Home Assistant's
+        own theme-resolution semantics; the `modes` key itself is dropped from `vars`.
+      - An already-normalized JSON shape (has "available" + a "vars" dict) — passed
+        through as-is (values re-stringified defensively), letting production ship a
+        pre-converted /data/theme.json without needing this function's YAML-shape logic.
+
+    Deliberate choice: ALL top-level theme tokens are kept in `vars` (elevation, motion,
+    shape, typeface, color, legacy semantic aliases — not just md-sys-color-*). They are
+    harmless as unused CSS custom properties if the frontend only consumes a subset, and
+    keeping everything avoids a second "which keys matter" decision that would silently
+    break if the theme file adds new tokens later. Values are passed through VERBATIM
+    (var(...) references, block-scalar shadow/motion strings, literal hex) — CSS resolves
+    var() chains at runtime, not this function.
+
+    Returns None on anything that isn't a usable dict (never raises).
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    try:
+        if _looks_pre_normalized(raw):
+            vars_ = {str(k): (v if isinstance(v, str) else str(v)) for k, v in raw["vars"].items()}
+            if not vars_:
+                return None
+            mode = raw.get("mode")
+            return {
+                "available": True,
+                "name": str(raw.get("name") or "theme"),
+                "mode": mode if mode in ("light", "dark") else "light",
+                "source": source,
+                "vars": vars_,
+            }
+
+        # Raw HA theme-YAML shape: top-level maps theme-name -> {tokens...}. Take the
+        # first entry whose value is itself a mapping (skip stray top-level scalars).
+        name, body = None, None
+        for k, v in raw.items():
+            if isinstance(v, dict):
+                name, body = k, v
+                break
+        if name is None or body is None:
+            return None
+
+        body = dict(body)  # don't mutate the parsed input
+        modes = body.pop("modes", None)
+        modes = modes if isinstance(modes, dict) else {}
+        mode = _detect_mode(body, modes)
+        active = modes.get(mode)
+        active = active if isinstance(active, dict) else {}
+        merged = {**body, **active}
+
+        vars_ = {}
+        for k, v in merged.items():
+            if isinstance(v, (dict, list)):
+                continue  # not a scalar theme token; skip (none expected in practice)
+            vars_[str(k)] = v if isinstance(v, str) else str(v)
+        if not vars_:
+            return None
+
+        return {
+            "available": True,
+            "name": str(name),
+            "mode": mode,
+            "source": source,
+            "vars": vars_,
+        }
+    except Exception:
+        logging.getLogger("finance").debug("normalize_theme failed", exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -465,6 +692,16 @@ def index(request: Request) -> HTMLResponse:
         base = ""
     html = (ROOT / "index.html").read_text(encoding="utf-8")
     inject = "<script>window.__API_BASE=" + json.dumps(base).replace("</", "<\\/") + ";</script>"
+
+    # HA theme adapter (DEC-024): inject window.__HA_THEME only when a theme is actually
+    # available. No file / parse error / no yaml module -> inject nothing, so the
+    # frontend's window.__HA_THEME stays undefined and it renders today's dark palette.
+    loaded = load_theme()
+    if loaded is not None:
+        theme = normalize_theme(loaded[0], "file")
+        if theme is not None:
+            inject += ("<script>window.__HA_THEME=" + json.dumps(theme).replace("</", "<\\/") + ";</script>")
+
     # index.html's <head> is a bare literal tag (no attributes) — pinned invariant.
     return HTMLResponse(html.replace("<head>", "<head>" + inject, 1))
 
@@ -479,6 +716,22 @@ def health() -> dict:
     except Exception:
         logging.getLogger("finance").exception("health check failed")
         raise HTTPException(status_code=503, detail="db unavailable")
+
+
+@app.get("/api/theme")
+def theme_endpoint() -> dict:
+    """DEC-024 v1 file-based HA theme adapter. Always 200 (never 204 — the frontend
+    parses JSON either way): the normalized theme when available, else {"available":
+    False}. Read-only, no request body/params. Under HA this sits behind ingress auth;
+    in the sandbox it's localhost-only. Returns only theme/color strings — never
+    secrets, never SUPERVISOR_TOKEN."""
+    loaded = load_theme()
+    if loaded is None:
+        return {"available": False}
+    theme = normalize_theme(loaded[0], "file")
+    if theme is None:
+        return {"available": False}
+    return theme
 
 
 def _load_tax_year_overlay() -> dict:
