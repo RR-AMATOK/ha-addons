@@ -40,6 +40,17 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
 - `backup: cold` — HA stops the add-on for a few seconds during backups so the
   SQLite copy inside the backup is always consistent.
 
+## Using the app
+
+- **Back up** and **What-If Mode** stay as top-level buttons in the header for quick
+  access. Everything else lives behind the **Settings** gear (top-right of the header):
+  **Print / PDF**, **Restore** (from a backup file), a **Show/Hide disclaimer** toggle,
+  and **Reset**.
+- **Theme:** the add-on ships with a bundled "Shiro" theme and displays in **full light**
+  by default. Open Settings to switch between **Full light**, **Shiro accent** (dark app,
+  gold accent), and **Classic dark** — your choice is remembered in the browser. If no
+  theme is bundled, the app falls back to the classic dark palette automatically.
+
 ## Data & backups
 
 - HA's native backups (Settings → System → Backups) include this add-on's `/data`
@@ -57,6 +68,11 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   `sh addon/publish_repo.sh`, then in HA: App store → Check for updates → Update.
 - **Local install (Option B):** re-run `build_bundle.sh`, re-copy the folder over
   `addons/finance_tracker/` (bump `version:` first), then Check for updates → Update.
+- **Updating the bundled theme (maintainer):** replace `homeassistant/theme/masai.yaml`
+  in the repo, then run the normal publish flow (`sh addon/publish_repo.sh`). It rebuilds
+  the bundle and regenerates `theme.json` from that YAML automatically — no manual JSON
+  editing, and the add-on image itself never needs a YAML parser since the conversion
+  happens at build time.
 
 ## Recommended on the Yellow
 
