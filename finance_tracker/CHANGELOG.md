@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2
+
+- **Each household member now has their own data.** Transactions, accounts,
+  budgets/plans, goals, ventures, and scenarios are scoped per user. All
+  existing data belongs to the owner; other members start with a clean,
+  empty dataset the first time they open the app after this update. (The
+  one-time migration runs automatically at update; a safety backup of the
+  database is taken first.)
+- **The app is now usable on phones.** Cards, forms, and the budget builder
+  fit narrow screens (no more content cut off at the right edge); wide
+  tables scroll within their own cards; tap targets are finger-sized. Fixes
+  apply across all widths below 900px, in both themes.
+- The full-database backup (owner-only) is relabeled "household-full" — it
+  contains every member's data.
+
 ## 0.2.1
 
 - **The panel now opens to every household user, not just admins**

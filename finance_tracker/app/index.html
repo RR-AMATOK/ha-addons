@@ -120,7 +120,7 @@
     display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
   }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
   section.card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
     padding: 14px 16px 16px; margin-bottom: 14px;
@@ -402,7 +402,7 @@
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
   }
   .panel-inner { display:grid; grid-template-columns: minmax(300px,380px) 1fr; gap:16px; }
-  @media (max-width:900px){ .panel-inner { grid-template-columns:1fr; } }
+  @media (max-width:900px){ .panel-inner { grid-template-columns:minmax(0,1fr); } .panel-inner > * { min-width:0; } }
   .disclaimer { display:flex; align-items:flex-start; gap:10px;
                 background:var(--warn-surface); border:1px solid var(--warn-border); color:var(--warn-text); border-radius:8px;
                 padding:10px 14px; font-size:var(--fs-sm); margin:0 0 14px; line-height:var(--lh-base); }
@@ -557,6 +557,76 @@
   }
   .ac-refund-toggle:hover { color: var(--good); border-color: transparent; }
   .ac-refund-toggle.active { color: var(--good); font-weight: var(--fw-semibold); }
+
+  /* Phone-first responsive pass (P0) — presentation-only, color-free (grid/flex/width/
+     padding/min-height), so both dark and shiro-full inherit identically. Additive only:
+     everything here lives inside a max-width/max-height query, so >480px-wide viewports
+     are byte-for-byte unaffected by construction. */
+  @media (max-width: 480px) {
+    /* gutters: reclaim ~40px width (tokens only, no new ad-hoc px) */
+    header, main, #tab-budget, #tab-invest, #tab-auto, #tab-actuals, footer,
+    section.card { padding-left: var(--space-3); padding-right: var(--space-3); }
+    #ov_out { padding-left: var(--space-3) !important; padding-right: var(--space-3) !important; }
+
+    /* let cards shrink to the viewport: the ≤900 .panel-inner override uses a bare 1fr,
+       so grid items keep their min-content width and clip past 390px without this */
+    .panel-inner > * { min-width: 0; }
+    section.card p, .row label, .hint, .mini { overflow-wrap: anywhere; word-break: break-word; }
+
+    /* paired inputs: stack label over full-width control */
+    .row { grid-template-columns: 1fr; row-gap: var(--space-1); }
+    .input-pair { width: 100%; min-width: 0; }
+    .input-pair input { width: 100%; min-width: 0; }
+    .input-cluster { width: 100%; align-items: stretch; }
+    #gl_target, #gl_manual { width: 100% !important; }
+    #tab-invest .row select, #tab-invest .row input[type=text],
+    #gl_card .row select, #gl_card .row input[type=text] { width: 100% !important; min-width: 0 !important; }
+
+    /* budget builder: two-line wrap rows (name full-width on line 1;
+       handle/amount/tax/split/$ on line 2) instead of full-bleed scroll */
+    .bgb-items, .bgb-items tbody { display: block; }
+    .bgb-items tr { display: flex; flex-wrap: wrap; align-items: center;
+      gap: var(--space-1) var(--space-2); padding-block: var(--space-1);
+      border-bottom: 1px solid var(--line-faint); }
+    .bgb-items td { display: flex; align-items: center; padding: 0; border-bottom: none; }
+    .bgb-items td:has(.bgb-iname) { order: -1; flex: 1 1 100%; }
+    .bgb-items input[type=text], .bgb-items input[type=number] { min-width: 0; }
+    .bgb-items input.bgb-iname { width: 100%; min-width: 140px; }
+    .bgb-bname, .bgb-gname { width: auto; flex: 1 1 auto; min-width: 140px; }
+    .bgb-items input.bgb-bname, .bgb-items input.bgb-gname { min-width: 140px; }
+    .bgb-ipreset { max-width: none; width: 100%; }
+
+    /* FIRE net-worth fields */
+    .nw-field { flex: 1 1 140px; }
+    .nw-field .input-pair, .nw-field input { width: 100%; }
+
+    /* wide/flex rows */
+    #ac_ledger table { min-width: 720px; }
+    .ac-row { flex-wrap: wrap; }
+    .ac-row > .ac-field { flex: 1 1 140px; }
+    .sc-grid { flex-direction: column; align-items: stretch; }
+    .borrower-grid { grid-template-columns: repeat(2, 1fr); }
+    .bracket-row { grid-template-columns: 1fr; }
+
+    /* tiles: guarantee 2-up down to ~264px */
+    .tiles { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+
+    /* tap targets ≥44px (primary) / ~40px (secondary) — padding/min-height only, never `font` */
+    #tabbar .tab-btn { min-height: 44px; }
+    #ac_prev, #ac_next { min-width: 44px; min-height: 44px; }
+    button.primary, .calc-btn { min-height: 44px; }
+    .actions button:not(.backup-popup button):not(.settings-popup button) { min-height: 44px; }
+    .chip { min-height: 40px; padding-block: 9px; }
+    .seed-btn { min-height: 40px; }
+    .ac-tool, .ac-refund-toggle { padding-block: 10px; }
+    td a.ac-act-edit, td a.ac-act-del, .gl-act { padding: 9px 11px; }
+  }
+
+  /* landscape / short-viewport popup guard (P1) — max-height query, independent of the
+     width cascade above; desktop is unaffected. */
+  @media (max-height: 480px) {
+    .backup-popup { max-height: 80vh; overflow-y: auto; }
+  }
 
   @media print {
     .tabbar { display:none; }

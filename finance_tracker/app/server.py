@@ -83,24 +83,48 @@ app = FastAPI(title="Income Tax Calculator", version="1.0", lifespan=_lifespan)
 _SUPERVISOR_PEER = "172.30.32.2"
 
 
-def resolve_user(request: Request) -> dict:
+def resolve_user(request: Request | None) -> dict:
     """The ONE identity resolver (DEC-026 "Verified contract" paragraph; DEC-031 §3).
     Every identity-dependent code path MUST call this -- never read X-Remote-User-Id
     (or any other identity signal) directly.
 
-    Returns ``{"id": <str>, "role": "owner"|"member"}``.
+    Returns ``{"id": <str>, "role": "owner"|"member", "scopeId": <str>}``.
+
+    ``scopeId`` (S1.1, per-user data separation) is the ONE seam every `/api/tracking/*`
+    data-table call must thread -- never ``id``:
+
+        scopeId = "__owner__" if role == "owner" else id
+
+    Why a second id at all: at migration time (boot, before any request) the `users`
+    table is empty and the real human owner hasn't been provisioned yet -- the v8
+    migration backfills every pre-existing (single-tenant) row to the sentinel
+    `"__owner__"` WITHOUT knowing the owner's eventual real HA UUID. If callers scoped
+    the owner's reads by their real UUID instead, every migrated row would be invisible
+    (data-loss-equivalent). Since there is exactly one owner (`idx_users_one_owner`),
+    "owner role -> `__owner__` slot" is a clean 1:1, and `__owner__` is deliberately not
+    a valid HA UUID so it can never collide with a member id. Identity (`id`, used by
+    whoami/audit/the roster) and data-scope (`scopeId`) are DELIBERATELY kept separate --
+    never conflate them.
+
+    `request` may be ``None`` for direct in-process calls (test helpers that don't
+    construct a Request) -- this resolves exactly like an absent header/query param,
+    i.e. the owner fallback. Real ASGI requests always supply a concrete Request.
 
     Precedence (highest first; see docs/multiuser-household-plan.md constraints):
       1. TRUSTED INGRESS HEADER -- ``X-Remote-User-Id``, but ONLY when
          ``request.client.host`` equals ``_SUPERVISOR_PEER``. A header arriving from
          any other peer IP is spoofable and is treated as wholly ABSENT: it is never
          read into an identity (spoof protection). Additionally, the header value is
-         trusted ONLY when it appears EXACTLY ONCE and is non-empty after stripping --
+         trusted ONLY when it appears EXACTLY ONCE and is non-empty AFTER STRIPPING --
          a duplicate header (two ``X-Remote-User-Id`` lines, however that arose) or an
-         empty-string value is also treated as wholly ABSENT (never selects one of
-         several candidate ids, and never lets an empty header silently enable the dev
+         all-whitespace value is also treated as wholly ABSENT (never selects one of
+         several candidate ids, and never lets a blank header silently enable the dev
          override below). This keeps the resolver safe regardless of whether HA's
-         Supervisor strips inbound ``X-Remote-User-*`` headers before proxying.
+         Supervisor strips inbound ``X-Remote-User-*`` headers before proxying. The
+         value is trimmed exactly ONCE (SEV-S1.1-002) and that same trimmed string is
+         used both for the truthiness check above AND as the identity itself, so
+         ``" abc "`` and ``"abc"`` are always the same id -- never two distinct
+         provisioned members.
       2. DEV OVERRIDE (DEC-022 sandbox parity) -- the ``FINANCE_DEV_USER`` env var,
          else the ``?user=`` query param (env wins when both are set -- an arbitrary
          but stable, documented precedence). INERT whenever step 1 found a trusted
@@ -116,22 +140,53 @@ def resolve_user(request: Request) -> dict:
     the `users` table (tracking_store.resolve_or_provision_user): the very first id
     ever seen this way becomes 'owner'; every subsequently-seen new id becomes
     'member' (at most one owner).
+
+    RESERVED SENTINEL (SEV-S1.1-001): ``"__owner__"`` (tracking_store._SENTINEL_OWNER_ID)
+    is not a real identity -- it is the internal data-scope slot for the owner role. If
+    a trusted header or dev override ever resolves to exactly this string, it is REJECTED
+    (HTTPException) rather than provisioned or silently folded into the owner fallback.
+    Mapping it to the owner fallback would be wrong: it would GRANT owner-level data
+    access to whoever supplied it. This is unreachable given the hardened ingress
+    contract (HA always sends real 32-hex UUIDs; the dev override never runs in
+    production), but is enforced here in code, not by convention alone.
     """
     client = getattr(request, "client", None)
     peer_host = getattr(client, "host", None) if client is not None else None
     header_id = None
     if peer_host == _SUPERVISOR_PEER:
         header_values = request.headers.getlist("X-Remote-User-Id")
-        if len(header_values) == 1 and header_values[0].strip():
-            header_id = header_values[0]
+        if len(header_values) == 1:
+            # SEV-S1.1-002: trim ONCE, then use that same trimmed value for both the
+            # trust decision (non-empty after stripping) and the id itself -- so " abc "
+            # and "abc" are the same identity, not two different provisioned members.
+            # An all-whitespace header strips to "" (falsy) and is treated as absent,
+            # same as today (-> dev override / owner fallback).
+            trimmed = header_values[0].strip()
+            if trimmed:
+                header_id = trimmed
 
     seen_id = header_id or os.environ.get("FINANCE_DEV_USER") \
         or getattr(request, "query_params", {}).get("user")
 
+    # SEV-S1.1-001: "__owner__" is a reserved sentinel (tracking_store._SENTINEL_OWNER_ID)
+    # meaning "the owner's data-scope slot", never a real identity. If a trusted header or
+    # a dev override ever resolves to this literal string, it must be REJECTED outright --
+    # NOT provisioned, and NOT silently mapped to the owner fallback (that would hand
+    # whoever supplied it the owner's entire dataset). This is enforced here regardless of
+    # whether the string arrived spoofed, misconfigured, or via a dev-only override.
+    if seen_id == tracking_store._SENTINEL_OWNER_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid identity: this value is reserved and cannot be used.",
+        )
+
     with closing(tracking_store.connect()) as c:
         if seen_id:
-            return tracking_store.resolve_or_provision_user(c, seen_id)
-        return tracking_store.resolve_owner_fallback(c)
+            user = tracking_store.resolve_or_provision_user(c, seen_id)
+        else:
+            user = tracking_store.resolve_owner_fallback(c)
+    user["scopeId"] = "__owner__" if user["role"] == "owner" else user["id"]
+    return user
 
 
 def require_owner(request: Request) -> dict:
@@ -1271,26 +1326,29 @@ class PlanDeltaModel(BaseModel):
 # ----- accounts -----
 
 @app.post("/api/tracking/accounts")
-def create_account_endpoint(m: AccountModel) -> dict:
+def create_account_endpoint(m: AccountModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
-            return tracking_store.create_account(c, m.name, m.type, m.is_liability, m.currency, invest_group=m.invest_group)
+            return tracking_store.create_account(c, scope, m.name, m.type, m.is_liability, m.currency, invest_group=m.invest_group)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/api/tracking/accounts")
-def list_accounts_endpoint(includeArchived: bool = False) -> dict:
+def list_accounts_endpoint(includeArchived: bool = False, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return {"accounts": tracking_store.list_accounts(c, include_archived=includeArchived)}
+        return {"accounts": tracking_store.list_accounts(c, scope, include_archived=includeArchived)}
 
 
 @app.patch("/api/tracking/accounts/{account_id}")
-def update_account_endpoint(account_id: int, m: AccountUpdateModel) -> dict:
+def update_account_endpoint(account_id: int, m: AccountUpdateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     fields = {k: v for k, v in m.model_dump(by_alias=False).items() if v is not None}
     with closing(tracking_store.connect()) as c:
         try:
-            acct = tracking_store.update_account(c, account_id, **fields)
+            acct = tracking_store.update_account(c, scope, account_id, **fields)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         if acct is None:
@@ -1299,10 +1357,11 @@ def update_account_endpoint(account_id: int, m: AccountUpdateModel) -> dict:
 
 
 @app.delete("/api/tracking/accounts/{account_id}")
-def delete_account_endpoint(account_id: int) -> dict:
+def delete_account_endpoint(account_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
-            tracking_store.delete_account(c, account_id)
+            tracking_store.delete_account(c, scope, account_id)
         except ValueError as e:                    # venture-linked account (DEC-020 invariant)
             raise HTTPException(status_code=422, detail=str(e))
     return {"deleted": account_id}
@@ -1311,15 +1370,17 @@ def delete_account_endpoint(account_id: int) -> dict:
 # ----- transactions -----
 
 @app.post("/api/tracking/transactions")
-def create_txn_endpoint(m: TransactionModel) -> dict:
+def create_txn_endpoint(m: TransactionModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     splits = None
     if m.splits:
         splits = [{"bucket": sp.get("bucket"), "category": sp.get("category"),
                    "amount_cents": _cents(sp.get("amount", 0))} for sp in m.splits]
     with closing(tracking_store.connect()) as c:
         try:
+            tracking_store._require_own_account(c, scope, m.account_id)
             return tracking_store.create_txn(
-                c, m.account_id, m.posted_on, m.direction, _cents(m.amount),
+                c, scope, m.account_id, m.posted_on, m.direction, _cents(m.amount),
                 bucket=m.bucket, category=m.category, description=m.description,
                 is_transfer=m.is_transfer, transfer_group=m.transfer_group, external_id=m.external_id,
                 tags=m.tags, splits=splits, partner_owed_cents=_cents(m.partner_owed or 0),
@@ -1332,21 +1393,24 @@ def create_txn_endpoint(m: TransactionModel) -> dict:
 @app.get("/api/tracking/transactions")
 def list_txns_endpoint(month: str | None = None, accountId: int | None = None,
                        bucket: str | None = None, direction: str | None = None,
-                       tag: str | None = None) -> dict:
+                       tag: str | None = None, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        txns = tracking_store.list_txns(c, month=month, account_id=accountId,
+        txns = tracking_store.list_txns(c, scope, month=month, account_id=accountId,
                                         bucket=bucket, direction=direction, tag=tag)
     return {"transactions": txns, "count": len(txns)}
 
 
 @app.get("/api/tracking/tags")
-def list_tags_endpoint() -> dict:
+def list_tags_endpoint(request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return {"tags": tracking_store.list_tags(c)}
+        return {"tags": tracking_store.list_tags(c, scope)}
 
 
 @app.patch("/api/tracking/transactions/{txn_id}")
-def update_txn_endpoint(txn_id: int, m: TransactionUpdateModel) -> dict:
+def update_txn_endpoint(txn_id: int, m: TransactionUpdateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     fields = {}
     for k, v in m.model_dump(by_alias=False).items():
         if v is None:
@@ -1359,7 +1423,7 @@ def update_txn_endpoint(txn_id: int, m: TransactionUpdateModel) -> dict:
             fields[k] = v
     with closing(tracking_store.connect()) as c:
         try:
-            txn = tracking_store.update_txn(c, txn_id, **fields)
+            txn = tracking_store.update_txn(c, scope, txn_id, **fields)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
     if txn is None:
@@ -1368,17 +1432,19 @@ def update_txn_endpoint(txn_id: int, m: TransactionUpdateModel) -> dict:
 
 
 @app.delete("/api/tracking/transactions/{txn_id}")
-def delete_txn_endpoint(txn_id: int) -> dict:
+def delete_txn_endpoint(txn_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        ids = tracking_store.delete_txn(c, txn_id)
+        ids = tracking_store.delete_txn(c, scope, txn_id)
     return {"deleted": txn_id, "deletedIds": ids, "rows": len(ids)}
 
 
 @app.get("/api/tracking/suggest")
-def suggest_endpoint() -> dict:
+def suggest_endpoint(request: Request = None) -> dict:
     """Quick-add autocomplete: payee memory + categories-by-bucket (drives the datalist)."""
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return tracking_store.suggestions(c)
+        return tracking_store.suggestions(c, scope)
 
 
 # ----- recurring templates (pre-fill only) -----
@@ -1395,26 +1461,31 @@ class TemplateModel(BaseModel):
 
 
 @app.post("/api/tracking/templates")
-def create_template_endpoint(m: TemplateModel) -> dict:
+def create_template_endpoint(m: TemplateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
+            if m.account_id is not None:
+                tracking_store._require_own_account(c, scope, m.account_id)
             return tracking_store.create_template(
-                c, m.name, direction=m.direction, amount_cents=_cents(m.amount),
+                c, scope, m.name, direction=m.direction, amount_cents=_cents(m.amount),
                 bucket=m.bucket, category=m.category, account_id=m.account_id, description=m.description)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/api/tracking/templates")
-def list_templates_endpoint() -> dict:
+def list_templates_endpoint(request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return {"templates": tracking_store.list_templates(c)}
+        return {"templates": tracking_store.list_templates(c, scope)}
 
 
 @app.delete("/api/tracking/templates/{template_id}")
-def delete_template_endpoint(template_id: int) -> dict:
+def delete_template_endpoint(template_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        tracking_store.delete_template(c, template_id)
+        tracking_store.delete_template(c, scope, template_id)
     return {"deleted": template_id}
 
 
@@ -1440,8 +1511,8 @@ class GoalUpdateModel(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-def _goal_with_progress(c, g: dict, pay_freq: float) -> dict:
-    saved = tracking_store.goal_saved_cents(c, g) / 100.0
+def _goal_with_progress(c, scope: str, g: dict, pay_freq: float) -> dict:
+    saved = tracking_store.goal_saved_cents(c, scope, g) / 100.0
     out = dict(g)
     out["saved"] = saved
     # Pace anchors at creation, clamped to the target date: a goal created with an
@@ -1468,28 +1539,31 @@ def _check_pay_freq(pay_freq: float) -> float:
 
 
 @app.get("/api/tracking/goals")
-def list_goals_endpoint(payFreq: float = 24.0, includeInactive: bool = False) -> dict:
+def list_goals_endpoint(payFreq: float = 24.0, includeInactive: bool = False, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     pf = _check_pay_freq(payFreq)
     with closing(tracking_store.connect()) as c:
-        rows = tracking_store.list_goals(c, include_inactive=includeInactive)
-        return {"goals": [_goal_with_progress(c, g, pf) for g in rows]}
+        rows = tracking_store.list_goals(c, scope, include_inactive=includeInactive)
+        return {"goals": [_goal_with_progress(c, scope, g, pf) for g in rows]}
 
 
 @app.post("/api/tracking/goals")
-def create_goal_endpoint(m: GoalModel, payFreq: float = 24.0) -> dict:
+def create_goal_endpoint(m: GoalModel, payFreq: float = 24.0, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     pf = _check_pay_freq(payFreq)    # validate BEFORE the write — a bad param must not commit
     with closing(tracking_store.connect()) as c:
         try:
             g = tracking_store.create_goal(
-                c, m.name, _cents(m.target), m.target_date, account_id=m.account_id,
+                c, scope, m.name, _cents(m.target), m.target_date, account_id=m.account_id,
                 manual_saved_cents=None if m.saved_so_far is None else _cents(m.saved_so_far))
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        return _goal_with_progress(c, g, pf)
+        return _goal_with_progress(c, scope, g, pf)
 
 
 @app.patch("/api/tracking/goals/{goal_id}")
-def update_goal_endpoint(goal_id: int, m: GoalUpdateModel, payFreq: float = 24.0) -> dict:
+def update_goal_endpoint(goal_id: int, m: GoalUpdateModel, payFreq: float = 24.0, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     pf = _check_pay_freq(payFreq)    # validate BEFORE the write — a bad param must not commit
     fields: dict = {}
     if m.name is not None:
@@ -1508,18 +1582,19 @@ def update_goal_endpoint(goal_id: int, m: GoalUpdateModel, payFreq: float = 24.0
         fields["status"] = m.status
     with closing(tracking_store.connect()) as c:
         try:
-            g = tracking_store.update_goal(c, goal_id, **fields)
+            g = tracking_store.update_goal(c, scope, goal_id, **fields)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         if g is None:
             raise HTTPException(status_code=404, detail="goal not found")
-        return _goal_with_progress(c, g, pf)
+        return _goal_with_progress(c, scope, g, pf)
 
 
 @app.delete("/api/tracking/goals/{goal_id}")
-def delete_goal_endpoint(goal_id: int) -> dict:
+def delete_goal_endpoint(goal_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        tracking_store.delete_goal(c, goal_id)
+        tracking_store.delete_goal(c, scope, goal_id)
     return {"deleted": goal_id}
 
 
@@ -1549,8 +1624,8 @@ class VentureUpdateModel(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-def _venture_with_roi(c, v: dict) -> dict:
-    f = tracking_store.venture_flows(c, v)
+def _venture_with_roi(c, scope: str, v: dict) -> dict:
+    f = tracking_store.venture_flows(c, scope, v)
     out = dict(v)
     out["txnCount"] = f["txnCount"]
     by_month = {m: {"revenue": mm["revenueCents"] / 100.0, "cost": mm["costCents"] / 100.0}
@@ -1566,27 +1641,30 @@ def _venture_with_roi(c, v: dict) -> dict:
 
 
 @app.get("/api/tracking/ventures")
-def list_ventures_endpoint(includeStopped: bool = False) -> dict:
+def list_ventures_endpoint(includeStopped: bool = False, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        rows = tracking_store.list_ventures(c, include_stopped=includeStopped)
-        return {"ventures": [_venture_with_roi(c, v) for v in rows]}
+        rows = tracking_store.list_ventures(c, scope, include_stopped=includeStopped)
+        return {"ventures": [_venture_with_roi(c, scope, v) for v in rows]}
 
 
 @app.post("/api/tracking/ventures")
-def create_venture_endpoint(m: VentureModel) -> dict:
+def create_venture_endpoint(m: VentureModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
             v = tracking_store.create_venture(
-                c, m.name,
+                c, scope, m.name,
                 [{"label": i.label, "amountCents": _cents(i.amount)} for i in m.items],
                 m.started_on, tag=m.tag, account_id=m.account_id)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
-        return _venture_with_roi(c, v)
+        return _venture_with_roi(c, scope, v)
 
 
 @app.patch("/api/tracking/ventures/{venture_id}")
-def update_venture_endpoint(venture_id: int, m: VentureUpdateModel) -> dict:
+def update_venture_endpoint(venture_id: int, m: VentureUpdateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     fields: dict = {}
     if m.name is not None:
         fields["name"] = m.name
@@ -1602,18 +1680,19 @@ def update_venture_endpoint(venture_id: int, m: VentureUpdateModel) -> dict:
         fields["status"] = m.status
     with closing(tracking_store.connect()) as c:
         try:
-            v = tracking_store.update_venture(c, venture_id, **fields)
+            v = tracking_store.update_venture(c, scope, venture_id, **fields)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         if v is None:
             raise HTTPException(status_code=404, detail="venture not found")
-        return _venture_with_roi(c, v)
+        return _venture_with_roi(c, scope, v)
 
 
 @app.delete("/api/tracking/ventures/{venture_id}")
-def delete_venture_endpoint(venture_id: int) -> dict:
+def delete_venture_endpoint(venture_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        tracking_store.delete_venture(c, venture_id)
+        tracking_store.delete_venture(c, scope, venture_id)
     return {"deleted": venture_id}
 
 
@@ -1630,44 +1709,53 @@ class RecurringModel(BaseModel):
 
 
 @app.post("/api/tracking/recurring")
-def upsert_recurring_endpoint(m: RecurringModel) -> dict:
+def upsert_recurring_endpoint(m: RecurringModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
             return tracking_store.upsert_recurring(
-                c, m.category, direction=m.direction, bucket=m.bucket,
+                c, scope, m.category, direction=m.direction, bucket=m.bucket,
                 due_day=m.due_day, expected_cents=_cents(m.expected), active=m.active)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/api/tracking/recurring")
-def list_recurring_endpoint() -> dict:
+def list_recurring_endpoint(request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return {"recurring": tracking_store.list_recurring(c)}
+        return {"recurring": tracking_store.list_recurring(c, scope)}
 
 
 @app.delete("/api/tracking/recurring/{recurring_id}")
-def delete_recurring_endpoint(recurring_id: int) -> dict:
+def delete_recurring_endpoint(recurring_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        tracking_store.delete_recurring(c, recurring_id)
+        tracking_store.delete_recurring(c, scope, recurring_id)
     return {"deleted": recurring_id}
 
 
 @app.post("/api/tracking/transactions/import")
-def import_txns_endpoint(m: ImportModel) -> dict:
+def import_txns_endpoint(m: ImportModel, request: Request = None) -> dict:
     """Bulk CSV import. Header required; columns case-insensitive, order-independent:
     date,account,direction,amount,bucket,category,description,transfer_group,external_id.
-    Valid rows commit; bad rows are reported and skipped (partial success)."""
+    Valid rows commit; bad rows are reported and skipped (partial success). A member
+    imports into THEIR OWN accounts only — the by-name lookup and the numeric-id
+    fallback are both restricted to `list_accounts(c, scope, ...)`, so a row cannot
+    address another user's account by guessing its id."""
+    scope = resolve_user(request)["scopeId"]
     imported, skipped, errors = 0, 0, []
     with closing(tracking_store.connect()) as c:
-        accounts = {a["name"].lower(): a["id"] for a in tracking_store.list_accounts(c, include_archived=True)}
+        owned_accounts = tracking_store.list_accounts(c, scope, include_archived=True)
+        accounts = {a["name"].lower(): a["id"] for a in owned_accounts}
+        owned_ids = {a["id"] for a in owned_accounts}
         reader = csv.DictReader(io.StringIO(m.csv))
         for i, raw in enumerate(reader, start=2):     # row 1 is the header
             row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items()}
             try:
                 acct_key = row.get("account", "").lower()
                 acct_id = accounts.get(acct_key)
-                if acct_id is None and acct_key.isdigit():
+                if acct_id is None and acct_key.isdigit() and int(acct_key) in owned_ids:
                     acct_id = int(acct_key)
                 if acct_id is None:
                     raise ValueError(f"unknown account {row.get('account')!r}")
@@ -1678,7 +1766,7 @@ def import_txns_endpoint(m: ImportModel) -> dict:
                 tg = row.get("transfer_group") or None
                 tags = [s.strip() for s in (row.get("tags") or "").replace("|", ";").split(";") if s.strip()] or None
                 tracking_store.create_txn(
-                    c, acct_id, row["date"], direction, _cents(abs(amount)),
+                    c, scope, acct_id, row["date"], direction, _cents(abs(amount)),
                     bucket=(row.get("bucket") or None), category=(row.get("category") or None),
                     description=(row.get("description") or None),
                     is_transfer=bool(tg), transfer_group=tg,
@@ -1694,54 +1782,65 @@ def import_txns_endpoint(m: ImportModel) -> dict:
 # ----- balance snapshots -----
 
 @app.post("/api/tracking/snapshots")
-def upsert_snapshot_endpoint(m: SnapshotModel) -> dict:
+def upsert_snapshot_endpoint(m: SnapshotModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return tracking_store.upsert_snapshot(c, m.account_id, m.as_of, _cents(m.balance))
+        try:
+            tracking_store._require_own_account(c, scope, m.account_id)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return tracking_store.upsert_snapshot(c, scope, m.account_id, m.as_of, _cents(m.balance))
 
 
 @app.get("/api/tracking/snapshots")
 def list_snapshots_endpoint(accountId: int | None = None,
                             date_from: str | None = Query(None, alias="from"),
-                            date_to: str | None = Query(None, alias="to")) -> dict:
+                            date_to: str | None = Query(None, alias="to"),
+                            request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         return {"snapshots": tracking_store.list_snapshots(
-            c, account_id=accountId, date_from=date_from, date_to=date_to)}
+            c, scope, account_id=accountId, date_from=date_from, date_to=date_to)}
 
 
 @app.delete("/api/tracking/snapshots/{snapshot_id}")
-def delete_snapshot_endpoint(snapshot_id: int) -> dict:
+def delete_snapshot_endpoint(snapshot_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        tracking_store.delete_snapshot(c, snapshot_id)
+        tracking_store.delete_snapshot(c, scope, snapshot_id)
     return {"deleted": snapshot_id}
 
 
 # ----- plan baseline + the headline comparison -----
 
 @app.post("/api/tracking/plan/{month}/lock")
-def lock_plan_endpoint(month: str, m: PlanLockModel) -> dict:
+def lock_plan_endpoint(month: str, m: PlanLockModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     payload = tracking.build_plan(
         month, bucket_planned=m.bucket_planned, income_planned=m.income_planned,
         savings_rate_planned=m.savings_rate_planned, forecast_cone=m.forecast_cone,
         anchor_date=m.anchor_date, anchor_value=m.anchor_value, engine_version=m.engine_version,
     )
     with closing(tracking_store.connect()) as c:
-        return tracking_store.save_plan(c, month, payload, status=m.status, engine_version=m.engine_version)
+        return tracking_store.save_plan(c, scope, month, payload, status=m.status, engine_version=m.engine_version)
 
 
 @app.get("/api/tracking/plan/{month}")
-def get_plan_endpoint(month: str) -> dict:
+def get_plan_endpoint(month: str, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        plan = tracking_store.get_plan(c, month)
+        plan = tracking_store.get_plan(c, scope, month)
     if plan is None:
         raise HTTPException(status_code=404, detail="no plan for month")
     return plan
 
 
 @app.get("/api/tracking/plan-vs-actual")
-def plan_vs_actual_endpoint(month: str, tol: float = 0.05) -> dict:
+def plan_vs_actual_endpoint(month: str, tol: float = 0.05, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        actuals = tracking_store.month_actuals(c, month)
-        plan = tracking_store.get_plan(c, month)
+        actuals = tracking_store.month_actuals(c, scope, month)
+        plan = tracking_store.get_plan(c, scope, month)
     if plan is None:
         # No baseline yet — return actuals so the UI can still show them and prompt to lock.
         return {"month": month, "needsPlan": True, "comparison": None, "actuals": actuals}
@@ -1758,36 +1857,40 @@ def _scenario_blob_guard(obj, what: str) -> None:
 
 
 @app.get("/api/tracking/scenarios")
-def list_scenarios_endpoint() -> dict:
+def list_scenarios_endpoint(request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        return {"scenarios": tracking_store.list_scenarios(c)}
+        return {"scenarios": tracking_store.list_scenarios(c, scope)}
 
 
 @app.post("/api/tracking/scenarios")
-def create_scenario_endpoint(m: ScenarioCreateModel) -> dict:
+def create_scenario_endpoint(m: ScenarioCreateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     _scenario_blob_guard(m.spec, "spec")
     with closing(tracking_store.connect()) as c:
         try:
-            return tracking_store.create_scenario(c, m.name, m.spec)
+            return tracking_store.create_scenario(c, scope, m.name, m.spec)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.get("/api/tracking/scenarios/{scenario_id}")
-def get_scenario_endpoint(scenario_id: int) -> dict:
+def get_scenario_endpoint(scenario_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        s = tracking_store.get_scenario(c, scenario_id)
+        s = tracking_store.get_scenario(c, scope, scenario_id)
     if s is None:
         raise HTTPException(status_code=404, detail="scenario not found")
     return s
 
 
 @app.put("/api/tracking/scenarios/{scenario_id}")
-def update_scenario_endpoint(scenario_id: int, m: ScenarioUpdateModel) -> dict:
+def update_scenario_endpoint(scenario_id: int, m: ScenarioUpdateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     _scenario_blob_guard(m.spec, "spec")
     with closing(tracking_store.connect()) as c:
         try:
-            s = tracking_store.update_scenario(c, scenario_id, name=m.name, spec=m.spec)
+            s = tracking_store.update_scenario(c, scope, scenario_id, name=m.name, spec=m.spec)
         except tracking_store.ScenarioConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
@@ -1798,10 +1901,11 @@ def update_scenario_endpoint(scenario_id: int, m: ScenarioUpdateModel) -> dict:
 
 
 @app.delete("/api/tracking/scenarios/{scenario_id}")
-def delete_scenario_endpoint(scenario_id: int) -> dict:
+def delete_scenario_endpoint(scenario_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
-            ok = tracking_store.delete_scenario(c, scenario_id)
+            ok = tracking_store.delete_scenario(c, scope, scenario_id)
         except tracking_store.ScenarioConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
     if not ok:
@@ -1810,17 +1914,19 @@ def delete_scenario_endpoint(scenario_id: int) -> dict:
 
 
 @app.post("/api/tracking/scenarios/{scenario_id}/activate")
-def activate_scenario_endpoint(scenario_id: int, m: ScenarioActivateModel) -> dict:
+def activate_scenario_endpoint(scenario_id: int, m: ScenarioActivateModel, request: Request = None) -> dict:
     """Install the scenario from its activation month onward (DEC-017 #5): one
     transaction writing plan snapshots for months >= M through the same machinery
     as /plan/{month}/lock; months < M are never touched (DEC-007). 409 while
-    another scenario is active — revert it first."""
+    another scenario (of the CALLER's own) is active — revert it first; a different
+    user's active scenario never blocks this one (per-user one-active index)."""
+    scope = resolve_user(request)["scopeId"]
     _scenario_blob_guard(m.client_state, "clientState")
     plan_months = [pm.model_dump(by_alias=True) for pm in m.plan_months]
     with closing(tracking_store.connect()) as c:
         try:
             out = tracking_store.activate_scenario(
-                c, scenario_id, m.activation_month, plan_months, client_state=m.client_state)
+                c, scope, scenario_id, m.activation_month, plan_months, client_state=m.client_state)
         except tracking_store.ScenarioConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
@@ -1831,13 +1937,14 @@ def activate_scenario_endpoint(scenario_id: int, m: ScenarioActivateModel) -> di
 
 
 @app.post("/api/tracking/scenarios/{scenario_id}/revert")
-def revert_scenario_endpoint(scenario_id: int) -> dict:
+def revert_scenario_endpoint(scenario_id: int, request: Request = None) -> dict:
     """Exactly undo activation: restore every overwritten plan snapshot, delete the
     ones activation created, flip the scenario back to draft, and hand back the
     opaque clientState so the client restores its budget/Tax config (DEC-017 #6)."""
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
-            out = tracking_store.revert_scenario(c, scenario_id)
+            out = tracking_store.revert_scenario(c, scope, scenario_id)
         except tracking_store.ScenarioConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
     if out is None:
@@ -1869,12 +1976,13 @@ def scenario_plan_delta_endpoint(m: PlanDeltaModel) -> dict:
 
 
 @app.get("/api/tracking/card-rollup")
-def card_rollup_endpoint(month: str) -> dict:
+def card_rollup_endpoint(month: str, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        accounts = tracking_store.list_accounts(c)
+        accounts = tracking_store.list_accounts(c, scope)
         credit_ids = [a["id"] for a in accounts if a["type"] == "credit"]
         txns = tracking_store.list_txns(
-            c,
+            c, scope,
             date_to=tracking.month_end(month),
             account_ids=credit_ids,
         )
@@ -1883,12 +1991,13 @@ def card_rollup_endpoint(month: str) -> dict:
 
 
 @app.get("/api/tracking/open-pending")
-def open_pending_endpoint(month: str) -> dict:
+def open_pending_endpoint(month: str, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
-        accounts = tracking_store.list_accounts(c)
+        accounts = tracking_store.list_accounts(c, scope)
         credit_ids = [a["id"] for a in accounts if a["type"] == "credit"]
         txns = tracking_store.list_txns(
-            c,
+            c, scope,
             status="pending",
             date_before=f"{month}-01",
             account_ids=credit_ids,
@@ -1897,24 +2006,25 @@ def open_pending_endpoint(month: str) -> dict:
 
 
 @app.post("/api/tracking/card-payment")
-def card_payment_endpoint(m: CardPaymentModel) -> dict:
+def card_payment_endpoint(m: CardPaymentModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         if _cents(m.amount) <= 0:
             raise HTTPException(status_code=422, detail="amount must be > 0")
-        card_acct = tracking_store.get_account(c, m.card_account_id)
+        card_acct = tracking_store.get_account(c, scope, m.card_account_id)
         if card_acct is None or card_acct["type"] != "credit":
             raise HTTPException(status_code=422, detail="cardAccountId must be an existing credit account")
         if m.from_account_id is not None:
             if m.from_account_id == m.card_account_id:
                 raise HTTPException(status_code=422, detail="fromAccountId must differ from cardAccountId")
-            from_acct = tracking_store.get_account(c, m.from_account_id)
+            from_acct = tracking_store.get_account(c, scope, m.from_account_id)
             # No type check on from_acct: any account type may fund a card payment by design.
             if from_acct is None:
                 raise HTTPException(status_code=422, detail="fromAccountId must be an existing account")
         tg = uuid.uuid4().hex
         try:
             ids = tracking_store.record_card_payment(
-                c, m.card_account_id, _cents(m.amount), m.date, tg,
+                c, scope, m.card_account_id, _cents(m.amount), m.date, tg,
                 from_account_id=m.from_account_id, description="Card payment",
                 bucket=m.apply_to_category,
             )
@@ -1929,7 +2039,7 @@ def card_payment_endpoint(m: CardPaymentModel) -> dict:
 
 
 @app.patch("/api/tracking/card-payment/{in_leg_id}")
-def edit_card_payment_endpoint(in_leg_id: int, m: CardPaymentEditModel) -> dict:
+def edit_card_payment_endpoint(in_leg_id: int, m: CardPaymentEditModel, request: Request = None) -> dict:
     """Edit the amount and/or earmark bucket on a card-payment transfer-IN leg.
 
     Full-replace contract: ``applyToCategory`` absent or null clears any existing earmark
@@ -1937,13 +2047,14 @@ def edit_card_payment_endpoint(in_leg_id: int, m: CardPaymentEditModel) -> dict:
     stays balanced.  The funding account is not changed.
 
     Returns the updated IN-leg txn dict.
-    404 when the id does not exist; 422 when the id is not a card-payment IN-leg or
-    validation fails (non-positive amount, empty bucket string).
+    404 when the id does not exist (or belongs to another user); 422 when the id is not
+    a card-payment IN-leg or validation fails (non-positive amount, empty bucket string).
     """
+    scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         try:
             txn = tracking_store.update_card_payment(
-                c, in_leg_id,
+                c, scope, in_leg_id,
                 amount_cents=_cents(m.amount),
                 bucket=m.apply_to_category,
             )
@@ -1964,6 +2075,11 @@ def export_backup_endpoint(request: Request) -> JSONResponse:
     Owner-only (DEC-031 S0.2): this backs every backup-popup download scope that
     reaches the server (full + actuals-only both call this endpoint; client-only never
     calls the server at all — see server.py's DEC-031 report). Members get 403.
+
+    S1.1: NOT scoped to the caller — every user-owned table now carries `user_id`, so
+    this dump is explicitly the WHOLE HOUSEHOLD's data (envelope `scope:"household-full"`,
+    filename `household-backup-*`), never just the owner's. The per-user backup slice
+    (DEC-028) is deferred — see docs/multiuser-household-plan.md S1.1 §4c.
     """
     require_owner(request)
     with closing(tracking_store.connect()) as c:
@@ -1971,7 +2087,7 @@ def export_backup_endpoint(request: Request) -> JSONResponse:
     stamp = payload["exportedAt"].replace(":", "").replace("-", "")
     return JSONResponse(
         content=payload,
-        headers={"Content-Disposition": f'attachment; filename="actuals-backup-{stamp}.json"'},
+        headers={"Content-Disposition": f'attachment; filename="household-backup-{stamp}.json"'},
     )
 
 
@@ -1988,6 +2104,12 @@ async def import_backup_endpoint(request: Request) -> dict:
     malformed JSON or an invalid/incompatible backup; 500 if the safety-copy write
     fails (no mutation occurred). Owner-only (DEC-031 S0.2) — members get 403 before
     the body is even read.
+
+    S1.1: full-DB REPLACE, NOT scoped — restores every household member's rows. A
+    pre-S1.1 backup (no `user_id` in any row) restores correctly for free: the allow-
+    list INSERT simply omits the absent column, and the `NOT NULL DEFAULT '__owner__'`
+    assigns every restored legacy row to the owner (single-tenant data always was
+    owner data).
     """
     require_owner(request)
     content_length = request.headers.get("content-length")
@@ -2025,11 +2147,14 @@ def export_txns_csv_endpoint(request: Request,
     backup — see tracking_store.export_txns_csv for the column contract. 422 for a
     malformed date or from > to. Owner-only (DEC-031 S0.2 — this is an exfiltration
     surface): members get 403.
+
+    S1.1: scoped to the OWNER's own transactions (`scopeId` — always `__owner__` since
+    only the owner may call this) — their personal tax-prep export, not a household dump.
     """
-    require_owner(request)
+    owner = require_owner(request)
     with closing(tracking_store.connect()) as c:
         try:
-            csv_text = tracking_store.export_txns_csv(c, date_from, date_to)
+            csv_text = tracking_store.export_txns_csv(c, owner["scopeId"], date_from, date_to)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
     filename = f"transactions-{date_from or 'all'}_{date_to or 'all'}.csv"

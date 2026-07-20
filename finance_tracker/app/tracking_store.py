@@ -43,19 +43,24 @@ _MIN_SQLITE_VERSION = (3, 43, 0)
 
 # Single source of truth for backup/restore table and column identifiers — PARENT→CHILD order.
 # Table and column names come ONLY from this constant; never from the payload.
+# S1.1 note: `user_id` was added to the 10 user-owned tables' column tuples below (NOT to
+# txn_split/txn_tag, which inherit scope from their parent txn/tag via FK). A pre-S1.1
+# backup simply has no `user_id` key in its rows — the allow-list INSERT in import_all
+# already only uses columns present in the payload row, so the column's
+# `NOT NULL DEFAULT '__owner__'` assigns every restored legacy row to the owner for free.
 _BACKUP_TABLES: tuple = (
-    ("account",          ("id", "name", "type", "is_liability", "currency", "archived", "created_at", "invest_group")),
-    ("tag",              ("id", "name", "created_at")),
-    ("template",         ("id", "name", "direction", "amount_cents", "bucket", "category", "account_id", "description", "created_at")),
-    ("txn",              ("id", "account_id", "posted_on", "direction", "amount_cents", "bucket", "category", "description", "is_transfer", "transfer_group", "source", "external_id", "partner_owed_cents", "status", "kind", "created_at")),
+    ("account",          ("id", "user_id", "name", "type", "is_liability", "currency", "archived", "created_at", "invest_group")),
+    ("tag",              ("id", "user_id", "name", "created_at")),
+    ("template",         ("id", "user_id", "name", "direction", "amount_cents", "bucket", "category", "account_id", "description", "created_at")),
+    ("txn",              ("id", "user_id", "account_id", "posted_on", "direction", "amount_cents", "bucket", "category", "description", "is_transfer", "transfer_group", "source", "external_id", "partner_owed_cents", "status", "kind", "created_at")),
     ("txn_split",        ("id", "txn_id", "bucket", "category", "amount_cents")),
     ("txn_tag",          ("txn_id", "tag_id")),
-    ("balance_snapshot", ("id", "account_id", "as_of", "balance_cents", "source", "created_at")),
-    ("plan_snapshot",    ("id", "month", "status", "engine_version", "payload_json", "created_at", "locked_at")),
-    ("recurring",        ("id", "bucket", "category", "direction", "due_day", "expected_cents", "active", "created_at")),
-    ("scenario",         ("id", "name", "status", "payload_json", "created_at", "updated_at", "activated_at")),
-    ("goal",             ("id", "name", "target_cents", "target_date", "account_id", "manual_saved_cents", "status", "created_at")),
-    ("venture",          ("id", "name", "tag", "account_id", "items_json", "started_on", "status", "created_at")),
+    ("balance_snapshot", ("id", "user_id", "account_id", "as_of", "balance_cents", "source", "created_at")),
+    ("plan_snapshot",    ("id", "user_id", "month", "status", "engine_version", "payload_json", "created_at", "locked_at")),
+    ("recurring",        ("id", "user_id", "bucket", "category", "direction", "due_day", "expected_cents", "active", "created_at")),
+    ("scenario",         ("id", "user_id", "name", "status", "payload_json", "created_at", "updated_at", "activated_at")),
+    ("goal",             ("id", "user_id", "name", "target_cents", "target_date", "account_id", "manual_saved_cents", "status", "created_at")),
+    ("venture",          ("id", "user_id", "name", "tag", "account_id", "items_json", "started_on", "status", "created_at")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
@@ -82,6 +87,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS account (
   id           INTEGER PRIMARY KEY,
+  user_id      TEXT    NOT NULL DEFAULT '__owner__',
   name         TEXT    NOT NULL,
   type         TEXT    NOT NULL DEFAULT 'other'
                  CHECK (type IN ('checking','savings','brokerage','retirement','hsa','credit','loan','cash','other')),
@@ -94,6 +100,7 @@ CREATE TABLE IF NOT EXISTS account (
 
 CREATE TABLE IF NOT EXISTS txn (
   id             INTEGER PRIMARY KEY,
+  user_id        TEXT    NOT NULL DEFAULT '__owner__',
   account_id     INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
   posted_on      TEXT    NOT NULL,
   direction      TEXT    NOT NULL CHECK (direction IN ('in','out')),
@@ -117,6 +124,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe       ON txn(source, external_i
 
 CREATE TABLE IF NOT EXISTS balance_snapshot (
   id            INTEGER PRIMARY KEY,
+  user_id       TEXT    NOT NULL DEFAULT '__owner__',
   account_id    INTEGER NOT NULL REFERENCES account(id) ON DELETE CASCADE,
   as_of         TEXT    NOT NULL,
   balance_cents INTEGER NOT NULL,
@@ -128,18 +136,21 @@ CREATE INDEX IF NOT EXISTS idx_snap_account_date ON balance_snapshot(account_id,
 
 CREATE TABLE IF NOT EXISTS plan_snapshot (
   id             INTEGER PRIMARY KEY,
-  month          TEXT    NOT NULL UNIQUE,
+  user_id        TEXT    NOT NULL DEFAULT '__owner__',
+  month          TEXT    NOT NULL,
   status         TEXT    NOT NULL DEFAULT 'locked' CHECK (status IN ('draft','locked')),
   engine_version TEXT    NOT NULL,
   payload_json   TEXT    NOT NULL,
   created_at     TEXT    NOT NULL,
-  locked_at      TEXT
+  locked_at      TEXT,
+  UNIQUE (user_id, month)
 );
 
 -- Tags: free, multi, cross-cutting labels. ORTHOGONAL to the bucket rollup (DEC-009) —
 -- aggregate_actuals never reads them, so plan-vs-actual is unaffected.
 CREATE TABLE IF NOT EXISTS tag (
   id         INTEGER PRIMARY KEY,
+  user_id    TEXT    NOT NULL DEFAULT '__owner__',
   name       TEXT    NOT NULL,
   created_at TEXT    NOT NULL
 );
@@ -167,6 +178,7 @@ CREATE INDEX IF NOT EXISTS idx_split_txn ON txn_split(txn_id);
 -- auto-create transactions (DEC-009 — actuals must be real and user-confirmed).
 CREATE TABLE IF NOT EXISTS template (
   id           INTEGER PRIMARY KEY,
+  user_id      TEXT    NOT NULL DEFAULT '__owner__',
   name         TEXT    NOT NULL,
   direction    TEXT    NOT NULL DEFAULT 'out' CHECK (direction IN ('in','out')),
   amount_cents INTEGER NOT NULL DEFAULT 0,
@@ -183,6 +195,7 @@ CREATE TABLE IF NOT EXISTS template (
 -- (DEC-009). expected_cents is the planned estimate (e.g. electricity may bill more or less).
 CREATE TABLE IF NOT EXISTS recurring (
   id             INTEGER PRIMARY KEY,
+  user_id        TEXT    NOT NULL DEFAULT '__owner__',
   bucket         TEXT,
   category       TEXT    NOT NULL,
   direction      TEXT    NOT NULL DEFAULT 'out' CHECK (direction IN ('in','out')),
@@ -200,6 +213,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS recurring_key
 -- columns are promoted.
 CREATE TABLE IF NOT EXISTS scenario (
   id           INTEGER PRIMARY KEY,
+  user_id      TEXT    NOT NULL DEFAULT '__owner__',
   name         TEXT    NOT NULL,
   status       TEXT    NOT NULL DEFAULT 'draft'
                  CHECK (status IN ('draft','active')),
@@ -219,6 +233,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_scenario_active
 -- manual_saved_cents. The per-month/per-paycheck math is pure (goals.py) — never stored.
 CREATE TABLE IF NOT EXISTS goal (
   id                 INTEGER PRIMARY KEY,
+  user_id            TEXT    NOT NULL DEFAULT '__owner__',
   name               TEXT    NOT NULL,
   target_cents       INTEGER NOT NULL CHECK (target_cents > 0),
   target_date        TEXT    NOT NULL,
@@ -235,6 +250,7 @@ CREATE TABLE IF NOT EXISTS goal (
 -- OR an account (exactly one; enforced in code). Payback math is pure (ventures.py).
 CREATE TABLE IF NOT EXISTS venture (
   id         INTEGER PRIMARY KEY,
+  user_id    TEXT    NOT NULL DEFAULT '__owner__',
   name       TEXT    NOT NULL,
   tag        TEXT,
   account_id INTEGER REFERENCES account(id) ON DELETE SET NULL,
@@ -446,7 +462,107 @@ def _mig_add_users_table(conn) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_owner ON users(role) WHERE role = 'owner'")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table]
+# Sentinel every existing (single-tenant) row is backfilled to — the owner's data-scope id
+# (S1.1, docs/multiuser-household-plan.md, per-user data separation). Duplicated here (not
+# imported from the identity section below) because migrations must not depend on forward
+# references; kept textually identical to `_SENTINEL_OWNER_ID`.
+_MIGRATION_OWNER_SENTINEL = "__owner__"
+
+# The 9 tables that get `user_id` via a plain ALTER ADD COLUMN. `plan_snapshot` is handled
+# separately (_mig_add_user_scoping) because its month UNIQUE must become UNIQUE(user_id, month),
+# which SQLite cannot express via ALTER — it needs the copy-drop-rename rebuild.
+_USER_SCOPED_ALTER_TABLES = (
+    "account", "txn", "balance_snapshot", "tag", "template", "recurring", "scenario", "goal", "venture",
+)
+
+
+def _mig_add_user_scoping(conn) -> None:
+    """Migration 8 (S1.1, per-user data separation): additive `user_id` on every
+    user-owned table, backfilling ALL existing rows to the owner sentinel.
+
+    Why the DEFAULT *is* the backfill: SQLite requires a default to ADD a NOT NULL
+    column to a populated table, and every pre-existing row was single-tenant owner
+    data anyway -- `DEFAULT '__owner__'` assigns it correctly in one statement, and
+    makes restoring an old (pre-user_id) backup correct for free (see `import_all`'s
+    allow-list INSERT, which simply omits the column and lets the DEFAULT apply).
+
+    Store code must always pass `user_id` explicitly on every insert going forward --
+    the DEFAULT is a backfill/migration safety net, not a substitute for scoping.
+
+    Idempotent: each ALTER is guarded by a `PRAGMA table_info` check; the
+    `plan_snapshot` rebuild guards on the same check; the index drop/recreate block
+    uses `DROP INDEX IF EXISTS` / `CREATE ... IF NOT EXISTS` throughout.
+    """
+    # ---- 2a. plain ALTER ADD COLUMN on 9 tables ----
+    for tbl in _USER_SCOPED_ALTER_TABLES:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()]
+        if "user_id" not in cols:
+            conn.execute(
+                f"ALTER TABLE {tbl} ADD COLUMN user_id TEXT NOT NULL DEFAULT '{_MIGRATION_OWNER_SENTINEL}'")
+
+    # ---- 2b. plan_snapshot rebuild: month UNIQUE -> UNIQUE(user_id, month) ----
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(plan_snapshot)").fetchall()]
+    if "user_id" not in cols:
+        fk_state = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            conn.execute("DROP TABLE IF EXISTS plan_snapshot_new")  # crash-safety: prior interrupted run
+            conn.execute("""
+                CREATE TABLE plan_snapshot_new (
+                  id             INTEGER PRIMARY KEY,
+                  user_id        TEXT    NOT NULL DEFAULT '__owner__',
+                  month          TEXT    NOT NULL,
+                  status         TEXT    NOT NULL DEFAULT 'locked' CHECK (status IN ('draft','locked')),
+                  engine_version TEXT    NOT NULL,
+                  payload_json   TEXT    NOT NULL,
+                  created_at     TEXT    NOT NULL,
+                  locked_at      TEXT,
+                  UNIQUE (user_id, month)
+                )""")
+            conn.execute("""
+                INSERT INTO plan_snapshot_new (id, user_id, month, status, engine_version, payload_json, created_at, locked_at)
+                  SELECT id, '__owner__', month, status, engine_version, payload_json, created_at, locked_at
+                  FROM plan_snapshot""")
+            conn.execute("DROP TABLE plan_snapshot")
+            conn.execute("ALTER TABLE plan_snapshot_new RENAME TO plan_snapshot")
+        finally:
+            # NOTE: by this point an INSERT has opened an implicit transaction; PRAGMA foreign_keys
+            # is silently ignored inside a transaction. Harmless — connect() re-asserts
+            # PRAGMA foreign_keys=ON per request, so FK enforcement is never skipped at steady state.
+            conn.execute(f"PRAGMA foreign_keys = {fk_state}")
+
+    # ---- 2c. index plan: drop the four uniques that must become per-user, recreate
+    # per-user, plus plain scan indexes. These live ONLY here (never in SCHEMA) — see
+    # SCHEMA's ordering comment: a standalone CREATE INDEX referencing user_id would
+    # crash executescript(SCHEMA) on a v6 device DB, since it runs before this ALTER. ----
+    conn.execute("DROP INDEX IF EXISTS idx_tag_name")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tag_name ON tag(user_id, name COLLATE NOCASE)")
+    conn.execute("DROP INDEX IF EXISTS recurring_key")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS recurring_key "
+        "ON recurring(user_id, direction, IFNULL(bucket,''), category COLLATE NOCASE)")
+    conn.execute("DROP INDEX IF EXISTS idx_scenario_active")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_scenario_active ON scenario(user_id, status) WHERE status='active'")
+    conn.execute("DROP INDEX IF EXISTS idx_txn_dedupe")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_dedupe "
+        "ON txn(user_id, source, external_id) WHERE external_id IS NOT NULL")
+
+    conn.execute("DROP INDEX IF EXISTS idx_txn_posted")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_posted ON txn(user_id, posted_on)")
+    conn.execute("DROP INDEX IF EXISTS idx_txn_account")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_account ON txn(user_id, account_id)")
+    conn.execute("DROP INDEX IF EXISTS idx_txn_month_bucket")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_txn_user_mo_bucket ON txn(user_id, posted_on, bucket)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_account_user  ON account(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_snap_user     ON balance_snapshot(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_template_user ON template(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_goal_user     ON goal(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_venture_user  ON venture(user_id)")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping]
 
 
 def _now() -> str:
@@ -494,6 +610,21 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.commit()
     version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    # S1.1 pre-migration safety copy: an established DB (0 < version < 8) is about to
+    # cross into multi-tenancy (the `plan_snapshot` rebuild + 9 ALTER ADD COLUMNs).
+    # version == 0 means either a genuinely fresh DB (executescript(SCHEMA) never
+    # stamps user_version) or one so old no migration has ever run -- either way there
+    # is nothing irreplaceable to protect yet, so the copy is skipped. Mirrors
+    # import_all's `.pre-import-<ts>.bak` online-backup-API technique (WAL-consistent).
+    if 0 < version < 8:
+        db_file = _main_db_file(conn)
+        if db_file:                                    # '' for :memory: -- nothing to copy
+            bak = f"{db_file}.pre-multiuser.bak"
+            if not os.path.exists(bak):                 # preserve the TRUE pre-migration snapshot on re-runs
+                with closing(sqlite3.connect(bak)) as dest:
+                    conn.backup(dest)                   # OSError propagates -> abort boot before any mutation
+
     for i in range(version, len(_MIGRATIONS)):
         _MIGRATIONS[i](conn)
         # Commit the migration's changes BEFORE stamping the version, each step atomically, so a
@@ -533,7 +664,23 @@ def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
     for this same user_id as 'member' instead of surfacing a 500. The DB invariant
     already prevents two owners; this just turns the race into a graceful member
     assignment for whoever lost it.
+
+    Raises
+    ------
+    ValueError
+        If *user_id* is the reserved owner sentinel (SEV-S1.1-001). server.py's
+        resolve_user() already rejects this before ever calling here -- this is
+        defense-in-depth so the store itself refuses to provision it even if a future
+        caller path forgets that check. Provisioning it would let a real member be
+        assigned the literal `"__owner__"` id, which would then collide with (and be
+        indistinguishable from) the owner's data-scope slot.
     """
+    if user_id == _SENTINEL_OWNER_ID:
+        raise ValueError(
+            f"resolve_or_provision_user() refuses to provision the reserved owner "
+            f"sentinel ({_SENTINEL_OWNER_ID!r}); callers must reject this id before "
+            "calling here (SEV-S1.1-001)."
+        )
     row = conn.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,)).fetchone()
     if row is not None:
         return {"id": row["user_id"], "role": row["role"]}
@@ -622,32 +769,34 @@ def list_users(conn: sqlite3.Connection) -> list[dict]:
 
 # ---------- accounts ----------
 
-def create_account(conn, name, type="other", is_liability=False, currency="USD", invest_group=None) -> dict:
+def create_account(conn, user_id, name, type="other", is_liability=False, currency="USD", invest_group=None) -> dict:
     if type not in _ACCOUNT_TYPES:
         raise ValueError(f"invalid account type: {type!r}")
     invest_group = (invest_group or "").strip() or None
     cur = conn.execute(
-        "INSERT INTO account (name, type, is_liability, currency, created_at, invest_group) VALUES (?,?,?,?,?,?)",
-        (name, type, int(bool(is_liability)), currency, _now(), invest_group),
+        "INSERT INTO account (user_id, name, type, is_liability, currency, created_at, invest_group) VALUES (?,?,?,?,?,?,?)",
+        (user_id, name, type, int(bool(is_liability)), currency, _now(), invest_group),
     )
     conn.commit()
-    return get_account(conn, cur.lastrowid)
+    return get_account(conn, user_id, cur.lastrowid)
 
 
-def get_account(conn, account_id) -> dict | None:
-    row = conn.execute("SELECT * FROM account WHERE id = ?", (account_id,)).fetchone()
+def get_account(conn, user_id, account_id) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM account WHERE id = ? AND user_id = ?", (account_id, user_id)).fetchone()
     return _account_dict(row) if row else None
 
 
-def list_accounts(conn, include_archived=False) -> list[dict]:
-    sql = "SELECT * FROM account"
+def list_accounts(conn, user_id, include_archived=False) -> list[dict]:
+    sql = "SELECT * FROM account WHERE user_id = ?"
+    vals = [user_id]
     if not include_archived:
-        sql += " WHERE archived = 0"
+        sql += " AND archived = 0"
     sql += " ORDER BY name"
-    return [_account_dict(r) for r in conn.execute(sql).fetchall()]
+    return [_account_dict(r) for r in conn.execute(sql, vals).fetchall()]
 
 
-def update_account(conn, account_id, **fields) -> dict | None:
+def update_account(conn, user_id, account_id, **fields) -> dict | None:
     allowed = {"name", "type", "is_liability", "archived", "currency", "invest_group"}
     sets, vals = [], []
     for k, v in fields.items():
@@ -663,26 +812,28 @@ def update_account(conn, account_id, **fields) -> dict | None:
         vals.append(v)
     if sets:
         vals.append(account_id)
-        conn.execute(f"UPDATE account SET {', '.join(sets)} WHERE id = ?", vals)
+        vals.append(user_id)
+        conn.execute(f"UPDATE account SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals)
         conn.commit()
-    return get_account(conn, account_id)
+    return get_account(conn, user_id, account_id)
 
 
-def delete_account(conn, account_id) -> None:
+def delete_account(conn, user_id, account_id) -> None:
     # An account-linked venture would be orphaned to NO linkage (ON DELETE SET NULL breaks
     # the exactly-one invariant, review finding 2) — make the user relink or delete it first.
     row = conn.execute(
-        "SELECT name FROM venture WHERE account_id = ?", (account_id,)).fetchone()
+        "SELECT name FROM venture WHERE account_id = ? AND user_id = ?", (account_id, user_id)).fetchone()
     if row is not None:
         raise ValueError(
             f"account is linked to venture {row['name']!r} — switch that venture to a tag "
             "or delete it first")
-    conn.execute("DELETE FROM account WHERE id = ?", (account_id,))
+    conn.execute("DELETE FROM account WHERE id = ? AND user_id = ?", (account_id, user_id))
     conn.commit()
 
 
-def account_liability_map(conn) -> dict[int, bool]:
-    return {r["id"]: bool(r["is_liability"]) for r in conn.execute("SELECT id, is_liability FROM account")}
+def account_liability_map(conn, user_id) -> dict[int, bool]:
+    return {r["id"]: bool(r["is_liability"]) for r in conn.execute(
+        "SELECT id, is_liability FROM account WHERE user_id = ?", (user_id,))}
 
 
 def _account_dict(r) -> dict:
@@ -698,15 +849,21 @@ def _account_dict(r) -> dict:
 
 # ----- tags (orthogonal to the bucket rollup; aggregate_actuals never reads them) -----
 
-def _set_txn_tags(conn, txn_id, names) -> None:
-    """Replace a transaction's tags with `names` (upserting tags case-insensitively)."""
+def _set_txn_tags(conn, user_id, txn_id, names) -> None:
+    """Replace a transaction's tags with `names` (upserting tags case-insensitively,
+    scoped to the caller's own tags -- txn_tag inherits scope from its parent txn/tag,
+    but the tag lookup/creation itself must stay within the caller's user_id)."""
     conn.execute("DELETE FROM txn_tag WHERE txn_id = ?", (txn_id,))
     for raw in names or []:
         name = str(raw).strip()
         if not name:
             continue
-        conn.execute("INSERT OR IGNORE INTO tag (name, created_at) VALUES (?, ?)", (name, _now()))
-        tid = conn.execute("SELECT id FROM tag WHERE name = ? COLLATE NOCASE", (name,)).fetchone()["id"]
+        conn.execute(
+            "INSERT OR IGNORE INTO tag (user_id, name, created_at) VALUES (?, ?, ?)",
+            (user_id, name, _now()))
+        tid = conn.execute(
+            "SELECT id FROM tag WHERE user_id = ? AND name = ? COLLATE NOCASE",
+            (user_id, name)).fetchone()["id"]
         conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?, ?)", (txn_id, tid))
 
 
@@ -718,10 +875,11 @@ def _attach_tags(conn, d: dict) -> dict:
     return d
 
 
-def list_tags(conn) -> list[dict]:
+def list_tags(conn, user_id) -> list[dict]:
     return [{"id": r["id"], "name": r["name"], "count": r["n"]} for r in conn.execute(
         "SELECT t.id, t.name, COUNT(jt.txn_id) AS n FROM tag t "
-        "LEFT JOIN txn_tag jt ON jt.tag_id = t.id GROUP BY t.id ORDER BY n DESC, t.name").fetchall()]
+        "LEFT JOIN txn_tag jt ON jt.tag_id = t.id WHERE t.user_id = ? "
+        "GROUP BY t.id ORDER BY n DESC, t.name", (user_id,)).fetchall()]
 
 
 def _validate_splits(direction, is_transfer, amount_cents, splits) -> list:
@@ -752,7 +910,7 @@ def _attach_splits(conn, d: dict) -> dict:
     return d
 
 
-def create_txn(conn, account_id, posted_on, direction, amount_cents, *, bucket=None,
+def create_txn(conn, user_id, account_id, posted_on, direction, amount_cents, *, bucket=None,
                category=None, description=None, is_transfer=False, transfer_group=None,
                source="manual", external_id=None, tags=None, splits=None,
                partner_owed_cents=0, status='settled', kind='charge') -> dict:
@@ -772,24 +930,24 @@ def create_txn(conn, account_id, posted_on, direction, amount_cents, *, bucket=N
         raise ValueError("refunds cannot be split")
     legs = _validate_splits(direction, is_transfer, amount_cents, splits) if splits else []
     cur = conn.execute(
-        """INSERT INTO txn (account_id, posted_on, direction, amount_cents, bucket, category,
+        """INSERT INTO txn (user_id, account_id, posted_on, direction, amount_cents, bucket, category,
                description, is_transfer, transfer_group, source, external_id, partner_owed_cents,
                status, kind, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (account_id, posted_on, direction, int(amount_cents), bucket, category, description,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (user_id, account_id, posted_on, direction, int(amount_cents), bucket, category, description,
          int(bool(is_transfer)), transfer_group, source, external_id, int(partner_owed_cents or 0),
          status, kind, _now()),
     )
     txn_id = cur.lastrowid
     if tags:
-        _set_txn_tags(conn, txn_id, tags)
+        _set_txn_tags(conn, user_id, txn_id, tags)
     for (b, cat, ac) in legs:
         conn.execute("INSERT INTO txn_split (txn_id, bucket, category, amount_cents) VALUES (?,?,?,?)", (txn_id, b, cat, ac))
     conn.commit()
     return _attach_splits(conn, _attach_tags(conn, _txn_dict(conn.execute("SELECT * FROM txn WHERE id = ?", (txn_id,)).fetchone())))
 
 
-def record_card_payment(conn, card_account_id, amount_cents, posted_on, transfer_group, *,
+def record_card_payment(conn, user_id, card_account_id, amount_cents, posted_on, transfer_group, *,
                         from_account_id=None, description=None, bucket=None) -> list[int]:
     """Insert a credit-card payment transfer (one or two legs).
 
@@ -800,7 +958,9 @@ def record_card_payment(conn, card_account_id, amount_cents, posted_on, transfer
         bucket is always None on Leg 2; the funding leg carries no category.
 
     Both legs share the same transfer_group so they can be matched as a pair.
-    A single conn.commit() covers both inserts atomically.
+    A single conn.commit() covers both inserts atomically. Both legs are stamped with the
+    caller's own `user_id` — the caller (server.py) must have already verified ownership of
+    both card_account_id and from_account_id via `_require_own_account`.
 
     Returns
     -------
@@ -815,22 +975,22 @@ def record_card_payment(conn, card_account_id, amount_cents, posted_on, transfer
     if bucket is not None and not str(bucket).strip():
         raise ValueError("bucket must not be empty")
     cur = conn.execute(
-        """INSERT INTO txn (account_id, posted_on, direction, amount_cents, bucket, category,
+        """INSERT INTO txn (user_id, account_id, posted_on, direction, amount_cents, bucket, category,
                description, is_transfer, transfer_group, source, external_id, partner_owed_cents,
                status, kind, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (card_account_id, posted_on, "in", int(amount_cents), bucket, None, description,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (user_id, card_account_id, posted_on, "in", int(amount_cents), bucket, None, description,
          1, transfer_group, "manual", None, 0, "settled", "charge", _now()),
     )
     card_in_id = cur.lastrowid
     ids: list[int] = [card_in_id]
     if from_account_id is not None:
         cur2 = conn.execute(
-            """INSERT INTO txn (account_id, posted_on, direction, amount_cents, bucket, category,
+            """INSERT INTO txn (user_id, account_id, posted_on, direction, amount_cents, bucket, category,
                    description, is_transfer, transfer_group, source, external_id, partner_owed_cents,
                    status, kind, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (from_account_id, posted_on, "out", int(amount_cents), None, None, description,
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, from_account_id, posted_on, "out", int(amount_cents), None, None, description,
              1, transfer_group, "manual", None, 0, "settled", "charge", _now()),
         )
         ids.append(cur2.lastrowid)
@@ -838,9 +998,9 @@ def record_card_payment(conn, card_account_id, amount_cents, posted_on, transfer
     return ids
 
 
-def list_txns(conn, *, month=None, account_id=None, bucket=None, direction=None, tag=None,
+def list_txns(conn, user_id, *, month=None, account_id=None, bucket=None, direction=None, tag=None,
               date_to=None, account_ids=None, status=None, date_before=None) -> list[dict]:
-    """Return transactions matching the given filters.
+    """Return transactions matching the given filters, scoped to `user_id`.
 
     New optional params (backward-compatible; existing callers unaffected):
       date_to     — ISO date string; keeps rows where posted_on <= date_to.
@@ -856,7 +1016,7 @@ def list_txns(conn, *, month=None, account_id=None, bucket=None, direction=None,
     sql = "SELECT t.* FROM txn t"
     if tag:
         sql += " JOIN txn_tag jt ON jt.txn_id = t.id JOIN tag tg ON tg.id = jt.tag_id"
-    where, vals = ["1=1"], []
+    where, vals = ["t.user_id = ?"], [user_id]
     if tag:
         where.append("tg.name = ? COLLATE NOCASE"); vals.append(tag)
     if month:
@@ -903,10 +1063,12 @@ def list_txns(conn, *, month=None, account_id=None, bucket=None, direction=None,
     return dicts
 
 
-def update_txn(conn, txn_id, **fields) -> dict | None:
+def update_txn(conn, user_id, txn_id, **fields) -> dict | None:
     """Patch a transaction in place (edit a mistyped amount, re-bucket, fix a category).
-    Only known columns are updated; bucket/direction are validated. Returns the updated
-    row dict, or None if the id doesn't exist."""
+    Only known columns are updated; bucket/direction are validated. Scoped to the
+    caller's own row: the UPDATE/SELECT both filter `AND user_id = ?`, so an id
+    belonging to another user is indistinguishable from a nonexistent one (returns
+    None -> the endpoint layer maps this to 404, never leaking existence)."""
     tags = fields.pop("tags", None)                          # tags aren't a txn column — set separately
     allowed = {"posted_on", "direction", "amount_cents", "bucket", "category",
                "description", "is_transfer", "transfer_group", "partner_owed_cents",
@@ -914,8 +1076,7 @@ def update_txn(conn, txn_id, **fields) -> dict | None:
     if "direction" in fields and fields["direction"] not in ("in", "out"):
         raise ValueError(f"direction must be 'in' or 'out', got {fields['direction']!r}")
     if "account_id" in fields:                               # validate here for a clean 422 (FK would 500)
-        if not conn.execute("SELECT 1 FROM account WHERE id = ?", (fields["account_id"],)).fetchone():
-            raise ValueError(f"account {fields['account_id']} does not exist")
+        _require_own_account(conn, user_id, fields["account_id"])
     if fields.get("bucket") is not None and not str(fields["bucket"]).strip():
         raise ValueError(f"bucket must not be empty")
     if "amount_cents" in fields and fields["amount_cents"] is not None and fields["amount_cents"] < 0:
@@ -936,19 +1097,22 @@ def update_txn(conn, txn_id, **fields) -> dict | None:
         vals.append(v)
     if sets:
         vals.append(txn_id)
-        conn.execute(f"UPDATE txn SET {', '.join(sets)} WHERE id = ?", vals)
+        vals.append(user_id)
+        conn.execute(f"UPDATE txn SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals)
         conn.commit()
-    row = conn.execute("SELECT * FROM txn WHERE id = ?", (txn_id,)).fetchone()
+    row = conn.execute("SELECT * FROM txn WHERE id = ? AND user_id = ?", (txn_id, user_id)).fetchone()
     if row is None:
         return None
     if tags is not None:
-        _set_txn_tags(conn, txn_id, tags)                    # replace; only after we know the row exists
+        _set_txn_tags(conn, user_id, txn_id, tags)           # replace; only after we know the row exists
         conn.commit()
     return _attach_tags(conn, _txn_dict(row))
 
 
-def delete_txn(conn, txn_id) -> list[int]:
-    """Delete a transaction and — when it belongs to a transfer_group — every leg in that group.
+def delete_txn(conn, user_id, txn_id) -> list[int]:
+    """Delete a transaction and — when it belongs to a transfer_group — every leg in that
+    group, scoped to the caller's own rows (`AND user_id = ?` on both SELECTs and the
+    DELETE) so a foreign id is a no-op, not a leak.
 
     This fixes the orphan-leg bug: deleting one side of a paired card payment now atomically
     removes both legs in a single DELETE statement and a single commit.
@@ -957,31 +1121,34 @@ def delete_txn(conn, txn_id) -> list[int]:
     -------
     list[int]
         Ids of every row removed, in the order returned by the SELECT.  Empty when the id
-        does not exist (idempotent no-op).  The caller (delete_txn_endpoint) surfaces this
-        as `deletedIds` / `rows` in the response so the client can reconcile both legs.
+        does not exist (or belongs to another user — idempotent no-op).  The caller
+        (delete_txn_endpoint) surfaces this as `deletedIds` / `rows` in the response so the
+        client can reconcile both legs.
 
     Notes
     -----
     * txn_tag and txn_split cascade via ON DELETE CASCADE — no extra DELETE needed.
     * SELECT-then-DELETE (not DELETE…RETURNING) for portability to minimal SQLite images.
     """
-    row = conn.execute("SELECT transfer_group FROM txn WHERE id = ?", (txn_id,)).fetchone()
+    row = conn.execute(
+        "SELECT transfer_group FROM txn WHERE id = ? AND user_id = ?", (txn_id, user_id)).fetchone()
     if row is None:
         return []
     tg = row["transfer_group"]
     if tg is None:
-        conn.execute("DELETE FROM txn WHERE id = ?", (txn_id,))
+        conn.execute("DELETE FROM txn WHERE id = ? AND user_id = ?", (txn_id, user_id))
         conn.commit()
         return [txn_id]
-    ids_rows = conn.execute("SELECT id FROM txn WHERE transfer_group = ?", (tg,)).fetchall()
+    ids_rows = conn.execute(
+        "SELECT id FROM txn WHERE transfer_group = ? AND user_id = ?", (tg, user_id)).fetchall()
     ids = [r["id"] for r in ids_rows]
     ph = ",".join("?" * len(ids))
-    conn.execute(f"DELETE FROM txn WHERE id IN ({ph})", ids)
+    conn.execute(f"DELETE FROM txn WHERE id IN ({ph}) AND user_id = ?", ids + [user_id])
     conn.commit()
     return ids
 
 
-def update_card_payment(conn, in_leg_id, *, amount_cents, bucket) -> dict | None:
+def update_card_payment(conn, user_id, in_leg_id, *, amount_cents, bucket) -> dict | None:
     """Edit the amount and/or earmark on a card-payment IN-leg (DEC-014).
 
     This is a FULL-REPLACE contract:
@@ -1003,7 +1170,7 @@ def update_card_payment(conn, in_leg_id, *, amount_cents, bucket) -> dict | None
     -------
     dict | None
         The updated IN-leg as a ``_txn_dict`` dict, or ``None`` when ``in_leg_id`` does
-        not exist.
+        not exist, or belongs to another user (scoped lookup — never leaks existence).
 
     Raises
     ------
@@ -1012,7 +1179,8 @@ def update_card_payment(conn, in_leg_id, *, amount_cents, bucket) -> dict | None
         * ``amount_cents`` is not a positive ``int``.
         * ``bucket`` is a non-None empty/whitespace string.
     """
-    row = conn.execute("SELECT * FROM txn WHERE id = ?", (in_leg_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM txn WHERE id = ? AND user_id = ?", (in_leg_id, user_id)).fetchone()
     if row is None:
         return None
     if not row["is_transfer"] or row["direction"] != "in":
@@ -1022,15 +1190,20 @@ def update_card_payment(conn, in_leg_id, *, amount_cents, bucket) -> dict | None
     if bucket is not None and not str(bucket).strip():
         raise ValueError("bucket must not be empty or whitespace")
     # Earmark on IN-leg only
-    conn.execute("UPDATE txn SET bucket = ? WHERE id = ?", (bucket, in_leg_id))
+    conn.execute("UPDATE txn SET bucket = ? WHERE id = ? AND user_id = ?", (bucket, in_leg_id, user_id))
     # Amount on both legs (via transfer_group when present; otherwise just this row)
     tg = row["transfer_group"]
     if tg is not None:
-        conn.execute("UPDATE txn SET amount_cents = ? WHERE transfer_group = ?", (amount_cents, tg))
+        conn.execute(
+            "UPDATE txn SET amount_cents = ? WHERE transfer_group = ? AND user_id = ?",
+            (amount_cents, tg, user_id))
     else:
-        conn.execute("UPDATE txn SET amount_cents = ? WHERE id = ?", (amount_cents, in_leg_id))
+        conn.execute(
+            "UPDATE txn SET amount_cents = ? WHERE id = ? AND user_id = ?",
+            (amount_cents, in_leg_id, user_id))
     conn.commit()
-    updated = conn.execute("SELECT * FROM txn WHERE id = ?", (in_leg_id,)).fetchone()
+    updated = conn.execute(
+        "SELECT * FROM txn WHERE id = ? AND user_id = ?", (in_leg_id, user_id)).fetchone()
     return _txn_dict(updated)
 
 
@@ -1048,23 +1221,27 @@ def _txn_dict(r) -> dict:
 
 # ---------- balance snapshots (upsert per account+date) ----------
 
-def upsert_snapshot(conn, account_id, as_of, balance_cents, source="manual") -> dict:
+def upsert_snapshot(conn, user_id, account_id, as_of, balance_cents, source="manual") -> dict:
+    # Caller (server.py) must already have verified account_id belongs to user_id via
+    # _require_own_account. The UNIQUE(account_id, as_of) conflict target is unchanged —
+    # account_id alone already implies a single user, so it needs no user_id in the key.
     conn.execute(
-        """INSERT INTO balance_snapshot (account_id, as_of, balance_cents, source, created_at)
-           VALUES (?,?,?,?,?)
+        """INSERT INTO balance_snapshot (user_id, account_id, as_of, balance_cents, source, created_at)
+           VALUES (?,?,?,?,?,?)
            ON CONFLICT(account_id, as_of)
            DO UPDATE SET balance_cents = excluded.balance_cents, source = excluded.source""",
-        (account_id, as_of, int(balance_cents), source, _now()),
+        (user_id, account_id, as_of, int(balance_cents), source, _now()),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT * FROM balance_snapshot WHERE account_id = ? AND as_of = ?", (account_id, as_of)
+        "SELECT * FROM balance_snapshot WHERE account_id = ? AND as_of = ? AND user_id = ?",
+        (account_id, as_of, user_id)
     ).fetchone()
     return _snapshot_dict(row)
 
 
-def list_snapshots(conn, *, account_id=None, date_from=None, date_to=None) -> list[dict]:
-    sql, vals = "SELECT * FROM balance_snapshot WHERE 1=1", []
+def list_snapshots(conn, user_id, *, account_id=None, date_from=None, date_to=None) -> list[dict]:
+    sql, vals = "SELECT * FROM balance_snapshot WHERE user_id = ?", [user_id]
     if account_id is not None:
         sql += " AND account_id = ?"
         vals.append(account_id)
@@ -1078,8 +1255,8 @@ def list_snapshots(conn, *, account_id=None, date_from=None, date_to=None) -> li
     return [_snapshot_dict(r) for r in conn.execute(sql, vals).fetchall()]
 
 
-def delete_snapshot(conn, snapshot_id) -> None:
-    conn.execute("DELETE FROM balance_snapshot WHERE id = ?", (snapshot_id,))
+def delete_snapshot(conn, user_id, snapshot_id) -> None:
+    conn.execute("DELETE FROM balance_snapshot WHERE id = ? AND user_id = ?", (snapshot_id, user_id))
     conn.commit()
 
 
@@ -1093,7 +1270,7 @@ def _snapshot_dict(r) -> dict:
 
 # ---------- plan snapshots ----------
 
-def _save_plan_row(conn, month, payload: dict, status="locked", engine_version="1.0",
+def _save_plan_row(conn, user_id, month, payload: dict, status="locked", engine_version="1.0",
                    locked_at: str | None = None) -> None:
     """The save_plan upsert WITHOUT the commit, so multi-month writers (scenario
     activate/revert, DEC-017) can batch it inside one transaction. `locked_at`
@@ -1101,25 +1278,26 @@ def _save_plan_row(conn, month, payload: dict, status="locked", engine_version="
     if locked_at is None:
         locked_at = _now() if status == "locked" else None
     conn.execute(
-        """INSERT INTO plan_snapshot (month, status, engine_version, payload_json, created_at, locked_at)
-           VALUES (?,?,?,?,?,?)
-           ON CONFLICT(month) DO UPDATE SET
+        """INSERT INTO plan_snapshot (user_id, month, status, engine_version, payload_json, created_at, locked_at)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(user_id, month) DO UPDATE SET
                status = excluded.status, engine_version = excluded.engine_version,
                payload_json = excluded.payload_json, locked_at = excluded.locked_at""",
-        (month, status, engine_version, json.dumps(payload), _now(), locked_at),
+        (user_id, month, status, engine_version, json.dumps(payload), _now(), locked_at),
     )
 
 
-def save_plan(conn, month, payload: dict, status="locked", engine_version="1.0") -> dict:
+def save_plan(conn, user_id, month, payload: dict, status="locked", engine_version="1.0") -> dict:
     """Upsert the month's plan baseline. status='draft' (mutable, open month) or
     'locked' (immutable history). Re-saving a locked month replaces its payload."""
-    _save_plan_row(conn, month, payload, status, engine_version)
+    _save_plan_row(conn, user_id, month, payload, status, engine_version)
     conn.commit()
-    return get_plan(conn, month)
+    return get_plan(conn, user_id, month)
 
 
-def get_plan(conn, month) -> dict | None:
-    row = conn.execute("SELECT * FROM plan_snapshot WHERE month = ?", (month,)).fetchone()
+def get_plan(conn, user_id, month) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM plan_snapshot WHERE user_id = ? AND month = ?", (user_id, month)).fetchone()
     if not row:
         return None
     return {
@@ -1129,19 +1307,22 @@ def get_plan(conn, month) -> dict | None:
     }
 
 
-def delete_plan(conn, month) -> int:
+def delete_plan(conn, user_id, month) -> int:
     """Remove a month's plan baseline. Used by scenario revert to undo a plan row that
     activation created where none existed (DEC-017 #6). Returns rows deleted (0 or 1)."""
-    cur = conn.execute("DELETE FROM plan_snapshot WHERE month = ?", (month,))
+    cur = conn.execute("DELETE FROM plan_snapshot WHERE user_id = ? AND month = ?", (user_id, month))
     conn.commit()
     return cur.rowcount
 
 
 # ---------- the aggregate the dashboard endpoint consumes ----------
 
-def month_actuals(conn, month: str) -> dict:
-    """Fetch the month's transactions + ALL snapshots and hand them to the pure
-    aggregator. (Snapshots span history because the net-worth overlay is a trajectory.)"""
+def month_actuals(conn, user_id, month: str) -> dict:
+    """Fetch the month's transactions + ALL snapshots (scoped to `user_id`) and hand
+    them to the pure aggregator. (Snapshots span history because the net-worth overlay
+    is a trajectory.) All user filtering happens HERE in the store query layer —
+    `tracking.aggregate_actuals` itself stays byte-unchanged (DEC-009 #1): it still
+    receives the same flat row shape and never sees `user_id`."""
     like = f"{month}-%"
     # Flatten splits in the STORE so the pure aggregator never changes (DEC-009): a txn WITH
     # splits is excluded from the first SELECT; its children (own bucket/amount, parent's
@@ -1150,28 +1331,30 @@ def month_actuals(conn, month: str) -> dict:
         """SELECT t.account_id, t.posted_on, t.direction,
                   CASE WHEN t.kind='refund' THEN -t.amount_cents ELSE t.amount_cents END AS amount_cents,
                   t.bucket, t.is_transfer
-             FROM txn t WHERE t.posted_on LIKE ?
+             FROM txn t WHERE t.posted_on LIKE ? AND t.user_id = ?
                AND NOT EXISTS (SELECT 1 FROM txn_split s WHERE s.txn_id = t.id)
            UNION ALL
            SELECT t.account_id, t.posted_on, t.direction,
                   CASE WHEN t.kind='refund' THEN -s.amount_cents ELSE s.amount_cents END AS amount_cents,
                   s.bucket, t.is_transfer
-             FROM txn_split s JOIN txn t ON t.id = s.txn_id WHERE t.posted_on LIKE ?""",
-        (like, like)).fetchall()]
+             FROM txn_split s JOIN txn t ON t.id = s.txn_id WHERE t.posted_on LIKE ? AND t.user_id = ?""",
+        (like, user_id, like, user_id)).fetchall()]
     snap_rows = [dict(r) for r in conn.execute(
-        "SELECT account_id, as_of, balance_cents FROM balance_snapshot").fetchall()]
-    return tracking.aggregate_actuals(txn_rows, snap_rows, account_liability_map(conn), month)
+        "SELECT account_id, as_of, balance_cents FROM balance_snapshot WHERE user_id = ?",
+        (user_id,)).fetchall()]
+    return tracking.aggregate_actuals(txn_rows, snap_rows, account_liability_map(conn, user_id), month)
 
 
-def suggestions(conn) -> dict:
+def suggestions(conn, user_id) -> dict:
     """Drives quick-add autocomplete + payee memory. `payees`: for each description seen,
     the most-frequent {bucket, category} the user chose (→ overridable auto-fill).
-    `categoriesByBucket`: distinct categories per bucket, most-used first (→ datalist)."""
+    `categoriesByBucket`: distinct categories per bucket, most-used first (→ datalist).
+    Every GROUP BY is scoped to the caller's own transactions."""
     payees: dict[str, dict] = {}
     for r in conn.execute(
         "SELECT description, bucket, category, COUNT(*) AS n, MAX(posted_on) AS last "
-        "FROM txn WHERE description IS NOT NULL AND TRIM(description) <> '' "
-        "GROUP BY LOWER(description), bucket, category"
+        "FROM txn WHERE user_id = ? AND description IS NOT NULL AND TRIM(description) <> '' "
+        "GROUP BY LOWER(description), bucket, category", (user_id,)
     ).fetchall():
         key = r["description"].strip().lower()
         cur = payees.get(key)
@@ -1181,8 +1364,8 @@ def suggestions(conn) -> dict:
     cats: dict[str, list] = {}
     for r in conn.execute(
         "SELECT bucket, category, COUNT(*) AS n FROM txn "
-        "WHERE category IS NOT NULL AND TRIM(category) <> '' "
-        "GROUP BY bucket, category ORDER BY n DESC"
+        "WHERE user_id = ? AND category IS NOT NULL AND TRIM(category) <> '' "
+        "GROUP BY bucket, category ORDER BY n DESC", (user_id,)
     ).fetchall():
         cats.setdefault(r["bucket"] or "", []).append(r["category"])
     # Tags usually applied to each payee (most-frequent first) → auto-fill the tag chips too.
@@ -1190,8 +1373,8 @@ def suggestions(conn) -> dict:
     for r in conn.execute(
         "SELECT LOWER(t.description) AS dkey, tg.name AS tag, COUNT(*) AS n "
         "FROM txn t JOIN txn_tag jt ON jt.txn_id = t.id JOIN tag tg ON tg.id = jt.tag_id "
-        "WHERE t.description IS NOT NULL AND TRIM(t.description) <> '' "
-        "GROUP BY LOWER(t.description), tg.name ORDER BY n DESC, tg.name"
+        "WHERE t.user_id = ? AND t.description IS NOT NULL AND TRIM(t.description) <> '' "
+        "GROUP BY LOWER(t.description), tg.name ORDER BY n DESC, tg.name", (user_id,)
     ).fetchall():
         payee_tags.setdefault(r["dkey"], []).append(r["tag"])
     for p in payees.values():
@@ -1207,26 +1390,27 @@ def _template_dict(r) -> dict:
             "category": r["category"], "accountId": r["account_id"], "description": r["description"]}
 
 
-def create_template(conn, name, *, direction="out", amount_cents=0, bucket=None,
+def create_template(conn, user_id, name, *, direction="out", amount_cents=0, bucket=None,
                     category=None, account_id=None, description=None) -> dict:
     if direction not in ("in", "out"):
         raise ValueError(f"direction must be 'in' or 'out', got {direction!r}")
     if bucket is not None and not str(bucket).strip():
         raise ValueError(f"bucket must not be empty")
     cur = conn.execute(
-        """INSERT INTO template (name, direction, amount_cents, bucket, category, account_id, description, created_at)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (name, direction, int(amount_cents), bucket, category, account_id, description, _now()))
+        """INSERT INTO template (user_id, name, direction, amount_cents, bucket, category, account_id, description, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (user_id, name, direction, int(amount_cents), bucket, category, account_id, description, _now()))
     conn.commit()
     return _template_dict(conn.execute("SELECT * FROM template WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-def list_templates(conn) -> list[dict]:
-    return [_template_dict(r) for r in conn.execute("SELECT * FROM template ORDER BY name").fetchall()]
+def list_templates(conn, user_id) -> list[dict]:
+    return [_template_dict(r) for r in conn.execute(
+        "SELECT * FROM template WHERE user_id = ? ORDER BY name", (user_id,)).fetchall()]
 
 
-def delete_template(conn, template_id) -> None:
-    conn.execute("DELETE FROM template WHERE id = ?", (template_id,))
+def delete_template(conn, user_id, template_id) -> None:
+    conn.execute("DELETE FROM template WHERE id = ? AND user_id = ?", (template_id, user_id))
     conn.commit()
 
 
@@ -1250,35 +1434,40 @@ def _goal_dict(row) -> dict:
     }
 
 
-def _require_account(conn, account_id) -> None:
-    if not conn.execute("SELECT 1 FROM account WHERE id = ?", (account_id,)).fetchone():
+def _require_own_account(conn, user_id, account_id) -> None:
+    """Cross-entity ownership guard (S1.1): any account_id supplied in a request body
+    must belong to the caller's own scope before use. Replaces the old existence-only
+    `_require_account` — a foreign account_id must be rejected exactly like a
+    nonexistent one (ValueError -> 422), never silently linked."""
+    if not conn.execute(
+            "SELECT 1 FROM account WHERE id = ? AND user_id = ?", (account_id, user_id)).fetchone():
         raise ValueError(f"account {account_id} does not exist")
 
 
-def create_goal(conn, name, target_cents, target_date, account_id=None, manual_saved_cents=None) -> dict:
+def create_goal(conn, user_id, name, target_cents, target_date, account_id=None, manual_saved_cents=None) -> dict:
     if not str(name or "").strip():
         raise ValueError("name must not be empty")
     if not isinstance(target_cents, int) or target_cents <= 0:
         raise ValueError(f"target_cents must be an int > 0, got {target_cents!r}")
     target_date = _valid_goal_date(target_date)
     if account_id is not None:
-        _require_account(conn, account_id)
+        _require_own_account(conn, user_id, account_id)
     if manual_saved_cents is not None and (not isinstance(manual_saved_cents, int) or manual_saved_cents < 0):
         raise ValueError(f"manual_saved_cents must be an int >= 0, got {manual_saved_cents!r}")
     cur = conn.execute(
-        """INSERT INTO goal (name, target_cents, target_date, account_id, manual_saved_cents, status, created_at)
-           VALUES (?,?,?,?,?,'active',?)""",
-        (str(name).strip(), target_cents, target_date, account_id, manual_saved_cents, _now()))
+        """INSERT INTO goal (user_id, name, target_cents, target_date, account_id, manual_saved_cents, status, created_at)
+           VALUES (?,?,?,?,?,?,'active',?)""",
+        (user_id, str(name).strip(), target_cents, target_date, account_id, manual_saved_cents, _now()))
     conn.commit()
     return _goal_dict(conn.execute("SELECT * FROM goal WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-def list_goals(conn, include_inactive=False) -> list[dict]:
-    q = "SELECT * FROM goal" + ("" if include_inactive else " WHERE status = 'active'") + " ORDER BY target_date, id"
-    return [_goal_dict(r) for r in conn.execute(q).fetchall()]
+def list_goals(conn, user_id, include_inactive=False) -> list[dict]:
+    q = "SELECT * FROM goal WHERE user_id = ?" + ("" if include_inactive else " AND status = 'active'") + " ORDER BY target_date, id"
+    return [_goal_dict(r) for r in conn.execute(q, (user_id,)).fetchall()]
 
 
-def update_goal(conn, goal_id, **fields) -> dict | None:
+def update_goal(conn, user_id, goal_id, **fields) -> dict | None:
     """Patch a goal. account_id=None explicitly unlinks (manual progress takes over)."""
     allowed = {"name", "target_cents", "target_date", "account_id", "manual_saved_cents", "status"}
     unknown = set(fields) - allowed
@@ -1291,7 +1480,7 @@ def update_goal(conn, goal_id, **fields) -> dict | None:
     if "target_date" in fields:
         fields["target_date"] = _valid_goal_date(fields["target_date"])
     if fields.get("account_id") is not None:
-        _require_account(conn, fields["account_id"])
+        _require_own_account(conn, user_id, fields["account_id"])
     if fields.get("manual_saved_cents") is not None and (
             not isinstance(fields["manual_saved_cents"], int) or fields["manual_saved_cents"] < 0):
         raise ValueError(f"manual_saved_cents must be an int >= 0, got {fields['manual_saved_cents']!r}")
@@ -1303,14 +1492,15 @@ def update_goal(conn, goal_id, **fields) -> dict | None:
         vals.append(str(v).strip() if k == "name" else v)
     if sets:
         vals.append(goal_id)
-        conn.execute(f"UPDATE goal SET {', '.join(sets)} WHERE id = ?", vals)
+        vals.append(user_id)
+        conn.execute(f"UPDATE goal SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals)
         conn.commit()
-    row = conn.execute("SELECT * FROM goal WHERE id = ?", (goal_id,)).fetchone()
+    row = conn.execute("SELECT * FROM goal WHERE id = ? AND user_id = ?", (goal_id, user_id)).fetchone()
     return None if row is None else _goal_dict(row)
 
 
-def delete_goal(conn, goal_id) -> None:
-    conn.execute("DELETE FROM goal WHERE id = ?", (goal_id,))
+def delete_goal(conn, user_id, goal_id) -> None:
+    conn.execute("DELETE FROM goal WHERE id = ? AND user_id = ?", (goal_id, user_id))
     conn.commit()
 
 
@@ -1355,7 +1545,7 @@ def _venture_dict(row) -> dict:
     }
 
 
-def create_venture(conn, name, items, started_on, tag=None, account_id=None) -> dict:
+def create_venture(conn, user_id, name, items, started_on, tag=None, account_id=None) -> dict:
     if not str(name or "").strip():
         raise ValueError("name must not be empty")
     started_on = _valid_goal_date(started_on)
@@ -1364,22 +1554,22 @@ def create_venture(conn, name, items, started_on, tag=None, account_id=None) -> 
     if tag is not None:
         tag = _venture_norm_tag(tag)
     if account_id is not None:
-        _require_account(conn, account_id)
+        _require_own_account(conn, user_id, account_id)
     items_json = _venture_items(items)
     cur = conn.execute(
-        """INSERT INTO venture (name, tag, account_id, items_json, started_on, status, created_at)
-           VALUES (?,?,?,?,?,'active',?)""",
-        (str(name).strip(), tag, account_id, items_json, started_on, _now()))
+        """INSERT INTO venture (user_id, name, tag, account_id, items_json, started_on, status, created_at)
+           VALUES (?,?,?,?,?,?,'active',?)""",
+        (user_id, str(name).strip(), tag, account_id, items_json, started_on, _now()))
     conn.commit()
     return _venture_dict(conn.execute("SELECT * FROM venture WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-def list_ventures(conn, include_stopped=False) -> list[dict]:
-    q = "SELECT * FROM venture" + ("" if include_stopped else " WHERE status = 'active'") + " ORDER BY started_on, id"
-    return [_venture_dict(r) for r in conn.execute(q).fetchall()]
+def list_ventures(conn, user_id, include_stopped=False) -> list[dict]:
+    q = "SELECT * FROM venture WHERE user_id = ?" + ("" if include_stopped else " AND status = 'active'") + " ORDER BY started_on, id"
+    return [_venture_dict(r) for r in conn.execute(q, (user_id,)).fetchall()]
 
 
-def update_venture(conn, venture_id, **fields) -> dict | None:
+def update_venture(conn, user_id, venture_id, **fields) -> dict | None:
     """Patch a venture. Setting `tag` clears the account link and vice versa (a venture
     always has exactly one linkage); passing both raises."""
     allowed = {"name", "items", "started_on", "tag", "account_id", "status"}
@@ -1403,7 +1593,7 @@ def update_venture(conn, venture_id, **fields) -> dict | None:
     if "account_id" in fields:
         if fields["account_id"] is None:
             raise ValueError("account_id must not be null — switch linkage by setting tag instead")
-        _require_account(conn, fields["account_id"])
+        _require_own_account(conn, user_id, fields["account_id"])
         sets.append("account_id = ?"); vals.append(fields["account_id"])
         sets.append("tag = ?"); vals.append(None)
     if "status" in fields:
@@ -1412,18 +1602,19 @@ def update_venture(conn, venture_id, **fields) -> dict | None:
         sets.append("status = ?"); vals.append(fields["status"])
     if sets:
         vals.append(venture_id)
-        conn.execute(f"UPDATE venture SET {', '.join(sets)} WHERE id = ?", vals)
+        vals.append(user_id)
+        conn.execute(f"UPDATE venture SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals)
         conn.commit()
-    row = conn.execute("SELECT * FROM venture WHERE id = ?", (venture_id,)).fetchone()
+    row = conn.execute("SELECT * FROM venture WHERE id = ? AND user_id = ?", (venture_id, user_id)).fetchone()
     return None if row is None else _venture_dict(row)
 
 
-def delete_venture(conn, venture_id) -> None:
-    conn.execute("DELETE FROM venture WHERE id = ?", (venture_id,))
+def delete_venture(conn, user_id, venture_id) -> None:
+    conn.execute("DELETE FROM venture WHERE id = ? AND user_id = ?", (venture_id, user_id))
     conn.commit()
 
 
-def venture_flows(conn, venture) -> dict:
+def venture_flows(conn, user_id, venture) -> dict:
     """Monthly revenue/cost flows for a venture's linked tag or account.
 
     Correctness rules (DEC-020, devils-advocate findings 5/6):
@@ -1431,18 +1622,19 @@ def venture_flows(conn, venture) -> dict:
       - refunds REDUCE cost (mirrors month_actuals' sign flip);
       - everything linked counts regardless of date (a deliberately tagged old
         transaction is data, not noise) — pace math handles the time axis.
-    Accepts a _venture_dict (camelCase keys). Returns cents."""
+    Accepts a _venture_dict (camelCase keys). Returns cents. Scoped to `user_id` so a
+    venture never tallies another user's transactions even if names/tags collide."""
     base = ("SELECT substr(t.posted_on,1,7) AS m, t.direction, t.kind, "
             "SUM(t.amount_cents) AS s, COUNT(*) AS c FROM txn t ")
     if venture.get("tag"):
         sql = base + ("JOIN txn_tag jt ON jt.txn_id = t.id JOIN tag tg ON tg.id = jt.tag_id "
-                      "WHERE tg.name = ? COLLATE NOCASE AND t.is_transfer = 0 "
+                      "WHERE tg.name = ? COLLATE NOCASE AND t.is_transfer = 0 AND t.user_id = ? "
                       "GROUP BY m, t.direction, t.kind")
-        vals: tuple = (venture["tag"],)
+        vals: tuple = (venture["tag"], user_id)
     elif venture.get("accountId") is not None:
-        sql = base + ("WHERE t.account_id = ? AND t.is_transfer = 0 "
+        sql = base + ("WHERE t.account_id = ? AND t.is_transfer = 0 AND t.user_id = ? "
                       "GROUP BY m, t.direction, t.kind")
-        vals = (venture["accountId"],)
+        vals = (venture["accountId"], user_id)
     else:
         return {"byMonth": {}, "revenueCents": 0, "costCents": 0, "txnCount": 0}
     by_month: dict = {}
@@ -1460,17 +1652,20 @@ def venture_flows(conn, venture) -> dict:
     return {"byMonth": by_month, "revenueCents": revenue, "costCents": cost, "txnCount": count}
 
 
-def goal_saved_cents(conn, goal) -> int:
+def goal_saved_cents(conn, user_id, goal) -> int:
     """Saved-so-far in cents. Precedence (deliberate, review finding 3): the linked
     account's LATEST balance snapshot when one exists; a linked account with NO
     snapshots yet falls back to the manual figure (linking must never make progress
     vanish while the first balance update is pending); manual-only goals use the
-    manual figure. Accepts a _goal_dict (camelCase keys)."""
+    manual figure. Accepts a _goal_dict (camelCase keys). Scoped by `user_id` (defense
+    in depth — the linked account_id is already guaranteed to be the caller's own via
+    _require_own_account at goal creation/update time)."""
     acct = goal.get("accountId")
     if acct is not None:
         row = conn.execute(
-            "SELECT balance_cents FROM balance_snapshot WHERE account_id = ? ORDER BY as_of DESC, id DESC LIMIT 1",
-            (acct,)).fetchone()
+            "SELECT balance_cents FROM balance_snapshot WHERE account_id = ? AND user_id = ? "
+            "ORDER BY as_of DESC, id DESC LIMIT 1",
+            (acct, user_id)).fetchone()
         if row is not None:
             return row["balance_cents"]
     manual = goal.get("manualSaved")
@@ -1485,9 +1680,9 @@ def _recurring_dict(r) -> dict:
             "expected": round(r["expected_cents"] / 100.0, 2), "active": bool(r["active"])}
 
 
-def upsert_recurring(conn, category, *, direction="out", bucket=None, due_day=None,
+def upsert_recurring(conn, user_id, category, *, direction="out", bucket=None, due_day=None,
                      expected_cents=0, active=True) -> dict:
-    """Create or update a recurring expectation keyed by (direction, bucket, category).
+    """Create or update a recurring expectation keyed by (user_id, direction, bucket, category).
     Idempotent so re-seeding from the budget updates in place instead of duplicating."""
     if direction not in ("in", "out"):
         raise ValueError(f"direction must be 'in' or 'out', got {direction!r}")
@@ -1498,30 +1693,30 @@ def upsert_recurring(conn, category, *, direction="out", bucket=None, due_day=No
     if due_day is not None and not (1 <= int(due_day) <= 31):
         raise ValueError(f"due_day must be 1..31, got {due_day!r}")
     existing = conn.execute(
-        "SELECT id FROM recurring WHERE direction = ? AND IFNULL(bucket,'') = IFNULL(?,'') "
-        "AND category = ? COLLATE NOCASE", (direction, bucket, category)).fetchone()
+        "SELECT id FROM recurring WHERE user_id = ? AND direction = ? AND IFNULL(bucket,'') = IFNULL(?,'') "
+        "AND category = ? COLLATE NOCASE", (user_id, direction, bucket, category)).fetchone()
     dd = None if due_day is None else int(due_day)
     if existing:
-        conn.execute("UPDATE recurring SET due_day = ?, expected_cents = ?, active = ? WHERE id = ?",
-                     (dd, int(expected_cents), 1 if active else 0, existing["id"]))
+        conn.execute("UPDATE recurring SET due_day = ?, expected_cents = ?, active = ? WHERE id = ? AND user_id = ?",
+                     (dd, int(expected_cents), 1 if active else 0, existing["id"], user_id))
         rid = existing["id"]
     else:
         cur = conn.execute(
-            """INSERT INTO recurring (bucket, category, direction, due_day, expected_cents, active, created_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (bucket, category, direction, dd, int(expected_cents), 1 if active else 0, _now()))
+            """INSERT INTO recurring (user_id, bucket, category, direction, due_day, expected_cents, active, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (user_id, bucket, category, direction, dd, int(expected_cents), 1 if active else 0, _now()))
         rid = cur.lastrowid
     conn.commit()
     return _recurring_dict(conn.execute("SELECT * FROM recurring WHERE id = ?", (rid,)).fetchone())
 
 
-def list_recurring(conn) -> list[dict]:
+def list_recurring(conn, user_id) -> list[dict]:
     return [_recurring_dict(r) for r in conn.execute(
-        "SELECT * FROM recurring ORDER BY direction, bucket, category").fetchall()]
+        "SELECT * FROM recurring WHERE user_id = ? ORDER BY direction, bucket, category", (user_id,)).fetchall()]
 
 
-def delete_recurring(conn, recurring_id) -> None:
-    conn.execute("DELETE FROM recurring WHERE id = ?", (recurring_id,))
+def delete_recurring(conn, user_id, recurring_id) -> None:
+    conn.execute("DELETE FROM recurring WHERE id = ? AND user_id = ?", (recurring_id, user_id))
     conn.commit()
 
 
@@ -1542,7 +1737,7 @@ def _scenario_dict(r, include_payload=True) -> dict:
     return d
 
 
-def create_scenario(conn, name, spec: dict) -> dict:
+def create_scenario(conn, user_id, name, spec: dict) -> dict:
     """New draft scenario. `spec` is the client-authored what-if definition
     (comp, activationMonth, payFreq, budgetPlan, catchup) — stored opaque
     (DEC-017 #3); the server never derives budget figures from it."""
@@ -1553,28 +1748,31 @@ def create_scenario(conn, name, spec: dict) -> dict:
     payload = {"payloadVersion": 1, "spec": spec, "revert": None}
     now = _now()
     cur = conn.execute(
-        "INSERT INTO scenario (name, status, payload_json, created_at, updated_at) VALUES (?,?,?,?,?)",
-        (name.strip(), "draft", json.dumps(payload), now, now))
+        "INSERT INTO scenario (user_id, name, status, payload_json, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+        (user_id, name.strip(), "draft", json.dumps(payload), now, now))
     conn.commit()
-    return get_scenario(conn, cur.lastrowid)
+    return get_scenario(conn, user_id, cur.lastrowid)
 
 
-def get_scenario(conn, scenario_id) -> dict | None:
-    r = conn.execute("SELECT * FROM scenario WHERE id = ?", (scenario_id,)).fetchone()
+def get_scenario(conn, user_id, scenario_id) -> dict | None:
+    r = conn.execute(
+        "SELECT * FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
     return _scenario_dict(r) if r else None
 
 
-def list_scenarios(conn) -> list[dict]:
+def list_scenarios(conn, user_id) -> list[dict]:
     """Summaries only — no payload parse (the list view doesn't need the blob).
-    The active scenario (at most one) always sorts first."""
+    The active scenario (at most one, per user) always sorts first."""
     return [_scenario_dict(r, include_payload=False) for r in conn.execute(
-        "SELECT * FROM scenario ORDER BY (status = 'active') DESC, updated_at DESC").fetchall()]
+        "SELECT * FROM scenario WHERE user_id = ? ORDER BY (status = 'active') DESC, updated_at DESC",
+        (user_id,)).fetchall()]
 
 
-def update_scenario(conn, scenario_id, *, name=None, spec=None) -> dict | None:
+def update_scenario(conn, user_id, scenario_id, *, name=None, spec=None) -> dict | None:
     """Rename and/or replace the draft's spec. An ACTIVE scenario is immutable
     (409 — revert first) so the installed plans always match its spec (DEC-017)."""
-    r = conn.execute("SELECT * FROM scenario WHERE id = ?", (scenario_id,)).fetchone()
+    r = conn.execute(
+        "SELECT * FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
     if not r:
         return None
     if r["status"] == "active":
@@ -1587,21 +1785,23 @@ def update_scenario(conn, scenario_id, *, name=None, spec=None) -> dict | None:
     if spec is not None:
         payload["spec"] = spec
     conn.execute(
-        "UPDATE scenario SET name = ?, payload_json = ?, updated_at = ? WHERE id = ?",
-        (str(name).strip() if name is not None else r["name"], json.dumps(payload), _now(), scenario_id))
+        "UPDATE scenario SET name = ?, payload_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+        (str(name).strip() if name is not None else r["name"], json.dumps(payload), _now(),
+         scenario_id, user_id))
     conn.commit()
-    return get_scenario(conn, scenario_id)
+    return get_scenario(conn, user_id, scenario_id)
 
 
-def delete_scenario(conn, scenario_id) -> bool:
+def delete_scenario(conn, user_id, scenario_id) -> bool:
     """Delete a draft. An ACTIVE scenario can't be deleted (409 — revert first):
     its revert bookkeeping is the only path back to the pre-activation plans."""
-    r = conn.execute("SELECT status FROM scenario WHERE id = ?", (scenario_id,)).fetchone()
+    r = conn.execute(
+        "SELECT status FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
     if not r:
         return False
     if r["status"] == "active":
         raise ScenarioConflictError("scenario is active; revert it before deleting")
-    conn.execute("DELETE FROM scenario WHERE id = ?", (scenario_id,))
+    conn.execute("DELETE FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id))
     conn.commit()
     return True
 
@@ -1611,7 +1811,7 @@ def _valid_month(m) -> bool:
             and m[:4].isdigit() and m[5:].isdigit() and 1 <= int(m[5:]) <= 12)
 
 
-def activate_scenario(conn, scenario_id, activation_month: str, plan_months: list[dict],
+def activate_scenario(conn, user_id, scenario_id, activation_month: str, plan_months: list[dict],
                       client_state=None) -> dict | None:
     """Install the scenario as the live plan from `activation_month` (M) onward —
     ONE transaction (DEC-017 #5).
@@ -1622,15 +1822,19 @@ def activate_scenario(conn, scenario_id, activation_month: str, plan_months: lis
     scenario's revert bookkeeping (existed / tombstone), then build_plan + upsert
     through the same machinery as the lock endpoint. Months < M are never read or
     written (DEC-007). Raises ScenarioConflictError when any scenario is already
-    active (the partial unique index backstops races), ValueError on bad input.
-    Returns None for an unknown id."""
-    r = conn.execute("SELECT * FROM scenario WHERE id = ?", (scenario_id,)).fetchone()
+    active FOR THIS USER (the partial unique index is now per-user — `UNIQUE(user_id,
+    status) WHERE status='active'` — so concurrent activation across DIFFERENT users
+    never collides), ValueError on bad input. Returns None for an unknown id (or one
+    belonging to another user — scoped lookup, never leaks existence)."""
+    r = conn.execute(
+        "SELECT * FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
     if not r:
         return None
     if r["status"] == "active":
         raise ScenarioConflictError("scenario is already active")
     other = conn.execute(
-        "SELECT id, name FROM scenario WHERE status = 'active' AND id != ?", (scenario_id,)).fetchone()
+        "SELECT id, name FROM scenario WHERE status = 'active' AND user_id = ? AND id != ?",
+        (user_id, scenario_id)).fetchone()
     if other:
         raise ScenarioConflictError(
             f"scenario {other['id']} ({other['name']!r}) is active; revert it first")
@@ -1657,7 +1861,7 @@ def activate_scenario(conn, scenario_id, activation_month: str, plan_months: lis
     try:
         for pm in sorted(plan_months, key=lambda p: p["month"]):
             month = pm["month"]
-            prior = get_plan(conn, month)
+            prior = get_plan(conn, user_id, month)
             if prior:
                 snapshots.append({"month": month, "existed": True, "status": prior["status"],
                                   "engineVersion": prior["engineVersion"], "payload": prior["payload"],
@@ -1680,15 +1884,16 @@ def activate_scenario(conn, scenario_id, activation_month: str, plan_months: lis
             # the user makes to these months while the scenario is active (data-safety).
             snapshots[-1]["installed"] = payload
             snapshots[-1]["installedStatus"] = pm.get("status") or "locked"
-            _save_plan_row(conn, month, payload, status=pm.get("status") or "locked",
+            _save_plan_row(conn, user_id, month, payload, status=pm.get("status") or "locked",
                            engine_version=pm.get("engineVersion") or "1.0")
         now = _now()
         body = json.loads(r["payload_json"])
         body["revert"] = {"activatedAt": now, "activationMonth": activation_month,
                           "planSnapshots": snapshots, "clientState": client_state}
         conn.execute(
-            "UPDATE scenario SET status = 'active', payload_json = ?, updated_at = ?, activated_at = ? WHERE id = ?",
-            (json.dumps(body), now, now, scenario_id))
+            "UPDATE scenario SET status = 'active', payload_json = ?, updated_at = ?, activated_at = ? "
+            "WHERE id = ? AND user_id = ?",
+            (json.dumps(body), now, now, scenario_id, user_id))
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()  # the partial unique index caught a concurrent activate
@@ -1696,12 +1901,12 @@ def activate_scenario(conn, scenario_id, activation_month: str, plan_months: lis
     except Exception:
         conn.rollback()
         raise
-    return {"scenario": get_scenario(conn, scenario_id),
+    return {"scenario": get_scenario(conn, user_id, scenario_id),
             "summary": {"monthsWritten": len(snapshots), "monthsOverwritten": overwrote,
                         "monthsCreated": created}}
 
 
-def revert_scenario(conn, scenario_id) -> dict | None:
+def revert_scenario(conn, user_id, scenario_id) -> dict | None:
     """Exactly undo activate — ONE transaction. Restore every captured plan_snapshot
     (re-save the prior payload with its prior status/lock timestamp) and delete the
     plan rows activation created where none existed. Data-safety guard: a month the
@@ -1710,8 +1915,9 @@ def revert_scenario(conn, scenario_id) -> dict | None:
     version and reports it as "kept-user-edit" instead of silently clobbering it.
     Flips the scenario back to draft and returns the opaque clientState so the client
     can restore its own budget config + Tax inputs (DEC-017 #6). Returns None for an
-    unknown id."""
-    r = conn.execute("SELECT * FROM scenario WHERE id = ?", (scenario_id,)).fetchone()
+    unknown id (or one belonging to another user)."""
+    r = conn.execute(
+        "SELECT * FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
     if not r:
         return None
     if r["status"] != "active":
@@ -1722,7 +1928,7 @@ def revert_scenario(conn, scenario_id) -> dict | None:
     try:
         for snap in revert.get("planSnapshots") or []:
             month = snap["month"]
-            cur = get_plan(conn, month)
+            cur = get_plan(conn, user_id, month)
             installed = snap.get("installed")
             if (cur is not None and installed is not None
                     and (cur["payload"] != installed
@@ -1730,22 +1936,23 @@ def revert_scenario(conn, scenario_id) -> dict | None:
                 restored[month] = "kept-user-edit"   # changed since activation — theirs wins
                 continue
             if snap.get("existed"):
-                _save_plan_row(conn, month, snap["payload"], status=snap.get("status") or "locked",
+                _save_plan_row(conn, user_id, month, snap["payload"], status=snap.get("status") or "locked",
                                engine_version=snap.get("engineVersion") or "1.0",
                                locked_at=snap.get("lockedAt"))
                 restored[month] = "restored"
             else:
-                conn.execute("DELETE FROM plan_snapshot WHERE month = ?", (month,))
+                conn.execute("DELETE FROM plan_snapshot WHERE month = ? AND user_id = ?", (month, user_id))
                 restored[month] = "deleted"
         body["revert"] = None
         conn.execute(
-            "UPDATE scenario SET status = 'draft', payload_json = ?, updated_at = ?, activated_at = NULL WHERE id = ?",
-            (json.dumps(body), _now(), scenario_id))
+            "UPDATE scenario SET status = 'draft', payload_json = ?, updated_at = ?, activated_at = NULL "
+            "WHERE id = ? AND user_id = ?",
+            (json.dumps(body), _now(), scenario_id, user_id))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    return {"scenario": get_scenario(conn, scenario_id), "restored": restored,
+    return {"scenario": get_scenario(conn, user_id, scenario_id), "restored": restored,
             "clientState": revert.get("clientState")}
 
 
@@ -1773,6 +1980,16 @@ def _validate_backup(payload: dict, current: int) -> None:
             f"backup is from a newer app version (schemaVersion {sv} > current {current}); "
             "upgrade the app first"
         )
+    # S1.1: the envelope's `scope` marks whether a backup carries one user's data or the
+    # whole household. Only "household-full" (or the field's historical absence, pre-S1.1)
+    # is accepted here — the DEC-028 per-user "user" scope slice is a deferred follow-up
+    # (docs/multiuser-household-plan.md S1.1 §4c) with no restore path yet.
+    scope = payload.get("scope")
+    if scope is not None and scope != "household-full":
+        raise RestoreError(
+            f"unsupported backup scope {scope!r}; this app version can only restore a "
+            "'household-full' backup"
+        )
     tables = payload.get("tables")
     if not isinstance(tables, dict):
         raise RestoreError(f"tables must be a dict, got {type(tables).__name__}")
@@ -1794,6 +2011,12 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
 
     Table and column identifiers come exclusively from _BACKUP_TABLES — never from the DB
     schema at runtime, so the allow-list is always the single source of truth.
+
+    ALWAYS whole-household (S1.1): this is the owner-only full-DB backup, unchanged in
+    scope, but now explicitly labeled `"scope": "household-full"` since every user-owned
+    table carries `user_id` — the export contains every household member's rows, not just
+    the owner's. `userCount` is a human sanity-check (distinct user_ids across the
+    user-owned tables), not used by import_all.
     """
     if exported_at is None:
         exported_at = _now()
@@ -1808,9 +2031,14 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
             tables[tbl] = [{c: row[c] for c in emit_cols} for row in rows]
         else:
             tables[tbl] = []
+    user_scoped_tables = [tbl for tbl, cols in _BACKUP_TABLES if "user_id" in cols]
+    user_count_sql = " UNION ".join(f"SELECT user_id FROM {tbl}" for tbl in user_scoped_tables)
+    user_count = conn.execute(f"SELECT COUNT(*) FROM ({user_count_sql})").fetchone()[0]
     return {
         "app": _BACKUP_APP_TAG,
         "schemaVersion": schema_version,
+        "scope": "household-full",
+        "userCount": user_count,
         "exportedAt": exported_at,
         "tables": tables,
     }
@@ -1830,11 +2058,15 @@ def _csv_safe(text: str) -> str:
     return text
 
 
-def export_txns_csv(conn: sqlite3.Connection, date_from: str | None = None, date_to: str | None = None) -> str:
+def export_txns_csv(conn: sqlite3.Connection, user_id, date_from: str | None = None, date_to: str | None = None) -> str:
     """Build a date-ranged CSV of transactions for analysis / tax-prep (read-only, no writes).
 
     Deliberately NOT a backup: no app tag, no schemaVersion, never accepted by import_all —
     this is a plain spreadsheet export a human opens in Excel/Sheets/Numbers.
+
+    Owner-only endpoint (S1.1 §3b) — scoped to the CALLER's own transactions (their
+    `scopeId`, always `__owner__` since only the owner may call this), never the whole
+    household's. This is the owner's personal tax-prep export, not a household dump.
 
     *date_from* / *date_to* are inclusive ISO ``YYYY-MM-DD`` bounds on ``txn.posted_on``;
     either or both may be ``None`` for an unbounded side. Raises ``ValueError`` (surfaced by
@@ -1859,7 +2091,7 @@ def export_txns_csv(conn: sqlite3.Connection, date_from: str | None = None, date
         raise ValueError(f"from ({date_from!r}) must not be after to ({date_to!r})")
 
     sql = "SELECT t.*, a.name AS account_name FROM txn t JOIN account a ON a.id = t.account_id"
-    where, vals = ["1=1"], []
+    where, vals = ["t.user_id = ?"], [user_id]
     if date_from is not None:
         where.append("t.posted_on >= ?"); vals.append(date_from)
     if date_to is not None:
