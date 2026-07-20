@@ -21,4 +21,12 @@ export ACTUALS_DB_PATH=/data/actuals.db
 
 cd /app
 bashio::log.info "Starting Finance Tracker on :8099 (ingress-only)"
-exec python3 -m uvicorn server:app --host 0.0.0.0 --port 8099 --log-level warning
+# --no-proxy-headers (SEV-001 hardening): uvicorn 0.51.0 defaults proxy_headers=True,
+# installing ProxyHeadersMiddleware. That's currently harmless only because
+# forwarded_allow_ips defaults to 127.0.0.1 while the Supervisor peer is 172.30.32.2 --
+# but a future FORWARDED_ALLOW_IPS=* edit would let a member set
+# X-Forwarded-For: 172.30.32.2 and rewrite request.client.host, defeating server.py's
+# peer gate (_SUPERVISOR_PEER). This flag makes "request.client.host == real TCP peer"
+# an explicit, drift-proof invariant per DEC-026: uvicorn must never trust forwarded
+# headers from that peer.
+exec python3 -m uvicorn server:app --host 0.0.0.0 --port 8099 --log-level warning --no-proxy-headers

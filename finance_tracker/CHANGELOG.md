@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.1
+
+- **The panel now opens to every household user, not just admins**
+  (`panel_admin: false`). Anyone with a Home Assistant login can open
+  **Finance** in the sidebar.
+- To keep that safe, a minimal identity guard was added ahead of full
+  per-user profiles: **Restore**, both backup downloads (full and Actuals
+  only), and the transactions **CSV export** now require the household
+  owner. Other members see those buttons hidden and get a friendly
+  "owner only" message if they hit the API directly. Everything else —
+  the planning tools, What-If Mode, Print, the theme picker — stays open
+  to everyone.
+- **Important:** the app does not yet have per-user data. Until per-user
+  profiles ship, all household members share one dataset — a member's
+  transactions land in the same actuals ledger as everyone else's, and
+  plan/tax inputs remain per-device (stored in each browser, not per-user
+  on the server). Treat this release as shared-household access, not
+  multi-user separation. One known limitation of the same guard: because
+  **Back up** bundles the owner-only full/Actuals backups with the
+  client-only "Settings only" backup, members can't currently download
+  their own settings-only backup file — their plan/tax inputs are still
+  safe in their browser, they just can't export them until per-user
+  profiles land.
+
 ## 0.2.0
 
 - **New pill-style tab navigation.** The active tab now shows as an accent

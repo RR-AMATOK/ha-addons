@@ -73,6 +73,82 @@ app = FastAPI(title="Income Tax Calculator", version="1.0", lifespan=_lifespan)
 
 
 # ---------------------------------------------------------------------------
+# Identity resolver (multi-user S0.1 + S0.2-lite, DEC-026/DEC-031)
+# ---------------------------------------------------------------------------
+
+# HA Supervisor's fixed ingress peer IP (DEC-021 threat model / DEC-026 "Verified
+# contract"). X-Remote-User-Id is trustworthy ONLY when the request's peer IP is
+# exactly this address -- uvicorn is never configured to trust forwarded headers from
+# anywhere else, so a header arriving from any other peer must be treated as absent.
+_SUPERVISOR_PEER = "172.30.32.2"
+
+
+def resolve_user(request: Request) -> dict:
+    """The ONE identity resolver (DEC-026 "Verified contract" paragraph; DEC-031 §3).
+    Every identity-dependent code path MUST call this -- never read X-Remote-User-Id
+    (or any other identity signal) directly.
+
+    Returns ``{"id": <str>, "role": "owner"|"member"}``.
+
+    Precedence (highest first; see docs/multiuser-household-plan.md constraints):
+      1. TRUSTED INGRESS HEADER -- ``X-Remote-User-Id``, but ONLY when
+         ``request.client.host`` equals ``_SUPERVISOR_PEER``. A header arriving from
+         any other peer IP is spoofable and is treated as wholly ABSENT: it is never
+         read into an identity (spoof protection). Additionally, the header value is
+         trusted ONLY when it appears EXACTLY ONCE and is non-empty after stripping --
+         a duplicate header (two ``X-Remote-User-Id`` lines, however that arose) or an
+         empty-string value is also treated as wholly ABSENT (never selects one of
+         several candidate ids, and never lets an empty header silently enable the dev
+         override below). This keeps the resolver safe regardless of whether HA's
+         Supervisor strips inbound ``X-Remote-User-*`` headers before proxying.
+      2. DEV OVERRIDE (DEC-022 sandbox parity) -- the ``FINANCE_DEV_USER`` env var,
+         else the ``?user=`` query param (env wins when both are set -- an arbitrary
+         but stable, documented precedence). INERT whenever step 1 found a trusted
+         header, so a sandbox/dev artifact can never ride along with, or override, a
+         real ingress session.
+      3. OWNER FALLBACK (DEC-031 §3) -- no trusted header AND no dev override. There
+         is NO unauthenticated profile picker: this always resolves to the concrete
+         household owner, lazily provisioning the canonical sentinel owner row if the
+         `users` table is still empty (first boot, sandbox, or a pre-header HA Core
+         version). This closes the DEC-026 fallback vulnerability by design.
+
+    Any id resolved via a trusted header or the dev override is lazily provisioned in
+    the `users` table (tracking_store.resolve_or_provision_user): the very first id
+    ever seen this way becomes 'owner'; every subsequently-seen new id becomes
+    'member' (at most one owner).
+    """
+    client = getattr(request, "client", None)
+    peer_host = getattr(client, "host", None) if client is not None else None
+    header_id = None
+    if peer_host == _SUPERVISOR_PEER:
+        header_values = request.headers.getlist("X-Remote-User-Id")
+        if len(header_values) == 1 and header_values[0].strip():
+            header_id = header_values[0]
+
+    seen_id = header_id or os.environ.get("FINANCE_DEV_USER") \
+        or getattr(request, "query_params", {}).get("user")
+
+    with closing(tracking_store.connect()) as c:
+        if seen_id:
+            return tracking_store.resolve_or_provision_user(c, seen_id)
+        return tracking_store.resolve_owner_fallback(c)
+
+
+def require_owner(request: Request) -> dict:
+    """Guard for owner-only endpoints (restore, backup/CSV downloads -- DEC-031 plan
+    S0.2). Resolves identity and raises 403 for anyone who isn't the household owner;
+    returns the resolved user dict on success so callers that also need it don't have
+    to re-resolve."""
+    user = resolve_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail="This action is available to the household owner only.",
+        )
+    return user
+
+
+# ---------------------------------------------------------------------------
 # Existing models (tax calculator)
 # ---------------------------------------------------------------------------
 
@@ -1881,11 +1957,15 @@ def edit_card_payment_endpoint(in_leg_id: int, m: CardPaymentEditModel) -> dict:
 # ----- backup / restore -----
 
 @app.get("/api/tracking/export")
-def export_backup_endpoint() -> JSONResponse:
+def export_backup_endpoint(request: Request) -> JSONResponse:
     """Dump the entire actuals DB as a JSON backup file (Content-Disposition: attachment).
 
     Values are raw integers (cents), not dollars — import_all restores them verbatim.
+    Owner-only (DEC-031 S0.2): this backs every backup-popup download scope that
+    reaches the server (full + actuals-only both call this endpoint; client-only never
+    calls the server at all — see server.py's DEC-031 report). Members get 403.
     """
+    require_owner(request)
     with closing(tracking_store.connect()) as c:
         payload = tracking_store.export_all(c)
     stamp = payload["exportedAt"].replace(":", "").replace("-", "")
@@ -1906,8 +1986,10 @@ async def import_backup_endpoint(request: Request) -> dict:
     oversized upload without buffering it), and again against the actual byte count
     after reading (backstop for a missing or understated Content-Length). 422 for
     malformed JSON or an invalid/incompatible backup; 500 if the safety-copy write
-    fails (no mutation occurred).
+    fails (no mutation occurred). Owner-only (DEC-031 S0.2) — members get 403 before
+    the body is even read.
     """
+    require_owner(request)
     content_length = request.headers.get("content-length")
     if content_length is not None:
         try:
@@ -1933,15 +2015,18 @@ async def import_backup_endpoint(request: Request) -> dict:
 # ----- CSV export (analysis / tax-prep — NOT a backup: no app tag, never importable) -----
 
 @app.get("/api/tracking/export.csv")
-def export_txns_csv_endpoint(date_from: str | None = Query(None, alias="from"),
+def export_txns_csv_endpoint(request: Request,
+                              date_from: str | None = Query(None, alias="from"),
                               date_to: str | None = Query(None, alias="to")) -> Response:
     """Date-ranged transactions CSV for analysis/tax-prep (Content-Disposition: attachment).
 
     `from`/`to` are optional inclusive ISO date (YYYY-MM-DD) bounds on posted_on; either or
     both may be omitted for an unbounded side. Plainly a spreadsheet, not a restorable
     backup — see tracking_store.export_txns_csv for the column contract. 422 for a
-    malformed date or from > to.
+    malformed date or from > to. Owner-only (DEC-031 S0.2 — this is an exfiltration
+    surface): members get 403.
     """
+    require_owner(request)
     with closing(tracking_store.connect()) as c:
         try:
             csv_text = tracking_store.export_txns_csv(c, date_from, date_to)
@@ -1953,3 +2038,20 @@ def export_txns_csv_endpoint(date_from: str | None = Query(None, alias="from"),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ----- identity self-check (multi-user S0.1, DEC-026/031) -----
+
+@app.get("/api/whoami")
+def whoami_endpoint(request: Request) -> dict:
+    """On-device identity verification (docs/multiuser-household-plan.md S0.1 exit
+    criteria). Always resolves via resolve_user() — never reads the ingress header
+    directly. The owner sees the full picture (their own id/role plus the provisioned
+    household roster); a member sees ONLY their own id and role — never who else is
+    in the household."""
+    user = resolve_user(request)
+    if user["role"] == "owner":
+        with closing(tracking_store.connect()) as c:
+            users = tracking_store.list_users(c)
+        return {"id": user["id"], "role": user["role"], "users": users}
+    return {"id": user["id"], "role": user["role"]}

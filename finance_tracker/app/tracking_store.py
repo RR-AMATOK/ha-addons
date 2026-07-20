@@ -243,6 +243,24 @@ CREATE TABLE IF NOT EXISTS venture (
   status     TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped')),
   created_at TEXT    NOT NULL
 );
+
+-- Household identity roster (multi-user S0.1, DEC-026/031): lazily provisioned by
+-- server.py's resolve_user() -- NEVER written to directly from request handlers other
+-- than through that one resolver. The first user_id ever seen (via a trusted ingress
+-- header or the DEC-022 dev override) becomes 'owner'; every subsequently-seen new id
+-- becomes 'member'. Deliberately NOT in _BACKUP_TABLES: identity is install-local, not
+-- user financial data -- a backup/restore round-trip must never move or overwrite
+-- who's-who between installs (see the constant's comment below).
+CREATE TABLE IF NOT EXISTS users (
+  user_id    TEXT PRIMARY KEY,
+  role       TEXT NOT NULL CHECK (role IN ('owner','member')),
+  created_at TEXT NOT NULL
+);
+-- At-most-one-owner invariant, enforced at the DB layer (mirrors idx_scenario_active):
+-- a concurrent double-provision-as-owner fails the INSERT (IntegrityError) rather than
+-- silently producing two owners.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_owner
+  ON users(role) WHERE role = 'owner';
 """
 
 # Future migrations append to this list; each takes a conn and upgrades by one step.
@@ -414,7 +432,21 @@ def _mig_add_venture_table(conn) -> None:
 )""")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table]
+def _mig_add_users_table(conn) -> None:
+    """Migration 6 (multi-user S0.1, DEC-026/031): household identity roster. Additive
+    table; CREATE IF NOT EXISTS makes it idempotent on fresh DBs that already have it
+    (plus the one-owner unique index) from SCHEMA above. See SCHEMA's comment for why
+    this table is deliberately excluded from _BACKUP_TABLES."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS users (
+  user_id    TEXT PRIMARY KEY,
+  role       TEXT NOT NULL CHECK (role IN ('owner','member')),
+  created_at TEXT NOT NULL
+)""")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_owner ON users(role) WHERE role = 'owner'")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table]
 
 
 def _now() -> str:
@@ -470,6 +502,122 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.commit()
         conn.execute(f"PRAGMA user_version = {i + 1}")
         conn.commit()
+
+
+# ---------- identity (multi-user S0.1, DEC-026/031) ----------
+
+# Stable sentinel user_id for the canonical owner profile, provisioned only when the
+# `users` table is otherwise empty and identity resolves to the OWNER fallback (no
+# trusted ingress header, no dev override -- DEC-031 §3). Deliberately NOT a valid
+# Supervisor-issued 32-hex-char UUID, so it can never collide with a real header id.
+_SENTINEL_OWNER_ID = "__owner__"
+
+
+def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
+    """Look up *user_id* in the `users` table; provision it if this is the first time
+    it's been seen. The very first id ever provisioned becomes 'owner'; every
+    subsequently-seen new id becomes 'member' -- at most one owner (also enforced by
+    the idx_users_one_owner unique index as a concurrency backstop). Idempotent: an
+    id that's already provisioned just returns its stored role unchanged, regardless
+    of how many times it's seen again.
+
+    Called ONLY from server.py's resolve_user() for ids obtained via a trusted ingress
+    header or the DEC-022 dev override -- never for the no-identity-signal case (see
+    resolve_owner_fallback below).
+
+    First-provision race (SEV-005): two never-seen ids can both observe "no existing
+    owner" (our own SELECT above) and both attempt to INSERT as 'owner'. The
+    idx_users_one_owner unique index lets only one such INSERT succeed; the loser's
+    INSERT raises sqlite3.IntegrityError -- and since it's *this* user_id's own row that
+    failed to land (the winner's id got the owner row, not ours), we retry the INSERT
+    for this same user_id as 'member' instead of surfacing a 500. The DB invariant
+    already prevents two owners; this just turns the race into a graceful member
+    assignment for whoever lost it.
+    """
+    row = conn.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if row is not None:
+        return {"id": row["user_id"], "role": row["role"]}
+    existing_owner = conn.execute("SELECT 1 FROM users WHERE role = 'owner'").fetchone()
+    role = "member" if existing_owner is not None else "owner"
+    try:
+        conn.execute(
+            "INSERT INTO users (user_id, role, created_at) VALUES (?, ?, ?)",
+            (user_id, role, _now()),
+        )
+        conn.commit()
+        return {"id": user_id, "role": role}
+    except sqlite3.IntegrityError:
+        conn.rollback()
+
+    if role == "owner":
+        # Lost the idx_users_one_owner race: another id was committed as owner between
+        # our existing_owner check and this INSERT. This id was never written by the
+        # failed attempt above, so retry it as 'member' -- the now-correct role given an
+        # owner exists.
+        try:
+            conn.execute(
+                "INSERT INTO users (user_id, role, created_at) VALUES (?, 'member', ?)",
+                (user_id, _now()),
+            )
+            conn.commit()
+            return {"id": user_id, "role": "member"}
+        except sqlite3.IntegrityError:
+            conn.rollback()
+
+    # Either the 'member' INSERT above also collided, or the original INSERT attempted
+    # role='member' and hit the user_id PRIMARY KEY (another caller provisioned this
+    # exact id concurrently) -- in both cases the row now exists; return what's on disk.
+    row = conn.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if row is not None:
+        return {"id": row["user_id"], "role": row["role"]}
+    raise
+
+
+def resolve_owner_fallback(conn: sqlite3.Connection) -> dict:
+    """DEC-031 §3: no trusted ingress header AND no dev override -> resolve to the
+    OWNER profile, never an unauthenticated picker. Returns whichever user_id is
+    currently the household owner if one has already been provisioned (e.g. via an
+    earlier header-bearing request); otherwise provisions the canonical sentinel owner
+    row so this always yields a concrete {id, role:'owner'} -- covers first boot,
+    the sandbox, and pre-header HA Core versions (Supervisor < 2023.08.2 / Core <
+    2023.9).
+
+    First-boot sentinel race (same class as SEV-005, see resolve_or_provision_user):
+    two concurrent no-header requests can both observe "no owner yet" (our own SELECT
+    above) and both attempt to INSERT the sentinel owner row. idx_users_one_owner lets
+    only one such INSERT succeed; the loser's INSERT raises sqlite3.IntegrityError. The
+    winner already committed a real owner row, so the loser just re-SELECTs and returns
+    it -- idempotent, no 500."""
+    row = conn.execute("SELECT user_id FROM users WHERE role = 'owner' LIMIT 1").fetchone()
+    if row is not None:
+        return {"id": row["user_id"], "role": "owner"}
+    try:
+        conn.execute(
+            "INSERT INTO users (user_id, role, created_at) VALUES (?, 'owner', ?)",
+            (_SENTINEL_OWNER_ID, _now()),
+        )
+        conn.commit()
+        return {"id": _SENTINEL_OWNER_ID, "role": "owner"}
+    except sqlite3.IntegrityError:
+        conn.rollback()
+
+    # Lost the idx_users_one_owner race: another request's owner INSERT (sentinel or
+    # real id) committed between our existing_owner check and this INSERT. That row is
+    # the household's owner now -- return it instead of surfacing a 500.
+    row = conn.execute("SELECT user_id FROM users WHERE role = 'owner' LIMIT 1").fetchone()
+    if row is not None:
+        return {"id": row["user_id"], "role": "owner"}
+    raise
+
+
+def list_users(conn: sqlite3.Connection) -> list[dict]:
+    """Every provisioned household member, owner first then by provisioning order.
+    Used by GET /api/whoami's owner-only roster view -- never exposed to members
+    (server.py enforces that)."""
+    rows = conn.execute(
+        "SELECT user_id, role, created_at FROM users ORDER BY (role != 'owner'), created_at"
+    ).fetchall()
+    return [{"id": r["user_id"], "role": r["role"], "createdAt": r["created_at"]} for r in rows]
 
 
 # ---------- accounts ----------

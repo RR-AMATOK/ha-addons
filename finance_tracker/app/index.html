@@ -1660,6 +1660,28 @@
   }
 })();
 
+// ---------- Household role gating (0.2.1 "guarded panel opening") ----------
+// The server now flips panel_admin: false so both household members can open the panel, but
+// destructive/export actions stay owner-only server-side (POST /api/tracking/import; GET
+// /api/tracking/export and export.csv all 403 for members). GET /api/whoami is the identity
+// contract that tells us which one we are: an owner gets {role:'owner', users:[...]}, a member
+// gets {role:'member'} (no `users` key). Kicked off immediately — before DOMContentLoaded —
+// so applyMemberGating() (wired in the DOMContentLoaded handler below) can hide the owner-only
+// controls before the header ever finishes wiring up, with no visible flash for members.
+// Any failure to resolve a role (old server without this endpoint, offline, network hiccup)
+// defaults to 'owner' — byte-identical to pre-0.2.1 behavior, and mirrors the server's own
+// fallback (an absent identity header resolves to the owner profile — DEC-031).
+window.__role = 'owner';
+const __roleReady = (async () => {
+  try {
+    const r = await fetch('/api/whoami');
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.role === 'member') window.__role = 'member';
+    }
+  } catch (e) {}
+})();
+
 // ---------- HA theme adapter (DEC-024; shipping default + persistent picker) ----------
 // server.py's index() route optionally injects window.__HA_THEME (see load_theme() /
 // normalize_theme() there) — a verbatim passthrough of the user's Home Assistant theme's
@@ -2758,6 +2780,32 @@ function restoreState(s) {
   }
   lastPayFreq = payFreq();
 }
+// Hide the owner-only controls for a household member — see the role-fetch IIFE up top for
+// how window.__role is resolved. Runs once, after the header/popup wiring in DOMContentLoaded,
+// so it never has to touch (or risk changing) that wiring for the owner path; for members it
+// simply deletes the nodes so they can never be clicked, tabbed to, or trigger a 403 later.
+//   - `reset()` below is a client-side localStorage clear with NO server guard at all, so
+//     removing its button here is the entire protection — there is no defense-in-depth for it.
+//   - Restore (#btnImport / #fileImport) and the whole "Back up" split-button + its popup
+//     (#btnExport / #btnBackupMenu / #backup_popup, covering full/actuals-only/settings-only
+//     backups AND the transactions CSV export) all front owner-only server endpoints that
+//     already 403 members; hiding them here is belt-and-braces on top of that.
+// What-If Mode, Print/PDF, the theme picker, and the disclaimer toggle are left untouched —
+// members are full users of the planning tools, only destructive/export actions are gated.
+function applyMemberGating() {
+  if (window.__role !== 'member') return;
+  const backupSplit = document.querySelector('.actions .backup-split');
+  if (backupSplit) backupSplit.remove();   // whole split-button + popup — cleanest fix for #4's
+                                            // "no dangling caret" requirement: nothing left to open
+  const btnImport = $('btnImport'); if (btnImport) btnImport.remove();
+  const fileImport = $('fileImport'); if (fileImport) fileImport.remove();
+  const btnReset = $('btnReset');
+  if (btnReset) {
+    const divider = btnReset.previousElementSibling;   // the <hr>-style divider directly above Reset
+    if (divider && divider.tagName === 'DIV') divider.remove();
+    btnReset.remove();
+  }
+}
 function reset() {
   if (wiBlockIfActive('reset')) return;
   if (!confirm('Reset all values to defaults?')) return;
@@ -2871,13 +2919,20 @@ async function doBackup(kind) {
   if (wiBlockIfActive('back up')) return;
   let serverSection = null;
   let degraded = false;
+  let failDetail = null;
   if (kind === 'full' || kind === 'actuals-only') {
     try {
       const res = await fetch('/api/tracking/export');
-      if (!res.ok) throw new Error('bad status');
+      if (!res.ok) {
+        // Defense-in-depth (0.2.1): the header control that reaches doBackup is hidden for
+        // members (see applyMemberGating) — this only matters if that's ever bypassed, in
+        // which case surface the server's friendly 403 detail instead of a generic message.
+        try { const err = await res.json(); failDetail = err && err.detail; } catch (e) {}
+        throw new Error('bad status');
+      }
       serverSection = await res.json();
     } catch (e) {
-      if (kind === 'actuals-only') { showToast('Actuals server unavailable — could not back up actuals'); return; }
+      if (kind === 'actuals-only') { showToast(failDetail || 'Actuals server unavailable — could not back up actuals'); return; }
       kind = 'client-only';
       degraded = true;
     }
@@ -2892,7 +2947,7 @@ async function doBackup(kind) {
   a.download = `finance-backup-${new Date().toISOString().slice(0, 10)}${suffix}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  if (degraded) showToast('Actuals server unavailable — backed up plan & settings only');
+  if (degraded) showToast(failDetail || 'Actuals server unavailable — backed up plan & settings only');
 }
 
 // Pure: resolve a CSV date-range preset to concrete from/to bounds, given "today" (ISO
@@ -2925,7 +2980,15 @@ async function downloadTransactionsCsv() {
   const qs = params.toString();
   try {
     const res = await fetch('/api/tracking/export.csv' + (qs ? '?' + qs : ''));
-    if (!res.ok) { showToast('CSV download failed'); return; }
+    if (!res.ok) {
+      // Defense-in-depth (0.2.1): the header CSV control is hidden for members (see
+      // applyMemberGating) — this only matters if that's ever bypassed, in which case
+      // surface the server's friendly 403 detail instead of a generic message.
+      let detail = null;
+      try { const err = await res.json(); detail = err && err.detail; } catch (e) {}
+      showToast(detail || 'CSV download failed');
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3064,6 +3127,10 @@ function importJSON(file) {
 
 // ---------- Wire-up ----------
 document.addEventListener('DOMContentLoaded', async () => {
+  // Resolve household role before any header wiring below runs (see the boot-time IIFE up
+  // top) — applyMemberGating() reads window.__role once this settles.
+  await __roleReady;
+
   // Initial brackets: try backend, fall back to baked-in defaults.
   try {
     const resp = await fetch('/api/defaults');
@@ -3233,6 +3300,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       spopup.addEventListener('click', e => { if (e.target.closest('button')) closeSettingsPopup(); });
     }
   }
+  applyMemberGating();
   { const x = $('btnDisclaimerX'); if (x) x.onclick = () => { setDisclaimerDismissed(true); applyDisclaimerVisibility(); }; }
   { const t = $('btnDisclaimerToggle'); if (t) t.onclick = () => { setDisclaimerDismissed(!isDisclaimerDismissed()); applyDisclaimerVisibility(); }; }
   { const b = document.getElementById('wi_broken_discard_btn'); if (b) b.onclick = () => {

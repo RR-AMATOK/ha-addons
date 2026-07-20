@@ -6,7 +6,7 @@
 #     homeassistant_config/config would expose HA's own recorder DB to this container.
 #   - NO privileged/host_network/*_api grants beyond what's listed.
 name: Finance Tracker
-version: "0.2.0"
+version: "0.2.1"
 slug: finance_tracker
 description: >-
   Personal income-tax, budget, and plan-vs-actual tracker (FastAPI + SQLite).
@@ -20,6 +20,10 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:finance
 panel_title: Finance
+# Open the panel to all household users now (S0.2-lite, pulled forward from S4.1 by user
+# directive). Server-side owner guards (require_owner) are live; full member onboarding UX
+# still lands at S4.1. Rollback = set this back to true (config-only).
+panel_admin: false
 backup: cold
 watchdog: http://[HOST]:[PORT:8099]/health
 services:

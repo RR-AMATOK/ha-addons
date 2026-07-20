@@ -50,6 +50,33 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   by default. Open Settings to switch between **Full light**, **Shiro accent** (dark app,
   gold accent), and **Classic dark** — your choice is remembered in the browser. If no
   theme is bundled, the app falls back to the classic dark palette automatically.
+- **Multiple household users:** since 0.2.1 the panel opens to every Home Assistant
+  user in the household, not just admins. **Restore**, both backup downloads (full and
+  Actuals only), and the transactions CSV export are restricted to the household
+  **owner** — other members won't see those buttons and get a friendly refusal if they
+  try the underlying API directly.
+
+  > **Note — one shared dataset.** This add-on does not yet have per-user profiles.
+  > Every household member who opens the panel is reading and writing the **same**
+  > actuals ledger — if a member logs a transaction, it lands in the same shared data
+  > as everyone else's, with no per-user separation. Plan and tax inputs are stored
+  > per-device (in each browser), not per-user on the server. Treat this as one
+  > household account shared by everyone with access, not a multi-user tool with
+  > individual data — that's planned for a later release. One side effect: the
+  > **Back up** button is owner-only in 0.2.1 (it bundles the full/Actuals
+  > backups with the per-device "Settings only" backup), so members can't yet
+  > download their own settings-only backup file — their plan/tax inputs are
+  > still safely stored in their browser, they just can't export them until
+  > per-user profiles land.
+
+  > **Note — the first person in becomes the owner.** With `panel_admin: false`,
+  > whichever household member opens **Finance** first after updating to 0.2.1
+  > becomes the permanent owner — the only one who can Restore, download
+  > backups, or export CSV. Everyone who opens it afterward is a member, and
+  > there's no in-app way to reassign owner in 0.2.1. If it matters who ends up
+  > owner, have that person open Finance first and confirm it in Settings (or
+  > have an admin check `/api/whoami`) before giving other household members
+  > access.
 
 ## Data & backups
 
