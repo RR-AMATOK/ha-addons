@@ -1727,6 +1727,142 @@ def delete_venture_endpoint(venture_id: int, request: Request = None) -> dict:
     return {"deleted": venture_id}
 
 
+# ----- sinking funds (TODO-238, DEC-034, docs/sinking-funds-design.md) -----
+# Phase 1 only: CRUD + a separate fund-lens endpoint (like /api/tracking/card-rollup).
+# Does NOT touch aggregate_actuals/plan_vs_actual or the month_actuals seam — those stay
+# byte-unchanged (Phase 2 folds the funded-draw excusal into the headline on-track number).
+
+class FundModel(BaseModel):
+    name: str
+    bucket: str | None = None
+    monthly_contribution: float = Field(0, ge=0, alias="monthlyContribution")   # dollars
+    target: float | None = Field(None, gt=0)                                   # dollars
+    target_date: str | None = Field(None, alias="targetDate")                  # YYYY-MM-DD
+    model_config = {"populate_by_name": True}
+
+
+class FundUpdateModel(BaseModel):
+    name: str | None = None
+    bucket: str | None = None
+    monthly_contribution: float | None = Field(None, ge=0, alias="monthlyContribution")
+    target: float | None = Field(None, gt=0)
+    target_date: str | None = Field(None, alias="targetDate")
+    clear_target: bool = Field(False, alias="clearTarget")   # unsets target + targetDate together
+    status: Literal["active", "archived"] | None = None
+    model_config = {"populate_by_name": True}
+
+
+class FundLinkModel(BaseModel):
+    txn_id: int = Field(..., alias="txnId")
+    role: Literal["contribute", "draw"]
+    model_config = {"populate_by_name": True}
+
+
+@app.get("/api/tracking/funds")
+def list_funds_endpoint(includeArchived: bool = False, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return {"funds": tracking_store.list_funds(c, scope, include_archived=includeArchived)}
+
+
+@app.post("/api/tracking/funds")
+def create_fund_endpoint(m: FundModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.create_fund(
+                c, scope, m.name, bucket=m.bucket,
+                monthly_contribution_cents=_cents(m.monthly_contribution),
+                target_cents=None if m.target is None else _cents(m.target),
+                target_date=m.target_date)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.patch("/api/tracking/funds/{fund_id}")
+def update_fund_endpoint(fund_id: int, m: FundUpdateModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    fields: dict = {}
+    if m.name is not None:
+        fields["name"] = m.name
+    if m.bucket is not None:
+        fields["bucket"] = m.bucket
+    if m.monthly_contribution is not None:
+        fields["monthly_contribution_cents"] = _cents(m.monthly_contribution)
+    if m.clear_target:
+        fields["target_cents"] = None
+        fields["target_date"] = None
+    else:
+        if m.target is not None:
+            fields["target_cents"] = _cents(m.target)
+        if m.target_date is not None:
+            fields["target_date"] = m.target_date
+    if m.status is not None:
+        fields["status"] = m.status
+    with closing(tracking_store.connect()) as c:
+        try:
+            f = tracking_store.update_fund(c, scope, fund_id, **fields)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if f is None:
+            raise HTTPException(status_code=404, detail="fund not found")
+        return f
+
+
+@app.delete("/api/tracking/funds/{fund_id}")
+def delete_fund_endpoint(fund_id: int, hard: bool = False, force: bool = False, request: Request = None) -> dict:
+    """Archive-by-default (`hard=false`, the default) — always succeeds, idempotent.
+    `hard=true` permanently deletes (cascades fund_txn); 409 when the fund's all-time
+    reserve is nonzero unless `force=true` is also passed (§4.3 — a hard delete reverts
+    past funded draws to raw spend)."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            result = tracking_store.delete_fund(c, scope, fund_id, hard=hard, force=force)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    return {"fundId": fund_id, **result}
+
+
+@app.post("/api/tracking/funds/{fund_id}/txns")
+def link_fund_txn_endpoint(fund_id: int, m: FundLinkModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.link_fund_txn(c, scope, fund_id, m.txn_id, m.role)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.delete("/api/tracking/funds/{fund_id}/txns/{txn_id}")
+def unlink_fund_txn_endpoint(fund_id: int, txn_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            tracking_store.unlink_fund_txn(c, scope, fund_id, txn_id)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    return {"fundId": fund_id, "txnId": txn_id, "unlinked": True}
+
+
+@app.get("/api/tracking/fund-rollup")
+def fund_rollup_endpoint(month: str, includeArchived: bool = False, request: Request = None) -> dict:
+    """The fund lens (Phase 1, DEC-034 §5) — per-fund reserve trajectory for `month`,
+    mirroring /api/tracking/card-rollup's shape. Purely additive: does not read or write
+    aggregate_actuals/plan_vs_actual (Phase 2 folds the funded-draw excusal into the
+    headline on-track number via the month_actuals seam — not built here)."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        funds = tracking_store.list_funds(c, scope, include_archived=includeArchived)
+        out = []
+        for f in funds:
+            flows = tracking_store.fund_monthly_flows(c, scope, f["id"], upto_month=month)
+            rollup = tracking.fund_rollup(flows, upto_month=month)
+            history = tracking_store.list_fund_txns(c, scope, f["id"])
+            out.append({**f, **rollup, "history": history})
+    return {"month": month, "funds": out}
+
+
 # ----- recurring expectations (monthly bills/income seeded from the budget) -----
 
 class RecurringModel(BaseModel):
@@ -2291,3 +2427,45 @@ def whoami_endpoint(request: Request) -> dict:
             users = tracking_store.list_users(c)
         return {"id": user["id"], "role": user["role"], "users": users}
     return {"id": user["id"], "role": user["role"]}
+
+
+# ----- owner transfer (SEV-004 follow-up, addon/DOCS.md; 0.2.1 explicitly deferred this) -----
+
+class OwnerTransferModel(BaseModel):
+    to_user_id: str = Field(..., alias="toUserId")
+    model_config = {"populate_by_name": True}
+
+
+@app.post("/api/tracking/owner-transfer")
+def owner_transfer_endpoint(m: OwnerTransferModel, request: Request) -> dict:
+    """Hand the household owner seat to another already-provisioned member. Owner-only
+    (require_owner) -- a member gets 403 before this ever runs.
+
+    ZERO DATA MOVEMENT: owner-scoped data (every `/api/tracking/*` table) is keyed to the
+    `__owner__` scopeId sentinel, never to a raw HA user id (resolve_user()'s scopeId
+    formula, DEC-033). Promoting `toUserId` to `role='owner'` means their VERY NEXT
+    request resolves `scopeId = '__owner__'` -- they immediately see every transaction,
+    account, fund, and synced profile the old owner had, with zero rows copied or moved.
+    Full mechanics + the atomicity guarantee (single transaction; current owner demoted
+    before the target is promoted) live in tracking_store.transfer_ownership's docstring.
+
+    ORPHANED DATA (documented, not merged -- see addon/DOCS.md): if `toUserId` had
+    already logged data as a member (their own transactions, their own synced profile),
+    it stays under their raw id, unreachable while they hold the owner seat -- it
+    reappears only if they're later demoted back to member. No merge tooling exists.
+
+    Body: ``{"toUserId": "<id>"}``. 400 if `toUserId` is the current owner (no-op) or the
+    reserved `__owner__` sentinel. 404 if `toUserId` has never opened the app (must be
+    lazily provisioned first, DEC-026/031). 200 ``{"previousOwnerId", "newOwnerId"}`` on
+    success.
+    """
+    owner = require_owner(request)
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.transfer_ownership(c, owner["id"], m.to_user_id)
+        except tracking_store.OwnerTransferError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except tracking_store.UnknownTransferTargetError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except tracking_store.OwnerTransferConflictError as e:
+            raise HTTPException(status_code=409, detail=str(e))

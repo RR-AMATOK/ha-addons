@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.1
+
+- **Sinking funds.** Set aside money monthly for irregular expenses (car
+  maintenance, travel): create funds in the Budget tab (with an optional
+  target), reserve the monthly amount in your plan with one tap, and link
+  real transactions as contributions or draws in Actuals — the fund lens
+  shows each reserve building up and how much of a big expense was
+  pre-funded.
+- **Transfer ownership.** The household's owner seat (all shared data +
+  admin actions) can now be handed to another member: Settings gear →
+  Transfer ownership. Useful when the wrong account ended up as owner —
+  the new owner gets everything instantly, nothing is copied or moved.
+- **Consistent selected states.** Everything selected — tabs, chips,
+  buttons — now shows white text on the deeper accent fill, in both themes
+  (this also fixes a text-contrast failure in the light theme's chips).
+- **No more automatic backup downloads.** The one-time profile migration
+  now asks: download a backup file, continue without, or cancel — nothing
+  downloads unless you choose it (the server still takes its own database
+  backup regardless). Also fixed a race that could download the file twice.
+
 ## 0.3.0
 
 - **Your plan now follows you across devices.** Tax inputs, budget setup, FIRE

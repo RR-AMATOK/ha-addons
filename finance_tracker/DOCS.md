@@ -70,13 +70,31 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   > per-user profiles land.
 
   > **Note — the first person in becomes the owner.** With `panel_admin: false`,
-  > whichever household member opens **Finance** first after updating to 0.2.1
-  > becomes the permanent owner — the only one who can Restore, download
-  > backups, or export CSV. Everyone who opens it afterward is a member, and
-  > there's no in-app way to reassign owner in 0.2.1. If it matters who ends up
-  > owner, have that person open Finance first and confirm it in Settings (or
-  > have an admin check `/api/whoami`) before giving other household members
-  > access.
+  > whichever household member opens **Finance** first becomes the owner — the
+  > only one who can Restore, download backups, or export CSV. Everyone who
+  > opens it afterward is a member. If it matters who ends up owner, have that
+  > person open Finance first and confirm it in Settings (or have an admin check
+  > `/api/whoami`) before giving other household members access.
+  >
+  > **Changed your mind? Transfer ownership any time.** Settings gear →
+  > **Transfer ownership…**, pick another household member from the list (they
+  > must have opened Finance at least once so the app knows they exist), and
+  > confirm. After transferring, close or refresh any other tabs you had open
+  > as the old owner — only the tab you acted in reloads itself; stale tabs are
+  > harmless (owner actions fail) but can look confusing until refreshed.
+  > Because the owner's data lives in a household-wide slot rather than
+  > under any one person's account, the new owner immediately has everything the
+  > old owner had — every transaction, account, backup, and admin action — with
+  > nothing copied or moved. The old owner becomes an ordinary member with a
+  > fresh, empty workspace of their own. **One nuance:** if the person you're
+  > promoting had already been using the app as a member (their own logged
+  > transactions or settings), that data is *not* merged in — it's left in place,
+  > simply inaccessible while they hold the owner seat, and reappears exactly as
+  > it was only if the seat is ever transferred back to a member role for them.
+  > There's no merge tool for this; it's a rare edge case (most people promoted
+  > to owner haven't used the app as a member first) but worth knowing about.
+  > This cannot be undone from within the app except by transferring the seat
+  > back the same way.
 
 ## Data & backups
 

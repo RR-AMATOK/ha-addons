@@ -61,6 +61,11 @@ _BACKUP_TABLES: tuple = (
     ("scenario",         ("id", "user_id", "name", "status", "payload_json", "created_at", "updated_at", "activated_at")),
     ("goal",             ("id", "user_id", "name", "target_cents", "target_date", "account_id", "manual_saved_cents", "status", "created_at")),
     ("venture",          ("id", "user_id", "name", "tag", "account_id", "items_json", "started_on", "status", "created_at")),
+    # Sinking funds (TODO-238, DEC-034, docs/sinking-funds-design.md §7): ordinary user
+    # data, no write-time invariants beyond the payload's own value (unlike user_profile
+    # below) — a plain verbatim restore is correct. `fund` before `fund_txn` (parent→child).
+    ("fund",             ("id", "user_id", "name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "status", "created_at")),
+    ("fund_txn",         ("fund_id", "txn_id", "role")),
     # S1.2 (DEC-027/DEC-035, docs/s1_2-migration-design.md §1.3): the per-user server profile.
     # `prev_blob`/`prev_state_version` are DELIBERATELY excluded from this column tuple —
     # they are an ephemeral conflict-recovery buffer, not restore-worthy state; the
@@ -71,7 +76,7 @@ _BACKUP_TABLES: tuple = (
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
 # instead of rejecting the file. The original 9 stay strictly required (DEC-016 / DEC-017 #1).
-_BACKUP_OPTIONAL_TABLES = frozenset({"scenario", "goal", "venture", "user_profile"})
+_BACKUP_OPTIONAL_TABLES = frozenset({"scenario", "goal", "venture", "user_profile", "fund", "fund_txn"})
 
 
 class RestoreError(Exception):
@@ -302,6 +307,45 @@ CREATE TABLE IF NOT EXISTS users (
 -- silently producing two owners.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_owner
   ON users(role) WHERE role = 'owner';
+
+-- Sinking funds (TODO-238, DEC-034, docs/sinking-funds-design.md §7): envelope-with-
+-- carryover savings for lumpy planned expenses (car maintenance, travel). The reserve is
+-- COMPUTED from linked fund_txn flows (contribute/draw), never stored — see
+-- tracking.fund_rollup. `bucket` must be a spend bucket (never 'investment', DEC-010 —
+-- enforced in store code, not a DB CHECK). Additive, user_id-scoped like goal/venture.
+-- Placed AFTER the "Household identity roster" block above deliberately: this table
+-- never existed pre-S1.1, so it must sit after the S1.1 QA harness's `_v6_schema()` split
+-- marker (tests/test_s1_1_qa_matrix.py — reconstructs a pre-migration schema by cutting
+-- SCHEMA's text at that exact comment) or that synthetic v6 DB would wrongly gain a
+-- (regex-stripped, indexless) `fund` table it never had. The user_id / fund_id indexes
+-- are declared only in `_mig_add_fund_table` below (not here) for the same reason the
+-- OTHER user-scoped indexes live only in `_mig_add_user_scoping` — see that migration's
+-- index-block comment.
+CREATE TABLE IF NOT EXISTS fund (
+  id                         INTEGER PRIMARY KEY,
+  user_id                    TEXT NOT NULL DEFAULT '__owner__',
+  name                       TEXT NOT NULL,
+  bucket                     TEXT,               -- the envelope's spend bucket (not 'investment')
+  monthly_contribution_cents INTEGER NOT NULL DEFAULT 0,
+  target_cents               INTEGER,            -- optional
+  target_date                TEXT,               -- optional eta
+  status                     TEXT NOT NULL DEFAULT 'active'
+                               CHECK (status IN ('active','archived')),
+  created_at                 TEXT NOT NULL
+);
+
+-- Child link: which transaction is a contribution to / draw from which fund. Inherits
+-- scope via FK to fund/txn (NO user_id column — mirrors txn_tag/txn_split). A link-table
+-- (not a `txn.fund_id`/`fund_role` column pair) because contributions and draws are both
+-- direction='out' — a tag can't express the role without a migration on the hot `txn`
+-- table, which this design deliberately avoids (§7). PRIMARY KEY(txn_id) enforces "one
+-- fund per txn" so a dollar is never double-counted across funds.
+CREATE TABLE IF NOT EXISTS fund_txn (
+  fund_id INTEGER NOT NULL REFERENCES fund(id) ON DELETE CASCADE,
+  txn_id  INTEGER NOT NULL REFERENCES txn(id)  ON DELETE CASCADE,
+  role    TEXT NOT NULL CHECK (role IN ('contribute','draw')),
+  PRIMARY KEY (txn_id)
+);
 """
 
 # Future migrations append to this list; each takes a conn and upgrades by one step.
@@ -608,7 +652,35 @@ def _mig_add_user_profile(conn) -> None:
 )""")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile]
+def _mig_add_fund_table(conn) -> None:
+    """Migration 9 (TODO-238, DEC-034, docs/sinking-funds-design.md §7): additive sinking-
+    fund tables -- v9 -> v10. `CREATE TABLE IF NOT EXISTS` makes it idempotent on fresh DBs
+    that already have both tables from SCHEMA above (mirrors the goal/venture/user_profile
+    convention exactly). Pure additive `CREATE` -- no ALTER, no data rewrite (DEC-009 #4).
+    `txn` itself is untouched (§7 — deliberately avoids an ALTER on the hot table)."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS fund (
+  id                         INTEGER PRIMARY KEY,
+  user_id                    TEXT NOT NULL DEFAULT '__owner__',
+  name                       TEXT NOT NULL,
+  bucket                     TEXT,
+  monthly_contribution_cents INTEGER NOT NULL DEFAULT 0,
+  target_cents               INTEGER,
+  target_date                TEXT,
+  status                     TEXT NOT NULL DEFAULT 'active'
+                               CHECK (status IN ('active','archived')),
+  created_at                 TEXT NOT NULL
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fund_user ON fund(user_id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS fund_txn (
+  fund_id INTEGER NOT NULL REFERENCES fund(id) ON DELETE CASCADE,
+  txn_id  INTEGER NOT NULL REFERENCES txn(id)  ON DELETE CASCADE,
+  role    TEXT NOT NULL CHECK (role IN ('contribute','draw')),
+  PRIMARY KEY (txn_id)
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_fund_txn_fund ON fund_txn(fund_id)")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table]
 
 
 def _now() -> str:
@@ -811,6 +883,114 @@ def list_users(conn: sqlite3.Connection) -> list[dict]:
         "SELECT user_id, role, created_at FROM users ORDER BY (role != 'owner'), created_at"
     ).fetchall()
     return [{"id": r["user_id"], "role": r["role"], "createdAt": r["created_at"]} for r in rows]
+
+
+class OwnerTransferError(ValueError):
+    """400: the requested transfer target is semantically invalid -- either it's already
+    the current owner (no-op) or it's the reserved `__owner__` data-scope sentinel, which
+    is never a real household member (SEV-S1.1-001)."""
+
+
+class UnknownTransferTargetError(LookupError):
+    """404: *to_user_id* has never been provisioned in the `users` roster. Identity is
+    lazily provisioned (DEC-026/031) -- a member must open the app at least once before
+    they can be handed the owner seat."""
+
+
+class OwnerTransferConflictError(RuntimeError):
+    """409: a concurrent/stale transfer lost the race -- the promote collided with
+    `idx_users_one_owner` (exactly one owner survived, invariant intact). Reload and
+    retry from whoever currently holds the seat."""
+
+
+def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_id: str) -> dict:
+    """Move the household owner seat from *current_owner_id* to *to_user_id* -- the
+    in-app owner reassignment SEV-004 explicitly deferred (0.2.1, addon/DOCS.md). Called
+    ONLY from server.py's owner-only POST /api/tracking/owner-transfer.
+
+    ZERO DATA MOVEMENT (the entire point of this design): every user-owned table is
+    scoped by `resolve_user()["scopeId"]`, which is `'__owner__'` for the owner role and
+    a member's raw HA id otherwise -- NEVER by `id` (see resolve_user()'s scopeId
+    formula and DEC-033). This function is a two-row UPDATE in the `users` table alone;
+    it never reads or writes account/txn/goal/venture/fund/user_profile/etc. Once
+    *to_user_id* holds `role='owner'`, their very next request resolves `scopeId =
+    '__owner__'` and they see EVERY bit of the data the old owner had -- transactions,
+    accounts, funds, their synced profile blob, all of it -- with not one row copied,
+    moved, or touched. Callers/tests should assert this by checking the `users` table
+    diff is exactly these two rows -- no other table's row count or content changes.
+
+    ORPHANED MEMBER-SCOPE DATA (documented, not merged -- deliberately out of scope; see
+    addon/DOCS.md): if *to_user_id* had already logged data while still a member (their
+    own transactions, their own synced profile blob), that data lives under THEIR RAW
+    ID, which after this swap belongs to nobody's current scope (the demoted owner's new
+    member scope is their OWN raw id -- never the promoted member's). That data is not
+    deleted; it simply becomes unreachable unless *to_user_id* is later demoted back to
+    member (a reverse transfer), at which point it reappears exactly as left. No
+    automatic merge is performed, and none is planned -- flag as a follow-up if a
+    real household ever needs it.
+
+    Atomicity: both UPDATEs run in ONE transaction. Python's `sqlite3` module opens an
+    implicit transaction before the first DML statement after a commit and holds it open
+    until `commit()`/`rollback()` -- so a process crash between the two UPDATEs below can
+    never be observed as a half-swapped state: either both land together (on `commit()`)
+    or neither does (nothing was durably written; the prior owner is unchanged on the
+    next connection). ORDER MATTERS: the current owner is demoted to 'member' FIRST
+    (transiently zero owners), THEN the target is promoted to 'owner' (back to exactly
+    one) -- reversing the order would collide with `idx_users_one_owner`, the partial
+    unique index that enforces at-most-one-owner on every individual statement, not just
+    at commit. That same index also stands as a concurrency backstop: if some future
+    caller bug ever left two rows claiming 'owner' mid-transaction, SQLite refuses the
+    second UPDATE outright (IntegrityError) rather than silently producing two owners.
+
+    Raises
+    ------
+    OwnerTransferError
+        Maps to 400 in server.py. *to_user_id* is *current_owner_id* (no-op transfer) or
+        the reserved `_SENTINEL_OWNER_ID` sentinel.
+    UnknownTransferTargetError
+        Maps to 404 in server.py. *to_user_id* has never been provisioned -- they must
+        open the app at least once first.
+    """
+    if to_user_id == _SENTINEL_OWNER_ID:
+        raise OwnerTransferError(
+            f"{_SENTINEL_OWNER_ID!r} is the reserved owner data-scope sentinel, not a "
+            "real household member -- it can never be a transfer target."
+        )
+    if to_user_id == current_owner_id:
+        raise OwnerTransferError("toUserId is already the current owner; nothing to transfer.")
+    target = conn.execute(
+        "SELECT user_id FROM users WHERE user_id = ?", (to_user_id,)
+    ).fetchone()
+    if target is None:
+        raise UnknownTransferTargetError(
+            f"{to_user_id!r} has never opened the app -- a member must be seen at least "
+            "once (lazily provisioned) before they can receive the owner seat."
+        )
+    # NOTE: to_user_id is intentionally NOT trimmed/normalized here — the target must
+    # exactly match a stored users.user_id, which the resolver already trimmed at
+    # provisioning time. Normalizing here could open a resolver/transfer mismatch.
+    try:
+        conn.execute(
+            "UPDATE users SET role = 'member' WHERE user_id = ? AND role = 'owner'",
+            (current_owner_id,),
+        )
+        conn.execute(
+            "UPDATE users SET role = 'owner' WHERE user_id = ?",
+            (to_user_id,),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        # A losing concurrent/stale transfer collides with idx_users_one_owner on the
+        # promote. The one-owner invariant held; surface it as a typed conflict (409 at
+        # the endpoint) instead of an unhandled 500.
+        conn.rollback()
+        raise OwnerTransferConflictError(
+            "ownership changed concurrently -- reload and retry from the current owner"
+        ) from exc
+    except Exception:
+        conn.rollback()
+        raise
+    return {"previousOwnerId": current_owner_id, "newOwnerId": to_user_id}
 
 
 # ---------- accounts ----------
@@ -1718,6 +1898,205 @@ def goal_saved_cents(conn, user_id, goal) -> int:
     return 0 if manual is None else round(manual * 100)
 
 
+# ---------- sinking funds (TODO-238, DEC-034, docs/sinking-funds-design.md) ----------
+
+def _fund_dict(row) -> dict:
+    return {
+        "id": row["id"], "name": row["name"], "bucket": row["bucket"],
+        "monthlyContribution": row["monthly_contribution_cents"] / 100.0,
+        "target": None if row["target_cents"] is None else row["target_cents"] / 100.0,
+        "targetDate": row["target_date"], "status": row["status"], "createdAt": row["created_at"],
+    }
+
+
+def _valid_fund_bucket(bucket) -> str | None:
+    """A fund's envelope bucket must be a real spend bucket, never 'investment' — DEC-010
+    already special-cases investment as permanent savings excluded from spend, a different
+    concept than a sinking fund's reserve (§4.3)."""
+    if bucket is None:
+        return None
+    b = str(bucket).strip()
+    if not b:
+        raise ValueError("bucket must not be empty")
+    if b == "investment":
+        raise ValueError("fund bucket must be a spend bucket, not 'investment'")
+    return b
+
+
+def create_fund(conn, user_id, name, *, bucket=None, monthly_contribution_cents=0,
+                 target_cents=None, target_date=None) -> dict:
+    if not str(name or "").strip():
+        raise ValueError("name must not be empty")
+    bucket = _valid_fund_bucket(bucket)
+    if not isinstance(monthly_contribution_cents, int) or monthly_contribution_cents < 0:
+        raise ValueError(f"monthly_contribution_cents must be an int >= 0, got {monthly_contribution_cents!r}")
+    if target_cents is not None and (not isinstance(target_cents, int) or target_cents <= 0):
+        raise ValueError(f"target_cents must be an int > 0, got {target_cents!r}")
+    if target_date is not None:
+        target_date = _valid_goal_date(target_date)
+    cur = conn.execute(
+        """INSERT INTO fund (user_id, name, bucket, monthly_contribution_cents, target_cents, target_date, status, created_at)
+           VALUES (?,?,?,?,?,?,'active',?)""",
+        (user_id, str(name).strip(), bucket, monthly_contribution_cents, target_cents, target_date, _now()))
+    conn.commit()
+    return _fund_dict(conn.execute("SELECT * FROM fund WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def list_funds(conn, user_id, include_archived=False) -> list[dict]:
+    q = ("SELECT * FROM fund WHERE user_id = ?" +
+         ("" if include_archived else " AND status = 'active'") + " ORDER BY name, id")
+    return [_fund_dict(r) for r in conn.execute(q, (user_id,)).fetchall()]
+
+
+def update_fund(conn, user_id, fund_id, **fields) -> dict | None:
+    """Patch a fund. `clear_target`/`clear_target_date` are handled by the caller
+    (server.py) translating to explicit `target_cents=None`/`target_date=None` fields —
+    mirrors goal's `clear_account` convention (None can't itself signal "unset")."""
+    allowed = {"name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "status"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"unknown fund fields: {sorted(unknown)}")
+    if "name" in fields and not str(fields["name"] or "").strip():
+        raise ValueError("name must not be empty")
+    if "bucket" in fields:
+        fields["bucket"] = _valid_fund_bucket(fields["bucket"])
+    if "monthly_contribution_cents" in fields and (
+            not isinstance(fields["monthly_contribution_cents"], int) or fields["monthly_contribution_cents"] < 0):
+        raise ValueError(
+            f"monthly_contribution_cents must be an int >= 0, got {fields['monthly_contribution_cents']!r}")
+    if fields.get("target_cents") is not None and (
+            not isinstance(fields["target_cents"], int) or fields["target_cents"] <= 0):
+        raise ValueError(f"target_cents must be an int > 0, got {fields['target_cents']!r}")
+    if fields.get("target_date") is not None:
+        fields["target_date"] = _valid_goal_date(fields["target_date"])
+    if "status" in fields and fields["status"] not in ("active", "archived"):
+        raise ValueError(f"status must be active/archived, got {fields['status']!r}")
+    sets, vals = [], []
+    for k, v in fields.items():
+        sets.append(f"{k} = ?")
+        vals.append(str(v).strip() if k == "name" else v)
+    if sets:
+        vals.append(fund_id)
+        vals.append(user_id)
+        conn.execute(f"UPDATE fund SET {', '.join(sets)} WHERE id = ? AND user_id = ?", vals)
+        conn.commit()
+    row = conn.execute("SELECT * FROM fund WHERE id = ? AND user_id = ?", (fund_id, user_id)).fetchone()
+    return None if row is None else _fund_dict(row)
+
+
+def _require_own_fund(conn, user_id, fund_id) -> dict:
+    """Cross-entity ownership guard (mirrors _require_own_account): fund_id must belong
+    to the caller's own scope before use. Returns the raw fund dict."""
+    row = conn.execute("SELECT * FROM fund WHERE id = ? AND user_id = ?", (fund_id, user_id)).fetchone()
+    if row is None:
+        raise ValueError(f"fund {fund_id} does not exist")
+    return _fund_dict(row)
+
+
+def fund_monthly_flows(conn, user_id, fund_id, upto_month=None) -> dict[str, dict]:
+    """Per-month {contributeCents, drawCents} for one fund's linked transactions, scoped
+    to user_id (defense in depth — fund_id is already the caller's own via
+    _require_own_fund at every call site; the join also re-checks t.user_id so a foreign
+    txn slipped into fund_txn by any future bug can never leak into the reserve math).
+
+    `upto_month` ('YYYY-MM') bounds rows to postedOn <= month_end(upto_month), mirroring
+    list_txns' date_to bound — a fund's reserve as of month M must never be influenced by
+    data dated after M. None folds the fund's ENTIRE history (used by the hard-delete
+    reserve guard, where "is there money left" must reflect everything ever logged).
+
+    Returns a dict keyed by 'YYYY-MM' — only months with recorded contribute/draw
+    activity are present; a month absent is zero activity for BOTH roles (the caller,
+    tracking.fund_rollup, treats an absent month identically to one explicitly zeroed)."""
+    sql = ("SELECT substr(t.posted_on,1,7) AS m, ft.role, SUM(t.amount_cents) AS s "
+           "FROM fund_txn ft JOIN txn t ON t.id = ft.txn_id "
+           "WHERE ft.fund_id = ? AND t.user_id = ?")
+    vals: list = [fund_id, user_id]
+    if upto_month is not None:
+        sql += " AND t.posted_on <= ?"
+        vals.append(tracking.month_end(upto_month))
+    sql += " GROUP BY m, ft.role"
+    out: dict = {}
+    for r in conn.execute(sql, vals).fetchall():
+        d = out.setdefault(r["m"], {"contributeCents": 0, "drawCents": 0})
+        if r["role"] == "contribute":
+            d["contributeCents"] = r["s"]
+        else:
+            d["drawCents"] = r["s"]
+    return out
+
+
+def list_fund_txns(conn, user_id, fund_id) -> list[dict]:
+    """Draw/contribution history for one fund (drives the Actuals fund-chip's history
+    list) — a lean projection scoped + ownership-checked, newest first."""
+    _require_own_fund(conn, user_id, fund_id)
+    rows = conn.execute(
+        "SELECT ft.role, t.id AS txn_id, t.posted_on, t.amount_cents, t.description, t.category "
+        "FROM fund_txn ft JOIN txn t ON t.id = ft.txn_id "
+        "WHERE ft.fund_id = ? AND t.user_id = ? ORDER BY t.posted_on DESC, t.id DESC",
+        (fund_id, user_id)).fetchall()
+    return [{
+        "txnId": r["txn_id"], "role": r["role"], "postedOn": r["posted_on"],
+        "amount": r["amount_cents"] / 100.0, "description": r["description"], "category": r["category"],
+    } for r in rows]
+
+
+def link_fund_txn(conn, user_id, fund_id, txn_id, role) -> dict:
+    """Link an existing transaction to a fund as a contribution or draw (§7's fund_txn
+    link table). One fund per txn (UNIQUE via PRIMARY KEY(txn_id)) — a txn already linked
+    to ANY fund (including this same fund) is rejected, so a dollar is never double-
+    counted across funds (§4.3). `txn_id` must be the caller's OWN transaction (mirrors
+    _require_own_account) — a foreign or nonexistent id is rejected identically to a
+    foreign or nonexistent fund_id."""
+    if role not in ("contribute", "draw"):
+        raise ValueError(f"role must be 'contribute' or 'draw', got {role!r}")
+    _require_own_fund(conn, user_id, fund_id)
+    if not conn.execute("SELECT 1 FROM txn WHERE id = ? AND user_id = ?", (txn_id, user_id)).fetchone():
+        raise ValueError(f"txn {txn_id} does not exist")
+    existing = conn.execute("SELECT fund_id FROM fund_txn WHERE txn_id = ?", (txn_id,)).fetchone()
+    if existing is not None:
+        raise ValueError(f"txn {txn_id} is already linked to fund {existing['fund_id']}")
+    conn.execute("INSERT INTO fund_txn (fund_id, txn_id, role) VALUES (?,?,?)", (fund_id, txn_id, role))
+    conn.commit()
+    return {"fundId": fund_id, "txnId": txn_id, "role": role}
+
+
+def unlink_fund_txn(conn, user_id, fund_id, txn_id) -> None:
+    """Remove a fund<->txn link. No-op if not linked or foreign to this fund (mirrors
+    delete_account/delete_goal's silent-no-op convention) — the fund ownership check
+    still runs first so a member can never even probe another user's fund's links."""
+    _require_own_fund(conn, user_id, fund_id)
+    conn.execute("DELETE FROM fund_txn WHERE fund_id = ? AND txn_id = ?", (fund_id, txn_id))
+    conn.commit()
+
+
+def delete_fund(conn, user_id, fund_id, *, hard=False, force=False) -> dict:
+    """Archive-by-default deletion (DEC-034 §4.3, architect's call). `hard=False`
+    (default): sets status='archived' — stops new flows, preserves history and past
+    excusals; always allowed, idempotent, a no-op (not an error) if the fund doesn't
+    exist. `hard=True`: actually DELETEs the fund row (fund_txn cascades via ON DELETE
+    CASCADE) — blocked with ValueError when the fund's ALL-TIME reserve is nonzero unless
+    `force=True` is also passed, because a hard delete retroactively reverts past funded
+    draws to raw spend, re-blowing past months' funded view. Returns
+    {"deleted": bool, "archived": bool, "hard": bool}."""
+    row = conn.execute("SELECT * FROM fund WHERE id = ? AND user_id = ?", (fund_id, user_id)).fetchone()
+    if row is None:
+        return {"deleted": False, "archived": False, "hard": hard}
+    if not hard:
+        conn.execute("UPDATE fund SET status = 'archived' WHERE id = ? AND user_id = ?", (fund_id, user_id))
+        conn.commit()
+        return {"deleted": False, "archived": True, "hard": False}
+    if not force:
+        flows = fund_monthly_flows(conn, user_id, fund_id)
+        reserve = tracking.fund_rollup(flows)["reserve"]
+        if reserve:
+            raise ValueError(
+                f"fund {fund_id} has a nonzero reserve (${reserve:.2f}); pass force=true to "
+                "hard-delete anyway (past funded draws will revert to raw spend)")
+    conn.execute("DELETE FROM fund WHERE id = ? AND user_id = ?", (fund_id, user_id))
+    conn.commit()
+    return {"deleted": True, "archived": False, "hard": True}
+
+
 # ----- recurring expectations (seeded from the budget; reconciled, never auto-created) -----
 
 def _recurring_dict(r) -> dict:
@@ -2178,6 +2557,8 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
     for tbl, cols in _BACKUP_TABLES:
         if tbl == "txn_tag":
             order_by = "txn_id, tag_id"
+        elif tbl == "fund_txn":
+            order_by = "fund_id, txn_id"        # PK is txn_id alone, but this reads better -- no surrogate id column
         elif tbl == "user_profile":
             order_by = "user_id"                # PK is user_id, not id -- no surrogate id column
         else:

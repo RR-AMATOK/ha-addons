@@ -23,6 +23,12 @@
     --travel: #a77bea;
     --on-accent: #0b1020;   /* ink on accent fills */
     --on-accent-strong: #fff; /* ink on --accent-strong fills (.calc-btn); white passes in all presets */
+    /* DEC-036 selected-state unification (TODO-240): one token pair for every user-selected
+       fill (chips, primary buttons, nav pill, Calculate). --selected-bg aliases --accent-strong
+       so it re-skins for free under applyHaTheme()'s per-preset --accent-strong remap; ink is
+       white in every theme per the user's explicit directive. See docs/selected-state-unification.md. */
+    --selected-bg: var(--accent-strong);
+    --selected-ink: #fff;
     --accent-tint: rgba(122,167,255,0.12);                              /* fallback line first */
     --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent); /* themeable override; keep BOTH lines in this order */
     --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px;
@@ -103,6 +109,19 @@
   .settings-split { position: relative; display: inline-flex; }
   .settings-popup button { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
   .settings-popup button:last-child { margin-bottom: 0; }
+  /* S1.2 pre-migration snapshot dialog (amended 2026-07-22 — replaces the old auto-triggered
+     download + confirm() per the user's "can we not have this auto pop up to download a backup?"
+     request; see docs/s1_2-migration-design.md §5 amendment and runPreMigrationSnapshot below).
+     Reuses .backup-popup's panel/border/radius/shadow surface for visual consistency with the
+     other header popups, but is presented centered + blocking via a backdrop rather than
+     anchored to a button — this fires from boot logic, not a click, so there is no anchor. */
+  .premigration-modal-backdrop { position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center;
+    padding: 16px; }
+  .premigration-modal-backdrop[hidden] { display: none; }
+  .premigration-modal { position: static; width: min(420px, 100%); }
+  .premigration-modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .premigration-modal-actions button { width: 100%; }
   /* Calc-error indicator (replaces the removed #status text). Hidden by default; setStatus()
      toggles it alongside showToast() on a failed /api/calculate. */
   .calc-error-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -115,7 +134,7 @@
     transition: background-color .12s ease, border-color .12s ease, color .12s ease;
   }
   button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: var(--fw-semibold); }
+  button.primary { background: var(--selected-bg); color: var(--selected-ink); border-color: var(--selected-bg); font-weight: var(--fw-semibold); }
   main {
     display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
@@ -315,7 +334,7 @@
     padding: 4px 10px; border-radius: 999px; background: var(--chip);
     border: 1px solid var(--line); cursor: pointer; font-size: var(--fs-sm); color: var(--muted);
   }
-  .chip.active { background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: var(--fw-semibold); }
+  .chip.active { background: var(--selected-bg); color: var(--selected-ink); border-color: var(--selected-bg); font-weight: var(--fw-semibold); }
 
   /* Results */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
@@ -390,7 +409,7 @@
   }
   #tabbar .tab-btn:hover { background:var(--accent-tint); color:var(--text); }
   #tabbar .tab-btn.active,
-  #tabbar .tab-btn.active:hover { background:var(--accent); color:var(--on-accent); }
+  #tabbar .tab-btn.active:hover { background:var(--selected-bg); color:var(--selected-ink); }
   #tabbar .tab-btn:active { transform:translateY(1px); }
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
@@ -474,8 +493,11 @@
      palette is luminance-flat, so adjacent breakdown-bar segments need a structural hairline
      to stay distinguishable on light. Dark/accent never match html.theme-shiro-full. */
   html.theme-shiro-full #barBreakdown > div:not(:last-child) { box-shadow: inset -1px 0 0 var(--panel); }
-  .calc-btn { background:var(--accent-strong); color:var(--on-accent-strong); border:none; border-radius:8px; padding:10px 16px; font-weight:var(--fw-semibold); cursor:pointer; margin-top:10px; }
-  .calc-btn:hover { background:var(--accent-strong); filter:brightness(1.15); }
+  .calc-btn { background:var(--selected-bg); color:var(--selected-ink); border:none; border-radius:8px; padding:10px 16px; font-weight:var(--fw-semibold); cursor:pointer; margin-top:10px; }
+  /* DEC-036: hover must darken, never brighten — brightening a white-ink selected fill lowers
+     contrast (dark theme: brightness(1.15) dropped white-on-#437dff to 3.74:1, failing AA).
+     Darkening only raises white-ink contrast, so it's safe in every theme. */
+  .calc-btn:hover { background:var(--selected-bg); filter:brightness(0.92); }
   .tab-panel select { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 8px; font-size:var(--fs-md); min-width:120px; }
   .tab-panel .row label { font-size:var(--fs-md); }
   .tab-panel input[type=checkbox] { width:auto; }
@@ -562,6 +584,10 @@
   }
   .ac-refund-toggle:hover { color: var(--good); border-color: transparent; }
   .ac-refund-toggle.active { color: var(--good); font-weight: var(--fw-semibold); }
+  /* Sinking funds — reserve chip (TODO-238, DEC-034 Phase 1), same pill family as .ac-earmark-chip */
+  .sf-chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:var(--fs-xs); font-weight:var(--fw-semibold); background:var(--chip); white-space:nowrap; }
+  .sf-chip.has-reserve { color:var(--good); border:1px solid var(--good); }
+  .sf-chip.is-empty { color:var(--muted); border:1px solid var(--line); }
 
   /* Phone-first responsive pass (P0) — presentation-only, color-free (grid/flex/width/
      padding/min-height), so both dark and shiro-full inherit identically. Additive only:
@@ -585,7 +611,8 @@
     .input-cluster { width: 100%; align-items: stretch; }
     #gl_target, #gl_manual { width: 100% !important; }
     #tab-invest .row select, #tab-invest .row input[type=text],
-    #gl_card .row select, #gl_card .row input[type=text] { width: 100% !important; min-width: 0 !important; }
+    #gl_card .row select, #gl_card .row input[type=text],
+    #sf_card .row select, #sf_card .row input[type=text], #sf_card .row input[type=date] { width: 100% !important; min-width: 0 !important; }
 
     /* budget builder: two-line wrap rows (name full-width on line 1;
        handle/amount/tax/split/$ on line 2) instead of full-bleed scroll */
@@ -712,7 +739,15 @@
           <label class="backup-popup-radio"><input type="radio" name="theme_choice" value="dark"> Classic dark</label>
         </div>
         <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+        <button id="btnOwnerTransfer">Transfer ownership&hellip;</button>
+        <div style="border-top:1px solid var(--line);margin:8px 0"></div>
         <button id="btnReset">Reset</button>
+      </div>
+      <div id="owner_transfer_panel" class="backup-popup settings-popup" aria-labelledby="owner_transfer_panel_h" hidden>
+        <div class="subhead" id="owner_transfer_panel_h" style="margin-top:0">Transfer ownership to&hellip;</div>
+        <div class="mini muted" style="margin-bottom:6px">They keep all of the household's data and admin actions; you become an ordinary member with a fresh, empty workspace.</div>
+        <div id="owner_transfer_list" class="mini">Loading&hellip;</div>
+        <button class="seed-btn" id="owner_transfer_cancel" type="button" style="margin-top:8px;width:100%">Cancel</button>
       </div>
     </span>
     <input type="file" id="fileImport" accept="application/json" style="display:none" />
@@ -761,6 +796,23 @@
   <span class="wi-banner-actions">
     <button type="button" id="profile_displacement_dismiss_btn">Dismiss</button>
   </span>
+</div>
+
+<!-- S1.2 pre-migration snapshot offer (amended 2026-07-22, see docs/s1_2-migration-design.md §5
+     amendment): replaces the old auto-triggered download + confirm() with an explicit in-dialog
+     choice, shown at most once per scope per migration by runPreMigrationSnapshot below. Cancel
+     aborts the whole migration for this boot (re-offered next boot); the server-side
+     .pre-profile-migration.bak safety copy stays mandatory and automatic either way. -->
+<div id="premigration_modal_backdrop" class="premigration-modal-backdrop" hidden>
+  <div id="premigration_modal" class="backup-popup premigration-modal" role="dialog" aria-modal="true" aria-labelledby="premigration_modal_h" aria-describedby="premigration_modal_body">
+    <div class="subhead" id="premigration_modal_h" style="margin-top:0">Moving to server-backed storage</div>
+    <p id="premigration_modal_body" class="mini">Your plan is moving to server-backed storage so it can sync across devices. You can download a safety-copy file first, or continue without one — a server-side safety copy is always taken automatically either way, and nothing on this device is deleted.</p>
+    <div class="premigration-modal-actions">
+      <button type="button" id="premigration_download_btn" class="primary">Download a backup file first (recommended)</button>
+      <button type="button" id="premigration_continue_btn">Continue without downloading</button>
+      <button type="button" id="premigration_cancel_btn">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div class="disclaimer" id="disclaimer">
@@ -1411,6 +1463,26 @@
     <button class="seed-btn" id="gl_add" type="button">+ Add goal</button>
   </div>
 </section>
+
+<!-- Sinking funds (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md §6.1) -->
+<section class="card" style="margin-top:16px" id="sf_card">
+  <h2>Sinking funds</h2>
+  <p class="mini">Set aside money for a lumpy expense you know is coming — car maintenance, travel — then spend it down when it lands. <span class="muted">Goal or fund? A goal saves toward a target you'll hold; a fund sets aside and spends down, repeatedly.</span> <b>→ Budget line</b> reserves the monthly contribution under Sinking funds.</p>
+  <div id="sf_list" class="mini muted">No funds yet — add one below.</div>
+  <div class="sc-grid" style="margin-top:12px">
+    <div class="row" style="margin:0"><label class="mini">Fund</label><input id="sf_name" type="text" placeholder="e.g. Car maintenance" style="min-width:170px"/></div>
+    <div class="row" style="margin:0"><label class="mini">Bucket</label><select id="sf_bucket" style="min-width:130px"></select></div>
+    <div class="row" style="margin:0"><label class="mini">Monthly</label><span class="input-pair"><input id="sf_monthly" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
+    <div class="row" style="margin:0"><label class="mini">Target <span class="muted">(optional)</span></label><span class="input-pair"><input id="sf_target" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
+    <div class="row" style="margin:0"><label class="mini">By <span class="muted">(optional)</span></label><input id="sf_date" type="date"/></div>
+    <button class="seed-btn" id="sf_add" type="button">+ Add fund</button>
+    <button class="ac-tool" id="sf_cancel_edit" type="button" style="display:none">Cancel edit</button>
+  </div>
+  <details id="sf_archived_wrap" class="mini" style="margin-top:10px;display:none">
+    <summary class="muted">Archived funds</summary>
+    <div id="sf_archived" style="margin-top:8px"></div>
+  </details>
+</section>
 <!-- The old parallel-form scenario editor (<details id="sc_wrap">) is removed — TODO-221/DEC-018
      replaces it with global What-If Mode: edit these same real fields in place (header
      "What-If Mode" button), with a minimal banner (name / Drafts / Save draft / Activate /
@@ -1710,6 +1782,13 @@
     <h2>Pay off your cards</h2>
     <div id="ac_cards"><div class="mini" style="color:var(--muted)">Loading card summary…</div></div>
     <div id="ac_open_pending"></div>
+  </section>
+
+  <!-- Sinking funds — fund lens (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md §6.2) -->
+  <section class="card" id="ac_funds_section">
+    <h2>Sinking funds</h2>
+    <p class="mini" style="margin:-4px 0 8px">Reserve per fund, this month's contributions/draws, and which funded amounts are excused vs. still count. Set up funds in the Budget tab. <span class="muted">Not folded into the "on track" verdict above yet — a separate lens for now.</span></p>
+    <div id="ac_funds"><div class="mini" style="color:var(--muted)">Loading funds…</div></div>
   </section>
 
   <section class="card"><h2>This month's transactions</h2>
@@ -2905,6 +2984,77 @@ function applyMemberGating() {
     if (divider && divider.tagName === 'DIV') divider.remove();
     btnReset.remove();
   }
+  const btnOwnerTransfer = $('btnOwnerTransfer');
+  if (btnOwnerTransfer) {
+    const divider = btnOwnerTransfer.previousElementSibling;   // its own divider, directly above it
+    if (divider && divider.tagName === 'DIV') divider.remove();
+    btnOwnerTransfer.remove();
+  }
+  const otPanel = $('owner_transfer_panel'); if (otPanel) otPanel.remove();
+}
+// Owner-only "Transfer ownership…" picker (SEV-004 follow-up, addon/DOCS.md — 0.2.1 explicitly
+// deferred in-app owner reassignment). Lists the household roster's members (GET /api/whoami's
+// owner-only `users` array) and, on confirmation, POSTs the swap. A member never sees the
+// trigger button at all (applyMemberGating above removes it); the server independently 403s a
+// member who somehow calls the endpoint directly (require_owner) — belt-and-braces, same
+// posture as every other owner-only control in this popup.
+async function renderOwnerTransferList() {
+  const el = $('owner_transfer_list');
+  if (!el) return;
+  el.textContent = 'Loading…';
+  let data;
+  try {
+    const r = await fetch('/api/whoami');
+    if (!r.ok) throw new Error('whoami ' + r.status);
+    data = await r.json();
+  } catch (e) {
+    el.innerHTML = '<div class="warn-box">Could not load the household roster.</div>';
+    return;
+  }
+  // Exclude the '__owner__' sentinel row: after a transfer FROM the fallback owner it
+  // lingers as a 'member' but is never a valid transfer target (server 400s it).
+  const members = (data.users || []).filter(u => u.role === 'member' && u.id !== '__owner__');
+  if (!members.length) {
+    el.innerHTML = '<div class="mini muted">No other household members yet — they need to open Finance at least once before they can receive the owner seat.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  members.forEach(u => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = u.id;
+    btn.title = 'Transfer ownership to this member';
+    btn.onclick = () => ownerTransferTo(u.id);
+    el.appendChild(btn);
+  });
+}
+async function ownerTransferTo(toUserId) {
+  const ok = confirm(
+    toUserId + ' becomes the owner and gains all household data + admin actions; ' +
+    'you become a member with a fresh workspace; this cannot be undone in-app — the new ' +
+    'owner would transfer back.\n\nContinue?'
+  );
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/tracking/owner-transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toUserId: toUserId }),
+    });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch (e) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+  } catch (e) {
+    alert('Transfer failed: ' + (e.message || e));
+    return;
+  }
+  // window.__role/__scopeId are boot-time constants — only a fresh GET /api/whoami (i.e. a
+  // reload) re-resolves them. A plain reload is also exactly what re-arms the S1.2 boot/sync
+  // engine's scopeId-mismatch guard (docs/s1_2-migration-design.md §4.0), so this browser
+  // naturally hydrates whichever scope it now resolves to instead of showing stale local state.
+  location.reload();
 }
 function reset() {
   if (wiBlockIfActive('reset')) return;
@@ -3190,16 +3340,77 @@ function dismissProfileDisplacementBanner() {
 }
 
 // ---- §5: pre-migration safety snapshot ----
+// AMENDED 2026-07-22 (user request: "can we not have this auto pop up to download a backup? or
+// have a setting to toggle it off" + an observed bug — two fps-pre-migration downloads firing
+// ~865ms apart in one boot). Full rationale in docs/s1_2-migration-design.md §5's dated amendment
+// note; summary here for anyone reading the code first:
+//
+// WHAT CHANGED: the client-side download is no longer auto-triggered. showPreMigrationDialog()
+// (below) replaces the old "download fires immediately, then confirm() to acknowledge it" flow
+// with an explicit in-page choice: "Download a backup file first (recommended)" (downloads, then
+// proceeds), "Continue without downloading" (proceeds, no download), or "Cancel" (aborts THIS
+// boot's migration entirely — same abort semantics as before: no PUT issued, meta.snapshotDone
+// stays false, re-offered next boot). The server-side `.pre-profile-migration.bak` safety copy
+// (§5.2, tracking_store.put_profile) is UNCHANGED and remains mandatory/automatic on the first
+// migration PUT regardless of which button is clicked — only the CLIENT download became opt-in.
+// A separate settings toggle was deliberately NOT added: the dialog is already opt-in and
+// already fires at most once per scope per migration (the latch below), so a toggle would be
+// redundant surface area for the same outcome.
+//
+// ROOT CAUSE OF THE DOUBLE-DOWNLOAD BUG: the old guard — `if (meta.snapshotDone) return true`
+// read once at function entry — was a classic check-then-act race. `meta.snapshotDone` was only
+// ever WRITTEN at the very end of the function, after an awaited `fetch('/api/tracking/export')`
+// and a blocking `confirm()` that could sit open for an arbitrary, user-paced amount of time. Two
+// overlapping invocations of this function for the SAME scope (e.g. bootProfileSyncEngine's
+// throw-triggered retry racing a still-in-flight first attempt, or any other path that ends up
+// calling the boot/sync engine twice for one page load) could BOTH read `snapshotDone: false`
+// before either had a chance to write `true` — so both proceeded to independently build an
+// envelope and fire a real file download. Nothing in the old code closed that window; the fix
+// (below) closes it with an in-memory, per-scope, promise-deduplicating latch that is set
+// SYNCHRONOUSLY (before any `await`), so a second overlapping call can never re-enter the offer —
+// it transparently awaits the SAME outcome as the first call instead.
+const __profileSnapshotOfferInFlight = {};   // scopeId -> Promise<boolean>, the in-flight half of
+                                              // the once-only latch (the persisted half is
+                                              // meta.snapshotDone, written only on resolution).
+
+// Renders the dialog and resolves to the user's choice. Deliberately NOT a native confirm()/
+// alert() — those block the whole tab (and, per the CDP/headless-testing lesson, are awkward to
+// test); an in-page dialog lets the rest of the app keep rendering underneath while this is open,
+// and gives a real 3-way choice a native confirm() can't express.
+function showPreMigrationDialog() {
+  return new Promise((resolve) => {
+    const backdrop = $('premigration_modal_backdrop');
+    const dlBtn = $('premigration_download_btn');
+    const contBtn = $('premigration_continue_btn');
+    const cancelBtn = $('premigration_cancel_btn');
+    // Defensive: if the dialog markup is ever missing (a stripped-down embed, a future refactor
+    // that forgets to carry it), never let a boot hang forever waiting for a button that can't
+    // exist — resolve as if the user chose to continue without downloading, exactly like landing
+    // on E1/no-history-to-lose cases already do, rather than stalling the whole migration.
+    if (!backdrop || !dlBtn || !contBtn || !cancelBtn) { resolve('continue'); return; }
+    const prevFocus = document.activeElement;
+    const cleanup = (choice) => {
+      backdrop.hidden = true;
+      dlBtn.onclick = null; contBtn.onclick = null; cancelBtn.onclick = null;
+      document.removeEventListener('keydown', onKeydown, true);
+      if (prevFocus && typeof prevFocus.focus === 'function') { try { prevFocus.focus(); } catch (e) {} }
+      resolve(choice);
+    };
+    const onKeydown = (e) => { if (e.key === 'Escape') { e.preventDefault(); cleanup('cancel'); } };
+    dlBtn.onclick = () => cleanup('download');
+    contBtn.onclick = () => cleanup('continue');
+    cancelBtn.onclick = () => cleanup('cancel');
+    document.addEventListener('keydown', onKeydown, true);
+    backdrop.hidden = false;
+    dlBtn.focus();
+  });
+}
+
 // Client-side download (§5.1) — the full fps-backup envelope, 'full' for the owner (client +
 // server sections) or 'client-only' for a member (no server data of their own to include yet).
-// Per the design/QA-flagged ambiguity (no reliable browser signal for a cancelled Blob→<a
-// download> trigger): forward progress gates on an EXPLICIT "I saved it — continue" confirm(),
-// never on trying to detect a cancelled download. A declined/failed download aborts the WHOLE
-// migration for this boot — no PUT is ever issued, `meta.snapshotDone` stays false, re-prompted
-// next boot; the app keeps running live off localStorage the whole time.
-async function runPreMigrationSnapshot() {
-  const meta = getProfileMeta();
-  if (meta && meta.snapshotDone === true) return true;
+// Only ever called after the user explicitly clicks "Download a backup file first" — see the
+// dialog above.
+async function downloadPreMigrationSnapshotFile(scopeId) {
   const isOwner = window.__role !== 'member';
   let serverSection = null;
   if (isOwner) {
@@ -3211,7 +3422,7 @@ async function runPreMigrationSnapshot() {
   if (WhatIf.active || WhatIf.suppress) return false;   // re-check across the await above (GUARD-0)
   const kind = (isOwner && serverSection) ? 'full' : 'client-only';
   const envelope = buildBackupEnvelope(kind, collectBackupClientKeys(), serverSection);
-  const filename = 'fps-pre-migration-' + (window.__scopeId || 'unknown') + '-' + Date.now() + '.json';
+  const filename = 'fps-pre-migration-' + scopeId + '-' + Date.now() + '.json';
   try {
     const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -3221,16 +3432,50 @@ async function runPreMigrationSnapshot() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  } catch (e) { return false; }   // couldn't even trigger the download — abort, retry next boot
-  const confirmed = confirm(
-    'Your plan is moving to server-backed storage. A safety-copy file was just downloaded (' +
-    filename + ') — please make sure it saved somewhere safe.\n\n' +
-    'Click OK once you’ve confirmed the file saved, to continue. Click Cancel to postpone — ' +
-    'nothing changes yet; you’ll be asked again next time you open the app.'
-  );
-  if (!confirmed) return false;
+    return true;
+  } catch (e) { return false; }   // couldn't even trigger the download — treated like Cancel below
+}
+
+// The actual offer, run at most once per scope per migration (both halves of the latch — see the
+// amendment note above). `ok=false` aborts the WHOLE migration for this boot: no PUT is ever
+// issued, `meta.snapshotDone` stays false, re-offered next boot; the app keeps running live off
+// localStorage the whole time. `ok=true` covers BOTH a successful download-and-continue AND an
+// explicit continue-without-downloading — the server-side `.pre-profile-migration.bak` snapshot
+// (§5.2) still gates the first flush unconditionally either way.
+async function runPreMigrationSnapshotImpl(scopeId) {
+  if (WhatIf.active || WhatIf.suppress) return false;
+  const choice = await showPreMigrationDialog();
+  if (WhatIf.active || WhatIf.suppress) return false;   // re-check across the (arbitrarily long) await
+  if (choice === 'cancel') return false;
+  if (choice === 'download') {
+    const downloaded = await downloadPreMigrationSnapshotFile(scopeId);
+    if (WhatIf.active || WhatIf.suppress) return false;
+    if (!downloaded) return false;   // download failed to trigger — do not silently proceed as if
+                                      // the user got their copy; abort, retry next boot (§5.1)
+  }
   setProfileMeta({ snapshotDone: true });
   return true;
+}
+
+// Public entry point — unchanged signature/semantics for its three §4 call sites (M1/M2/M3, X1,
+// S2). The in-memory latch here is what actually fixes the double-download bug (see the amendment
+// note above): `meta.snapshotDone` alone only closes the window AFTER a resolution has been
+// persisted, which is exactly the gap two overlapping invocations could race through. Keying by
+// scopeId (not a single flag) means a distinct scope's offer is never blocked by another scope's
+// in-flight one.
+function runPreMigrationSnapshot() {
+  const scopeId = window.__scopeId || 'unknown';
+  const meta = getProfileMeta();
+  if (meta && meta.snapshotDone === true) return Promise.resolve(true);
+  const inFlight = __profileSnapshotOfferInFlight[scopeId];
+  if (inFlight) return inFlight;   // a second overlapping call (retry racing a first attempt,
+                                    // etc.) reuses the SAME in-progress dialog's outcome instead
+                                    // of independently showing a second dialog/second download.
+  const p = runPreMigrationSnapshotImpl(scopeId).finally(() => {
+    delete __profileSnapshotOfferInFlight[scopeId];
+  });
+  __profileSnapshotOfferInFlight[scopeId] = p;
+  return p;
 }
 
 // ---- §4: the boot/sync state machine (the gate's core) ----
@@ -3373,6 +3618,8 @@ window.__profileSync = {
   markProfileDirty: markProfileDirty, scheduleProfileFlush: scheduleProfileFlush,
   profileFlushExecutor: profileFlushExecutor, doProfileFlush: doProfileFlush,
   doHydrate: doHydrate, runPreMigrationSnapshot: runPreMigrationSnapshot,
+  showPreMigrationDialog: showPreMigrationDialog,
+  downloadPreMigrationSnapshotFile: downloadPreMigrationSnapshotFile,
   runProfileSyncEngine: runProfileSyncEngine, runProfileSyncEngineImpl: runProfileSyncEngineImpl,
   bootProfileSyncEngine: bootProfileSyncEngine, showProfileConflictNote: showProfileConflictNote,
   checkRestoreDisplacement: checkRestoreDisplacement,
@@ -3834,6 +4081,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       spopup.addEventListener('click', e => { if (e.target.closest('button')) closeSettingsPopup(); });
     }
   }
+  // Owner-transfer picker (sibling of #settings_popup, not nested inside it — see the markup
+  // comment): opening it closes the settings gear popup via the delegated listener above
+  // (btnOwnerTransfer lives inside #settings_popup, so that click bubbles there too).
+  { const b = $('btnOwnerTransfer'), panel = $('owner_transfer_panel'), cancelBtn = $('owner_transfer_cancel');
+    if (b && panel) {
+      b.onclick = () => { panel.hidden = false; renderOwnerTransferList(); };
+      if (cancelBtn) cancelBtn.onclick = () => { panel.hidden = true; };
+      document.addEventListener('click', e => { if (!panel.hidden && !panel.contains(e.target) && e.target !== b) panel.hidden = true; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+    }
+  }
   applyMemberGating();
   { const x = $('btnDisclaimerX'); if (x) x.onclick = () => { setDisclaimerDismissed(true); applyDisclaimerVisibility(); }; }
   { const t = $('btnDisclaimerToggle'); if (t) t.onclick = () => { setDisclaimerDismissed(!isDisclaimerDismissed()); applyDisclaimerVisibility(); }; }
@@ -3925,7 +4183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
       if (t === 'invest') { ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); }   // derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures
-      if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability
+      if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds
       if (t === 'auto' && !window.__autoResult) calcAuto();   // first open computes the comparison
       if (t === 'actuals') acOnOpen();
     });
@@ -4607,6 +4865,155 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (dl) { if (!window.confirm('Delete this goal?')) return; await _fetchJSON('/api/tracking/goals/' + dl.dataset.glDel, { method: 'DELETE' }); showToast('Goal deleted'); }
         glLoad();
       } catch (e2) { showToast('Goal update failed: ' + (e2.message || '')); }
+    }); }
+
+  // ---- Sinking funds (TODO-238, DEC-034 Phase 1): create/edit/archive here; the reserve
+  // lens + transaction linking lives in Actuals (acRenderFunds) — this tab only manages the
+  // fund's identity + monthly contribution, mirroring the goal card's split. ----
+  const SF = { funds: [], editingId: null };
+  const sfMoney = n => '$' + (Math.round((+n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Maps a fund's spend-bucket kind (need/want/travel/other/custom) to the budget builder's
+  // display bucket name for addBudgetItem() — 'Sinking funds' group lands inside the matching
+  // top-level bucket (need→Needs, want→Wants, travel→Travel) so it reconciles against the
+  // right plan-vs-actual bar; custom kinds fall back to their own label, title-cased by KINDS.
+  function sfBgbBucketName(key) {
+    if (key === 'need') return 'Needs';
+    if (key === 'want') return 'Wants';
+    if (key === 'travel') return 'Travel';
+    return (KINDS[key] && KINDS[key].label) || 'Needs';
+  }
+  async function sfLoad() {
+    if (!$('sf_card')) return;
+    try { SF.funds = (await _fetchJSON('/api/tracking/funds?includeArchived=true')).funds || []; }
+    catch (e) { $('sf_list').innerHTML = '<span class="muted">Server offline — funds unavailable.</span>'; return; }
+    sfFillBuckets(); sfRender();
+  }
+  function sfFillBuckets() {
+    const sel = $('sf_bucket'); if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join('');
+    if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
+  }
+  function sfRender() {
+    const el = $('sf_list'); if (!el) return;
+    const active = SF.funds.filter(f => f.status !== 'archived');
+    const archived = SF.funds.filter(f => f.status === 'archived');
+    if (!active.length) { el.innerHTML = 'No funds yet — add one below.'; }
+    else {
+      el.innerHTML = active.map(f => {
+        const target = f.target ? sfMoney(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') : '';
+        return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px">'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
+          + '<b>' + esc(f.name) + '</b><span class="muted">' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + sfMoney(f.monthlyContribution) + '/mo' + (target ? ' · target ' + target : '') + '</span>'
+          + '<span style="margin-left:auto;white-space:nowrap">'
+          + (f.monthlyContribution > 0 ? '<a href="#" class="gl-act gl-act-primary" data-sf-budget="' + f.id + '" title="reserve the monthly amount in the budget" style="margin-right:6px">→ Budget line</a>' : '')
+          + '<a href="#" class="gl-act" data-sf-edit="' + f.id + '" title="edit" style="margin-right:6px">✎</a>'
+          + '<a href="#" class="gl-act gl-act-del" data-sf-archive="' + f.id + '" title="archive — stops new flows, keeps history">archive</a></span></div>'
+          + '</div>';
+      }).join('');
+    }
+    const aw = $('sf_archived_wrap'), ael = $('sf_archived');
+    if (aw && ael) {
+      aw.style.display = archived.length ? '' : 'none';
+      ael.innerHTML = archived.map(f => '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line-faint)">'
+        + '<span>' + esc(f.name) + '</span><span style="margin-left:auto;white-space:nowrap">'
+        + '<a href="#" class="gl-act" data-sf-restore="' + f.id + '" style="margin-right:6px">restore</a>'
+        + '<a href="#" class="gl-act gl-act-del" data-sf-harddelete="' + f.id + '">delete permanently</a></span></div>').join('');
+    }
+  }
+  function sfResetForm() {
+    $('sf_name').value = ''; $('sf_monthly').value = ''; $('sf_target').value = ''; $('sf_date').value = '';
+    sfFillBuckets();
+  }
+  function sfCancelEdit() {
+    SF.editingId = null;
+    sfResetForm();
+    $('sf_add').textContent = '+ Add fund';
+    $('sf_cancel_edit').style.display = 'none';
+  }
+  function sfEdit(id) {
+    const f = SF.funds.find(x => String(x.id) === String(id)); if (!f) return;
+    SF.editingId = f.id;
+    $('sf_name').value = f.name || '';
+    sfFillBuckets();
+    if (f.bucket) $('sf_bucket').value = f.bucket;
+    $('sf_monthly').value = f.monthlyContribution ? String(f.monthlyContribution) : '';
+    $('sf_target').value = f.target ? String(f.target) : '';
+    $('sf_date').value = f.targetDate || '';
+    formatUSDFields();
+    $('sf_add').textContent = 'Save changes';
+    $('sf_cancel_edit').style.display = '';
+    $('sf_name').focus();
+  }
+  async function sfAdd() {
+    if (acWriteGuard()) return;
+    const name = ($('sf_name').value || '').trim();
+    const bucket = $('sf_bucket').value || null;
+    const monthly = rn($('sf_monthly').value);
+    const target = rn($('sf_target').value);
+    const date = $('sf_date').value;
+    if (!name) { showToast('Name the fund'); return; }
+    const body = { name: name, bucket: bucket, monthlyContribution: monthly || 0 };
+    if (target > 0) body.target = target; else if (SF.editingId) body.clearTarget = true;
+    if (target > 0 && date) body.targetDate = date;
+    try {
+      if (SF.editingId) {
+        await _fetchJSON('/api/tracking/funds/' + SF.editingId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        showToast('Fund updated · ' + name);
+        sfCancelEdit();
+      } else {
+        await post('/api/tracking/funds', body);
+        showToast('Fund added · ' + name);
+        sfResetForm();
+      }
+      sfLoad();
+    } catch (e) { showToast('Could not save the fund: ' + (e.message || '')); }
+  }
+  async function sfArchive(id) {
+    if (acWriteGuard()) return;
+    try { await _fetchJSON('/api/tracking/funds/' + id, { method: 'DELETE' }); showToast('Fund archived'); sfLoad(); }
+    catch (e) { showToast('Could not archive the fund'); }
+  }
+  async function sfRestore(id) {
+    if (acWriteGuard()) return;
+    try { await _fetchJSON('/api/tracking/funds/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) }); showToast('Fund restored'); sfLoad(); }
+    catch (e) { showToast('Could not restore the fund'); }
+  }
+  async function sfHardDelete(id) {
+    if (acWriteGuard()) return;
+    if (!window.confirm('Permanently delete this fund and its transaction links? This cannot be undone.')) return;
+    try { await _fetchJSON('/api/tracking/funds/' + id + '?hard=true', { method: 'DELETE' }); showToast('Fund deleted'); sfLoad(); return; }
+    catch (e) {
+      if (!String(e.message || '').startsWith('409')) { showToast('Could not delete the fund'); return; }
+    }
+    // 409: nonzero reserve — a hard delete reverts past funded draws to raw spend (§4.3); confirm again with force.
+    if (!window.confirm('This fund still has a reserve — deleting will revert its past funded draws back to raw, unfunded spend. Delete anyway?')) return;
+    try { await _fetchJSON('/api/tracking/funds/' + id + '?hard=true&force=true', { method: 'DELETE' }); showToast('Fund deleted'); sfLoad(); }
+    catch (e2) { showToast('Could not delete the fund'); }
+  }
+  { const b = $('sf_add'); if (b) b.onclick = sfAdd; }
+  { const b = $('sf_cancel_edit'); if (b) b.onclick = sfCancelEdit; }
+  { const l = $('sf_list'); if (l) l.addEventListener('click', e => {
+      const bd = e.target.closest('[data-sf-budget]'), ed = e.target.closest('[data-sf-edit]'), ar = e.target.closest('[data-sf-archive]');
+      if (!bd && !ed && !ar) return;
+      e.preventDefault();
+      if (bd) {
+        const f = SF.funds.find(x => String(x.id) === bd.dataset.sfBudget);
+        if (!f || !(f.monthlyContribution > 0)) { showToast('Nothing to reserve'); return; }
+        const bname = sfBgbBucketName(f.bucket);
+        addBudgetItem(bname, 'Sinking funds', 'Fund: ' + f.name, f.monthlyContribution);
+        showToast('Reserved ' + sfMoney(f.monthlyContribution) + '/mo under ' + bname + ' › Sinking funds');
+        return;
+      }
+      if (ed) { sfEdit(ed.dataset.sfEdit); return; }
+      if (ar) { sfArchive(ar.dataset.sfArchive); return; }
+    }); }
+  { const l = $('sf_archived'); if (l) l.addEventListener('click', e => {
+      const rs = e.target.closest('[data-sf-restore]'), hd = e.target.closest('[data-sf-harddelete]');
+      if (!rs && !hd) return;
+      e.preventDefault();
+      if (rs) { sfRestore(rs.dataset.sfRestore); return; }
+      if (hd) { sfHardDelete(hd.dataset.sfHarddelete); return; }
     }); }
 
   // ---- Living in WA vs TX (TODO-224): same life priced under both states ----
@@ -6957,6 +7364,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     acRenderPVA(data);
     await acRenderRecurring();
     try { const cr = await getJSON('/api/tracking/card-rollup?month=' + ACT.month); acRenderCards(cr.rollup); } catch (e) { acRenderCards(null); }
+    try { const fr = await getJSON('/api/tracking/fund-rollup?month=' + ACT.month); ACT.funds = fr.funds || []; acRenderFunds(fr); } catch (e) { ACT.funds = []; acRenderFunds(null); }
     try { const op = await getJSON('/api/tracking/open-pending?month=' + ACT.month); ACT.openPending = op.txns || []; } catch (e) { ACT.openPending = []; }
     acRenderOpenPending();
   }
@@ -7501,6 +7909,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = h;
   }
 
+  // ---- Sinking funds: the fund lens (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md
+  // §6.2) — per-fund reserve trajectory + linked-transaction history, mirroring the card rollup's
+  // structure verbatim (same .ac-cards-* classes). Purely additive: never touches acRenderPVA /
+  // the plan-vs-actual headline math above (Phase 2's job, not this pass's). ----
+  function acRenderFunds(data) {
+    const el = $('ac_funds'); if (!el) return;
+    if (data == null) {   // fetch failed — don't claim "no funds" when the server is down
+      el.innerHTML = '<div class="mini" style="color:var(--muted)">Server offline — funds unavailable.</div>';
+      return;
+    }
+    const funds = data.funds || [];
+    if (!funds.length) {
+      el.innerHTML = '<div class="mini" style="color:var(--muted)">No sinking funds yet — add one in the Budget tab.</div>';
+      return;
+    }
+    const EPS = 0.005;
+    // Every txn already linked to ANY fund this render (one fund per txn, server-enforced) —
+    // excluded from every fund's "link a transaction" picker so a dollar can't be offered twice.
+    const linkedTxnIds = new Set(funds.flatMap(f => (f.history || []).map(h => h.txnId)));
+    let h = '<div class="ac-cards-scroll"><table class="res-table ac-cards-table"><thead><tr>';
+    h += '<th class="ac-col-name">Fund</th><th class="num ac-col-total">Reserve</th>';
+    h += '</tr></thead><tbody>';
+    funds.forEach(f => {
+      const reserve = f.reserve || 0;
+      const hasReserve = reserve > EPS;
+      h += '<tr class="ac-card-row"><td class="ac-col-name">';
+      h += '<button class="ac-card-toggle" data-fund-toggle="' + f.id + '" aria-expanded="false">' + esc(f.name) + '</button>';
+      h += '<span class="mini" style="color:var(--muted);display:block;margin-top:2px">' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + acAmt(f.monthlyContribution) + '/mo</span>';
+      h += '</td>';
+      h += '<td class="num ac-col-total"><span class="sf-chip ' + (hasReserve ? 'has-reserve' : 'is-empty') + '">' + (hasReserve ? acAmt(reserve) : 'no reserve yet') + '</span></td></tr>';
+
+      h += '<tr class="ac-card-detail" id="ac_fund_det_' + f.id + '" style="display:none">';
+      h += '<td colspan="2" style="padding:0"><div style="padding:10px 14px 12px;background:var(--panel-2);border-top:1px solid var(--line)">';
+
+      if (f.target) {
+        h += '<div class="mini" style="color:var(--muted);margin-bottom:8px">Target ' + acAmt(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') + '</div>';
+      }
+
+      // Monthly trajectory (the whole-month envelope fold, §4.2) — funded/unfunded per month.
+      if (f.trajectory && f.trajectory.length) {
+        h += '<div class="subhead" style="margin:0 0 6px">Monthly trajectory</div>';
+        h += '<table class="res-table"><tr><th>Month</th><th class="num">Contribution</th><th class="num">Draw</th><th class="num">Funded</th><th class="num">Unfunded</th><th class="num">Closing</th></tr>';
+        f.trajectory.forEach(m => {
+          h += '<tr><td>' + esc(m.month) + '</td>'
+            + '<td class="num">' + acAmt(m.contribution) + '</td>'
+            + '<td class="num">' + acAmt(m.draw) + '</td>'
+            + '<td class="num good-text">' + (m.fundedDraw > EPS ? acAmt(m.fundedDraw) : '—') + '</td>'
+            + '<td class="num' + (m.unfundedDraw > EPS ? ' bad-text' : '') + '">' + (m.unfundedDraw > EPS ? acAmt(m.unfundedDraw) : '—') + '</td>'
+            + '<td class="num">' + acAmt(m.closing) + '</td></tr>';
+        });
+        h += '</table>';
+      } else {
+        h += '<div class="mini" style="color:var(--muted)">No contributions or draws logged yet.</div>';
+      }
+
+      // Linked-transaction history — unlink per row.
+      h += '<div class="subhead" style="margin:10px 0 5px;padding-top:8px;border-top:1px solid var(--line-faint)">Linked transactions</div>';
+      if (!f.history || !f.history.length) {
+        h += '<div class="mini" style="color:var(--muted)">No transactions linked yet.</div>';
+      } else {
+        f.history.forEach(hr => {
+          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:3px 0;border-bottom:1px solid var(--line-faint)">';
+          h += '<span style="color:var(--muted);min-width:38px;flex-shrink:0">' + (hr.postedOn || '').slice(5) + '</span>';
+          h += '<span style="flex:1;min-width:0"><b>' + acAmt(hr.amount) + '</b> <span style="color:var(--muted)">· ' + (hr.role === 'draw' ? 'draw' : 'contribution') + (hr.description ? ' · ' + esc(hr.description) : '') + '</span></span>';
+          h += '<a href="#" class="ac-act-del" data-fund-unlink="' + f.id + '|' + hr.txnId + '" title="Unlink" aria-label="Unlink transaction">✕</a>';
+          h += '</div>';
+        });
+      }
+
+      // Link an existing (already-logged) transaction as a contribution or draw.
+      const opts = (ACT.txns || []).filter(t => t.direction === 'out' && !linkedTxnIds.has(t.id))
+        .map(t => '<option value="' + t.id + '">' + (t.postedOn || '').slice(5) + ' · ' + acAmt(t.amount) + (t.description ? ' · ' + esc(t.description) : '') + '</option>').join('');
+      h += '<div class="subhead" style="margin:10px 0 5px;padding-top:8px;border-top:1px solid var(--line-faint)">Link a transaction</div>';
+      if (!opts) {
+        h += '<div class="mini" style="color:var(--muted)">No unlinked outflow transactions this month.</div>';
+      } else {
+        h += '<div class="ac-row" style="flex-wrap:wrap">';
+        h += '<label class="ac-field" style="flex:1 1 220px"><span class="ac-lbl">Transaction</span><select data-fund-link-txn="' + f.id + '"><option value="">— choose —</option>' + opts + '</select></label>';
+        h += '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Role</span><select data-fund-link-role="' + f.id + '"><option value="contribute">Contribute</option><option value="draw">Draw</option></select></label>';
+        h += '</div>';
+        h += '<button class="ac-tool" type="button" data-fund-link="' + f.id + '" style="margin-top:8px">Link</button>';
+      }
+
+      h += '</div></td></tr>';
+    });
+    h += '</tbody></table></div>';
+    el.innerHTML = h;
+  }
+
   // ---- Prior-month pending txns: "Pending from earlier months" section ----
   // Renders ACT.openPending into #ac_open_pending using the same acLedgerRow markup and hooks
   // (data-edit-tx / data-toggle-status / data-del-tx) so the existing click handler handles
@@ -7669,6 +8166,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Card row expand/collapse
       const ct = ev.target.closest('[data-card-toggle]');
       if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open)); } return; }
+      // Fund row expand/collapse (same pattern as the card rollup toggle above)
+      const ft = ev.target.closest('[data-fund-toggle]');
+      if (ft) { ev.preventDefault(); const fid = ft.dataset.fundToggle; const det = document.getElementById('ac_fund_det_' + fid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ft.setAttribute('aria-expanded', String(!open)); } return; }
+      // Fund: link an existing (already-logged) transaction as a contribution or draw
+      const fl = ev.target.closest('[data-fund-link]');
+      if (fl) {
+        ev.preventDefault();
+        if (acWriteGuard()) return;
+        const fid = fl.dataset.fundLink;
+        const sel = document.querySelector('[data-fund-link-txn="' + fid + '"]');
+        const roleSel = document.querySelector('[data-fund-link-role="' + fid + '"]');
+        const txnId = sel ? sel.value : '';
+        if (!txnId) { showToast('Choose a transaction to link'); return; }
+        const role = roleSel ? roleSel.value : 'contribute';
+        try { await post('/api/tracking/funds/' + fid + '/txns', { txnId: +txnId, role: role }); showToast('Linked as ' + role); acRefresh(); }
+        catch (e) { showToast('Could not link: ' + (e.message || '')); }
+        return;
+      }
+      // Fund: unlink a transaction
+      const fu = ev.target.closest('[data-fund-unlink]');
+      if (fu) {
+        ev.preventDefault();
+        if (acWriteGuard()) return;
+        const parts = fu.dataset.fundUnlink.split('|');
+        try { await _fetchJSON('/api/tracking/funds/' + parts[0] + '/txns/' + parts[1], { method: 'DELETE' }); showToast('Unlinked'); acRefresh(); }
+        catch (e) { showToast('Could not unlink'); }
+        return;
+      }
       // Status pill toggle (ledger + card detail share the same handler via acPatchStatus)
       const ts = ev.target.closest('[data-toggle-status]');
       if (ts) { ev.preventDefault(); acPatchStatus(ts.dataset.toggleStatus); return; }

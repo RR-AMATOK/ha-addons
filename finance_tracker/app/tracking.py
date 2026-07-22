@@ -706,6 +706,104 @@ def card_rollup_running(txn_rows: list[dict], accounts: list[dict], month: str) 
     }
 
 
+# ---------- sinking funds (TODO-238, DEC-034) ----------
+
+def fund_rollup(monthly_flows: dict[str, dict], upto_month: str | None = None) -> dict:
+    """Per-fund reserve trajectory — the whole-month envelope fold (docs/sinking-funds-
+    design.md §4.2). Pure (no I/O), float dollars at the edge; all arithmetic is done in
+    integer cents internally (mirrors card_rollup / card_rollup_running's discipline).
+
+    This is a NEW pure function layered ON TOP of the existing aggregator, exactly as
+    card_rollup layers on top of aggregate_actuals (§5) — aggregate_actuals and
+    plan_vs_actual are never called from here and never call this, so they stay
+    byte-unchanged (DEC-009 #1). Phase 1 does not fold this into the month_actuals seam;
+    that is Phase 2's job.
+
+    Parameters
+    ----------
+    monthly_flows : dict
+        ``{'YYYY-MM': {'contributeCents': int, 'drawCents': int}}`` — one entry per month
+        with ANY contribution or draw activity, as returned by
+        ``tracking_store.fund_monthly_flows``. A month absent from this dict is zero
+        activity for BOTH roles — omitting it from the returned trajectory is exactly
+        equivalent to folding it explicitly (``reserveClosing_M == reserveOpening_M`` when
+        ``contrib_M == draw_M == 0``), so the trajectory below is sparse by design, never
+        padded with zero rows.
+    upto_month : str | None
+        ``'YYYY-MM'`` or ``None``. When given, months strictly after ``upto_month`` are
+        EXCLUDED from the fold (mirrors ``card_rollup_running``'s ``date_to`` bound) — a
+        fund's reserve as of month M must never be influenced by data dated after M.
+        ``None`` means "no bound, fold everything" (used by the hard-delete reserve
+        guard, where "is there money left, ever" must reflect the fund's entire history).
+
+    Returns
+    -------
+    dict
+        ``trajectory``: chronological list of per-month dicts, each
+        ``{month, opening, contribution, draw, fundedDraw, unfundedDraw, closing}``
+        (all float dollars).
+        ``reserve``: the closing balance of the LAST trajectory entry (0.0 when
+        ``monthly_flows`` is empty or every included month has zero closing).
+        ``contributionTotal`` / ``fundedDrawTotal`` / ``unfundedDrawTotal``: lifetime sums
+        across the trajectory (i.e. bounded by ``upto_month`` exactly like every other
+        field here).
+
+    Reconciliation invariants (§5.1, QA-assertable, cent-exact by construction):
+        1. Conservation: for every month M, ``closing_M == opening_M + contribution_M -
+           fundedDraw_M``, and ``closing_M >= 0`` always (``fundedDraw = min(draw,
+           available)`` guarantees the floor — never a separate ``max(0, ...)`` clamp that
+           could retroactively rewrite history).
+        2. No double-count (lifetime): ``Σ fundedDraw == Σ contribution - reserve`` (the
+           final closing balance) — every funded-draw dollar was already counted at
+           contribution time, so funded draws add zero NEW counted spend. Holds by
+           telescoping: each month's ``closing`` becomes the next month's ``opening``, so
+           ``Σ contribution - Σ fundedDraw`` collapses to the last ``closing``.
+        3. Zero-fund byte-identity: ``monthly_flows == {}`` → ``trajectory == []`` and
+           ``reserve == 0.0``. The regression guard this protects is structural, not just
+           this function's output — ``aggregate_actuals``/``plan_vs_actual`` never call
+           ``fund_rollup`` inline, so a bucket with no funds is byte-identical to today's
+           numbers by construction, not by a special-cased empty branch here.
+        4. Per-month floor (the deliberate divergence from ``card_rollup_running``, which
+           floors only the FINAL cumulative): an ``unfundedDraw_M > 0`` is never
+           retroactively cleared by a LATER month's contribution, because each month's
+           fold reads only the PRIOR month's already-floored ``closing`` as its own
+           ``opening`` — a later contribution can only grow the reserve going forward, it
+           can never rewrite an already-realized overspend in an earlier trajectory entry.
+    """
+    months = sorted(m for m in monthly_flows if upto_month is None or m <= upto_month)
+    trajectory: list[dict] = []
+    opening_c = 0
+    contrib_total_c = funded_total_c = unfunded_total_c = 0
+    for m in months:
+        flows = monthly_flows[m]
+        contribution_c = int(flows.get("contributeCents", 0))
+        draw_c = int(flows.get("drawCents", 0))
+        available_c = opening_c + contribution_c
+        funded_draw_c = min(draw_c, available_c)
+        unfunded_draw_c = draw_c - funded_draw_c
+        closing_c = available_c - funded_draw_c        # always >= 0: funded_draw_c <= available_c
+        trajectory.append({
+            "month": m,
+            "opening": _d(opening_c),
+            "contribution": _d(contribution_c),
+            "draw": _d(draw_c),
+            "fundedDraw": _d(funded_draw_c),
+            "unfundedDraw": _d(unfunded_draw_c),
+            "closing": _d(closing_c),
+        })
+        contrib_total_c += contribution_c
+        funded_total_c += funded_draw_c
+        unfunded_total_c += unfunded_draw_c
+        opening_c = closing_c
+    return {
+        "trajectory": trajectory,
+        "reserve": _d(opening_c),
+        "contributionTotal": _d(contrib_total_c),
+        "fundedDrawTotal": _d(funded_total_c),
+        "unfundedDrawTotal": _d(unfunded_total_c),
+    }
+
+
 __all__ = [
     "BUCKETS",
     "month_end",
@@ -714,4 +812,5 @@ __all__ = [
     "plan_vs_actual",
     "card_rollup",
     "card_rollup_running",
+    "fund_rollup",
 ]
