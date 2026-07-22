@@ -61,11 +61,17 @@ _BACKUP_TABLES: tuple = (
     ("scenario",         ("id", "user_id", "name", "status", "payload_json", "created_at", "updated_at", "activated_at")),
     ("goal",             ("id", "user_id", "name", "target_cents", "target_date", "account_id", "manual_saved_cents", "status", "created_at")),
     ("venture",          ("id", "user_id", "name", "tag", "account_id", "items_json", "started_on", "status", "created_at")),
+    # S1.2 (DEC-027/DEC-035, docs/s1_2-migration-design.md §1.3): the per-user server profile.
+    # `prev_blob`/`prev_state_version` are DELIBERATELY excluded from this column tuple —
+    # they are an ephemeral conflict-recovery buffer, not restore-worthy state; the
+    # allow-list intersection drops them for free, so a restore rebuilds a clean
+    # current-only profile (no stitched-together undo chain from before the restore).
+    ("user_profile",     ("user_id", "blob", "state_version", "updated_at", "created_at")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
 # instead of rejecting the file. The original 9 stay strictly required (DEC-016 / DEC-017 #1).
-_BACKUP_OPTIONAL_TABLES = frozenset({"scenario", "goal", "venture"})
+_BACKUP_OPTIONAL_TABLES = frozenset({"scenario", "goal", "venture", "user_profile"})
 
 
 class RestoreError(Exception):
@@ -258,6 +264,25 @@ CREATE TABLE IF NOT EXISTS venture (
   started_on TEXT    NOT NULL,
   status     TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','stopped')),
   created_at TEXT    NOT NULL
+);
+
+-- Per-user server profile (S1.2, DEC-027/DEC-035, docs/s1_2-migration-design.md §1.1): the
+-- boot/sync source of truth for the client's localStorage cache once a device migrates.
+-- `blob` IS the versioned fps-backup client-section ({version:3, keys:{...}} over the
+-- BACKUP_CLIENT_KEYS allowlist) -- no new format. `state_version` is the SYNC generation
+-- (orthogonal to the blob's own `version` field). `prev_blob`/`prev_state_version` are a
+-- ONE-level undo the server keeps on every LWW write (DEC-027 §7) -- displaced content,
+-- never a history log. No FK to `users` (identity is install-local; this is DATA).
+-- Additive CREATE IF NOT EXISTS -- CREATE TABLE IF NOT EXISTS + a mirrored idempotent
+-- migration entry, same convention as `goal`/`venture`/`users` above.
+CREATE TABLE IF NOT EXISTS user_profile (
+  user_id            TEXT    PRIMARY KEY,
+  blob               TEXT    NOT NULL,
+  state_version      INTEGER NOT NULL DEFAULT 1,
+  updated_at         TEXT    NOT NULL,
+  prev_blob          TEXT,
+  prev_state_version INTEGER,
+  created_at         TEXT    NOT NULL
 );
 
 -- Household identity roster (multi-user S0.1, DEC-026/031): lazily provisioned by
@@ -562,7 +587,28 @@ def _mig_add_user_scoping(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_venture_user  ON venture(user_id)")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping]
+def _mig_add_user_profile(conn) -> None:
+    """Migration 8 (S1.2, DEC-027/DEC-035, docs/s1_2-migration-design.md §1.2): additive
+    per-user server profile table -- v8 -> v9. `CREATE TABLE IF NOT EXISTS` makes it
+    idempotent on fresh DBs that already have it from SCHEMA above (mirrors the
+    goal/venture/users convention exactly). Pure additive `CREATE` -- no ALTER, no data
+    rewrite, no copy-drop-rename (DEC-009 #4). A v8 device booting v9 code runs SCHEMA
+    (creates the table) then this migration (idempotent no-op) and stamps user_version=9.
+    A v9 DB opened by OLDER (v8) code runs `range(9, 8)` -- empty, no crash -- and v8
+    code never references `user_profile`, so rollback (profiles are feature-flagged
+    until R1) is safe with no down-migration needed."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_profile (
+  user_id            TEXT    PRIMARY KEY,
+  blob               TEXT    NOT NULL,
+  state_version      INTEGER NOT NULL DEFAULT 1,
+  updated_at         TEXT    NOT NULL,
+  prev_blob          TEXT,
+  prev_state_version INTEGER,
+  created_at         TEXT    NOT NULL
+)""")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile]
 
 
 def _now() -> str:
@@ -1966,6 +2012,113 @@ def _main_db_file(conn: sqlite3.Connection) -> str:
     return ""
 
 
+# ---------- per-user server profile (S1.2, DEC-027/DEC-035, docs/s1_2-migration-design.md) ----------
+
+def get_profile(conn: sqlite3.Connection, user_id: str) -> dict:
+    """§3.1: read this user's profile row. Returns the empty shape when no row exists
+    for *user_id* -- identical code path for owner and member; the scopeId (PK) is the
+    only thing that differs. A foreign scope with no row of its own gets this exact same
+    shape, never a distinguishable 403/leak (design §3.1's no-existence-leak guarantee)."""
+    r = conn.execute(
+        "SELECT blob, state_version, updated_at FROM user_profile WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    if r is None:
+        return {"hasState": False, "stateVersion": 0, "blob": None, "updatedAt": None}
+    return {
+        "hasState": True,
+        "stateVersion": r["state_version"],
+        "blob": json.loads(r["blob"]),
+        "updatedAt": r["updated_at"],
+    }
+
+
+def put_profile(conn: sqlite3.Connection, user_id: str, blob: dict, base_state_version=None,
+                 is_migration: bool = False) -> dict:
+    """§3.2: last-write-wins upsert of this user's profile blob. The PUT ALWAYS wins —
+    v1 has no rejection-on-conflict; `base_state_version` is advisory only (accepted,
+    never persisted, never used to refuse a stale write — a future v2 409 is an open
+    question, DEC-027). The displaced blob (if any) moves to `prev_blob`/
+    `prev_state_version` — exactly ONE level of undo, not a history log.
+
+    Implemented as a single atomic `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING`
+    so a fresh row (state_version -> 1) and a displacing update (state_version -> N+1,
+    prev_* <- the row this write displaced) are the SAME statement under the SAME write
+    lock — no read-then-write race window, so two near-simultaneous PUTs for the same
+    scope serialize cleanly (SQLite's writer lock + `busy_timeout`) and the loser's
+    write is never lost to a stale in-Python read of the prior row (§7's "no torn blob"
+    / simultaneous-PUT guarantee).
+
+    §5.2 pre-migration server snapshot: on the FIRST `is_migration=True` PUT for a scope
+    that has no row yet, take a one-time `.pre-profile-migration.bak` online-backup copy
+    of the WHOLE db file BEFORE the upsert — mirrors `init_db`'s `.pre-multiuser.bak` and
+    `import_all`'s `.pre-import-<ts>.bak` (DEC-016 OSError-before-mutation posture). An
+    `OSError` from `conn.backup()` propagates here, before any mutation. Guarded by
+    `os.path.exists(bak)` (same pattern as `init_db`) so a retried migration PUT never
+    overwrites the TRUE pre-migration snapshot.
+    """
+    if is_migration:
+        exists = conn.execute(
+            "SELECT 1 FROM user_profile WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if exists is None:
+            db_file = _main_db_file(conn)
+            if db_file:                                    # '' for :memory: -- nothing to copy
+                bak = f"{db_file}.pre-profile-migration.bak"
+                if not os.path.exists(bak):                # preserve the TRUE first snapshot on re-runs
+                    with closing(sqlite3.connect(bak)) as dest:
+                        conn.backup(dest)                   # OSError propagates -> abort before any mutation
+
+    # TODO-241 (pre-R1 hardening): capture the row's state_version BEFORE the upsert so the
+    # response can tell the client whether this write displaced a DIFFERENT lineage than the
+    # one it was based on -- distinct from an ordinary same-device re-flush (D1: base_state_
+    # version == the prior state_version). `prior_state_version > base_state_version` is the
+    # precise predicate: it's true exactly when the blob this PUT just overwrote had already
+    # moved past what the caller last synced from -- another device's flush, or a restore's
+    # reload-door FLUSH landing on an already-migrated-elsewhere server (D2/X1, §4/§7 of
+    # docs/s1_2-migration-design.md). It is deliberately NOT true for S3 (local clean but
+    # newer than a rolled-back/restored-older server, base_state_version > prior_state_version)
+    # -- that flush re-asserts a NEWER local over an OLDER server, the opposite of what the
+    # TODO-241 banner ("replaced a newer server version") describes, so it must not fire there.
+    prior = conn.execute(
+        "SELECT state_version, updated_at FROM user_profile WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    prior_state_version = prior["state_version"] if prior is not None else None
+    prior_updated_at = prior["updated_at"] if prior is not None else None
+
+    now = _now()
+    blob_json = json.dumps(blob)
+    row = conn.execute(
+        """
+        INSERT INTO user_profile (user_id, blob, state_version, updated_at, prev_blob, prev_state_version, created_at)
+        VALUES (?, ?, 1, ?, NULL, NULL, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+          prev_blob          = user_profile.blob,
+          prev_state_version = user_profile.state_version,
+          blob                = excluded.blob,
+          state_version       = user_profile.state_version + 1,
+          updated_at          = excluded.updated_at
+        RETURNING state_version, updated_at
+        """,
+        (user_id, blob_json, now, now),
+    ).fetchone()
+    conn.commit()
+
+    base = base_state_version if base_state_version is not None else 0
+    displaced = prior_state_version is not None and prior_state_version > base
+    return {
+        "stateVersion": row["state_version"],
+        "updatedAt": row["updated_at"],
+        # Additive-only (TODO-241): existing clients ignore unknown fields; new ones use
+        # `displaced` to surface the non-transient "your plan replaced a newer server version"
+        # banner. `prevStateVersion`/`prevUpdatedAt` describe exactly what got displaced (the
+        # same content now sitting in `prev_blob`/`prev_state_version`, one-level recoverable).
+        "displaced": displaced,
+        "prevStateVersion": prior_state_version,
+        "prevUpdatedAt": prior_updated_at,
+    }
+
+
 def _validate_backup(payload: dict, current: int) -> None:
     """Pure validation — raises RestoreError on any structural or version problem; writes nothing."""
     if payload.get("app") != _BACKUP_APP_TAG and payload.get("app") not in _BACKUP_LEGACY_APP_TAGS:
@@ -2023,7 +2176,12 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
     schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
     tables: dict = {}
     for tbl, cols in _BACKUP_TABLES:
-        order_by = "txn_id, tag_id" if tbl == "txn_tag" else "id"
+        if tbl == "txn_tag":
+            order_by = "txn_id, tag_id"
+        elif tbl == "user_profile":
+            order_by = "user_id"                # PK is user_id, not id -- no surrogate id column
+        else:
+            order_by = "id"
         rows = conn.execute(f"SELECT * FROM {tbl} ORDER BY {order_by}").fetchall()
         if rows:
             available = set(rows[0].keys())
@@ -2182,15 +2340,47 @@ def import_all(conn: sqlite3.Connection, payload: dict) -> dict:
           Skipped for :memory: connections.  OSError propagates before any mutation.
       (c) Single atomic transaction with FK enforcement suspended:
             isolation_level=None (load-bearing: PRAGMA foreign_keys is ignored inside an
-            implicit transaction), PRAGMA foreign_keys=OFF, BEGIN, DELETE all tables in
-            reversed(_BACKUP_TABLES) order (child→parent), INSERT all tables in forward
-            order (parent→child) using allow-list columns only, PRAGMA foreign_key_check,
-            PRAGMA integrity_check, PRAGMA user_version=<N>, COMMIT.
+            implicit transaction), PRAGMA foreign_keys=OFF, BEGIN, capture each existing
+            `user_profile` row's state_version (pre-R1 hardening — see below), DELETE all
+            tables in reversed(_BACKUP_TABLES) order (child→parent), INSERT all tables in
+            forward order (parent→child) using allow-list columns only, PRAGMA
+            foreign_key_check, PRAGMA integrity_check, PRAGMA user_version=<N>, COMMIT.
           Any exception triggers ROLLBACK; FK ON and prior isolation_level restored in finally.
       (d) If the imported schemaVersion < the pre-import version, run init_db to apply
           any pending migrations and advance user_version to the current app schema.
       (e) On success only, prune old `.pre-import-*.bak` safety copies down to
           `MAX_PRE_IMPORT_BACKUPS` (SEC-003).
+
+    PRE-R1 HARDENING — `user_profile` restore is a DISPLACING PUT, never a verbatim write:
+    every other table is restored byte-for-byte (that IS the restore contract — REQ-1/REQ-2).
+    `user_profile` is the one exception, and deliberately so: `state_version` is a
+    SERVER-AUTHORITATIVE sync counter the client boot logic (docs/s1_2-migration-design.md
+    §4) trusts to be monotonically non-decreasing. Writing a backup's `state_version` verbatim
+    can REWIND it (a backup taken at v2 restored over a live v3 row), and a rewound version is
+    exactly what let a stale restored blob hydrate back down over newer local data on next
+    boot (the incident this hardening closes — see docs/multiuser-household-plan.md's pre-R1
+    guard ledger row and LESSONS-LEARNED.md "A restored backup file is a second device with
+    stale data"). Fix: for each restored `user_profile` row, treat the restore exactly like a
+    `put_profile` PUT whose "current" row is whatever existed for that scope immediately
+    before this restore (captured before the DELETE below) — `new_state_version =
+    max(existing_state_version, payload_state_version) + 1` (never verbatim; a client meta
+    that had already learned a high version — either the live pre-restore row's version, or
+    the version the payload itself carries — must still see the server strictly advance,
+    never regress or tie), `prev_blob`/`prev_state_version` = the row this restore displaced
+    (one level of undo, same as an ordinary PUT — recorded from the LIVE pre-restore row, not
+    from the payload's own prev_blob, which the backup contract excludes, see `_BACKUP_TABLES`
+    above), `updated_at` = now. A restore into a scope with no existing row still versions as
+    `max(0, payload_state_version) + 1` rather than the payload's raw version, so a client
+    whose meta synced with the pre-backup lineage can never see the server as
+    older-or-equal. The restored blob DOES still land as the live blob (disaster-recovery
+    intent preserved, DEC-016/§1.3) — only the version discipline changes; this is why
+    `test_household_full_restore_replace_writes_profile_blobs` and
+    `test_backup_round_trip_profile_survives_verbatim` in tests/test_profile_store.py were
+    updated alongside this fix (they asserted the old verbatim-version behavior, which was the
+    bug). Duplicate `user_id` rows in a payload (malformed backup): the second row hits the
+    `user_id` PRIMARY KEY -> `RestoreError` -> the ENTIRE restore rolls back (fail-closed,
+    live row intact) — deliberately kept as reject-and-rollback rather than last-write-wins,
+    same posture as a duplicate surrogate `id` in any other table.
     """
     # (a) validate first — no mutation and no safety copy on a bad payload
     current = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -2215,6 +2405,15 @@ def import_all(conn: sqlite3.Connection, payload: dict) -> dict:
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("BEGIN")
         try:
+            # Pre-R1 hardening: capture each existing user_profile row's version/blob BEFORE
+            # the DELETE below wipes it — this is the "current row" a restore must displace
+            # exactly like an ordinary put_profile PUT would (see the docstring above).
+            existing_profiles: dict = {
+                r["user_id"]: {"blob": r["blob"], "state_version": r["state_version"]}
+                for r in conn.execute("SELECT user_id, blob, state_version FROM user_profile").fetchall()
+            }
+            restore_now = _now()
+
             # DELETE child→parent (FK is OFF, but ordering is still correct practice)
             for tbl, _cols in reversed(_BACKUP_TABLES):
                 conn.execute(f"DELETE FROM {tbl}")
@@ -2222,6 +2421,41 @@ def import_all(conn: sqlite3.Connection, payload: dict) -> dict:
             for tbl, cols in _BACKUP_TABLES:
                 count = 0
                 for row in src_tables.get(tbl, []):
+                    if tbl == "user_profile":
+                        # Displacing-PUT semantics, not a verbatim write — see the docstring.
+                        if "user_id" not in row or "blob" not in row:
+                            raise RestoreError(f"row in {tbl!r} has no recognised columns")
+                        user_id = row["user_id"]
+                        payload_version = row.get("state_version")
+                        if isinstance(payload_version, bool) or not isinstance(payload_version, int):
+                            payload_version = 0
+                        existing = existing_profiles.get(user_id)
+                        if existing is not None:
+                            existing_version = existing["state_version"]
+                            prev_blob = existing["blob"]
+                            prev_state_version = existing_version
+                        else:
+                            existing_version = 0
+                            prev_blob = None
+                            prev_state_version = None
+                        new_version = max(existing_version, payload_version) + 1
+                        created_at = row.get("created_at", restore_now)
+                        try:
+                            conn.execute(
+                                "INSERT INTO user_profile "
+                                "(user_id, blob, state_version, updated_at, prev_blob, prev_state_version, created_at) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (user_id, row["blob"], new_version, restore_now,
+                                 prev_blob, prev_state_version, created_at),
+                            )
+                        except (sqlite3.Error, OverflowError) as exc:
+                            # OverflowError: a hostile/corrupt payload state_version near
+                            # 2^63 makes new_version exceed SQLite's INTEGER max BEFORE the
+                            # INSERT — sqlite3.Error alone would let it escape as a 500
+                            # instead of the endpoint's clean 422 RestoreError contract.
+                            raise RestoreError(f"insert into {tbl!r} failed: {exc}") from exc
+                        count += 1
+                        continue
                     use = [c for c in cols if c in row]
                     if not use:
                         raise RestoreError(f"row in {tbl!r} has no recognised columns")
@@ -2277,5 +2511,6 @@ __all__ = [
     "save_plan", "get_plan", "month_actuals", "suggestions",
     "create_template", "list_templates", "delete_template",
     "upsert_recurring", "list_recurring", "delete_recurring",
+    "get_profile", "put_profile",
     "RestoreError", "export_all", "import_all",
 ]

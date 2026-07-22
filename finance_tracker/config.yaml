@@ -6,7 +6,7 @@
 #     homeassistant_config/config would expose HA's own recorder DB to this container.
 #   - NO privileged/host_network/*_api grants beyond what's listed.
 name: Finance Tracker
-version: "0.2.2"
+version: "0.3.0"
 slug: finance_tracker
 description: >-
   Personal income-tax, budget, and plan-vs-actual tracker (FastAPI + SQLite).

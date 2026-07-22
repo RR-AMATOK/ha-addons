@@ -446,6 +446,11 @@
   .wi-banner-actions button { font-size:var(--fs-xs); padding:5px 10px; }
   #wi_banner { background: rgba(124,92,255,0.12); }
   #wi_resume_banner, #wi_broken_banner { background: rgba(124,92,255,0.06); }
+  /* TODO-241 displacement banner — reuses the --warn-* tokens already used by .disclaimer,
+     not the What-If violet accent (this isn't a What-If affordance). */
+  .profile-displacement-banner { background: var(--warn-surface); border-bottom-color: var(--warn-border); color: var(--warn-text); }
+  .profile-displacement-banner .wi-banner-icon { color: var(--warn-text-strong); }
+  .profile-displacement-banner .wi-banner-label { color: var(--warn-text); }
   body.whatif-active header { border-bottom-color: var(--wi-accent, #7c5cff); }
   @media (max-width: 600px) { #bg_out, #iv_out, #au_out, #ov_out, #nw_chart, #bgb_catsummary, #ac_ledger, #ac_pva, #ac_recurring { overflow-x: auto; } }
   #ov_out a { color:var(--accent); text-decoration:none; }
@@ -745,6 +750,17 @@
 </div>
 <div id="wi_drafts_panel" class="wi-banner" hidden>
   <div id="wi_drafts_list" class="mini" style="width:100%">Loading&hellip;</div>
+</div>
+
+<!-- TODO-241 / pre-R1 hardening: non-transient (not a toast) notice that a profile flush
+     displaced a different lineage than the one it was based on — kept visible until dismissed,
+     unlike the transient two-device conflict toast. -->
+<div id="profile_displacement_banner" class="wi-banner profile-displacement-banner" hidden role="status" aria-live="polite">
+  <span class="wi-banner-icon" aria-hidden="true">&#9888;</span>
+  <span class="wi-banner-label">Your plan replaced a newer server version from another device/restore — the previous version is kept one level back.</span>
+  <span class="wi-banner-actions">
+    <button type="button" id="profile_displacement_dismiss_btn">Dismiss</button>
+  </span>
 </div>
 
 <div class="disclaimer" id="disclaimer">
@@ -1742,12 +1758,17 @@
 // defaults to 'owner' — byte-identical to pre-0.2.1 behavior, and mirrors the server's own
 // fallback (an absent identity header resolves to the owner profile — DEC-031).
 window.__role = 'owner';
+// window.__scopeId mirrors server.py's resolve_user() formula EXACTLY (scopeId = '__owner__' if
+// role==='owner' else id) — S1.2's boot/sync engine (docs/s1_2-migration-design.md §4.0) needs
+// this client-side to detect a shared-browser scopeId mismatch in itc.profile.meta. Defaults to
+// '__owner__' before whoami resolves (and on any resolution failure), matching the fallback above.
+window.__scopeId = '__owner__';
 const __roleReady = (async () => {
   try {
     const r = await fetch('/api/whoami');
     if (r.ok) {
       const d = await r.json();
-      if (d && d.role === 'member') window.__role = 'member';
+      if (d && d.role === 'member') { window.__role = 'member'; window.__scopeId = d.id; }
     }
   } catch (e) {}
 })();
@@ -2002,6 +2023,15 @@ function persist(key, valueStr) {
     return;
   }
   try { localStorage.setItem(key, valueStr); } catch (e) {}
+  // S1.2 §6.1 autosave hook — LIVE branch only. Structurally unreachable in What-If Mode (the
+  // active branch above returns before this line) and during boot/every mode transition (the
+  // suppress guard above short-circuits first). Dirties+schedules a flush ONLY for the profile
+  // keys (BACKUP_CLIENT_KEYS) routed through persist() — itc.activetab is also routed through
+  // persist() (it's WI-scoped) but is NOT a profile key, so it never dirties the profile, by the
+  // same allowlist check. markProfileDirty()/BACKUP_CLIENT_KEYS are defined further down this
+  // script but this reference is safe: by the time persist() is ever CALLED (after full script
+  // parse), both are already initialized — only their declaration order in the file differs.
+  if (BACKUP_CLIENT_KEYS.includes(key)) markProfileDirty();
 }
 function load(key) {
   if (WhatIf.active && WhatIf.session) {
@@ -2880,6 +2910,12 @@ function reset() {
   if (wiBlockIfActive('reset')) return;
   if (!confirm('Reset all values to defaults?')) return;
   localStorage.removeItem(STORAGE_KEY);
+  // S1.2 reload-door (Mechanism 2, docs/s1_2-migration-design.md §6.1): delete the profile sync
+  // bookkeeping BEFORE the reload, not merely mark it dirty. This makes present-clean structurally
+  // UNREACHABLE post-reload (no `scopeId` left to compare) so the boot can never collapse to
+  // 'empty'→HYDRATE and silently resurrect the values just reset away — it lands on
+  // present-no-meta → a FLUSH cell (X1/M3) instead. Must execute before location.reload() fires.
+  try { localStorage.removeItem(PROFILE_META_KEY); } catch (e) {}
   location.reload();
 }
 
@@ -2888,6 +2924,17 @@ function reset() {
 // (including the device-local itc.activetab and itc.whatif.* keys) can never be read into a
 // backup file or written back on restore, by construction — not by a denylist that could miss one.
 const BACKUP_CLIENT_KEYS = ['itc.v3', 'itc.tabs.v1', 'budgetBuilder_v1', 'itc.fire.v1', 'itc.categories.v1', 'itc.proj.accts.v1', 'itc.maxout.v1'];
+
+// S1.2 (§4.0/§6.1 TM-44's seed-exclusion): captured ONCE, here, at true script-start — before ANY
+// app code has run, including the Manage-categories panel's first render (further down this same
+// script), which calls getCategories()'s read-path default-seed (@~5085) and materializes
+// itc.categories.v1 into localStorage as a normal side effect of painting the page. Without this
+// snapshot, the boot/sync engine's local-state derivation (further down) would see that
+// seed-materialized key and misread a genuinely brand-new browser as "present-no-meta" instead of
+// "empty" — landing on a FLUSH cell and sending a spurious PUT of nothing but default categories
+// (exactly the TM-01/TM-37-breaking bug TM-44 exists to catch). This is what the app's OWN
+// localStorage looked like the instant the page loaded, unpolluted by its own first-paint effects.
+const __profileBootKeysSnapshot = new Set(BACKUP_CLIENT_KEYS.filter(k => { try { return localStorage.getItem(k) != null; } catch (e) { return false; } }));
 
 // Read every eligible client key currently in localStorage (parsed JSON). A key with nothing
 // stored is omitted entirely, never written as null — so restoring this object elsewhere never
@@ -2934,6 +2981,406 @@ function buildBackupEnvelope(kind, clientKeys, serverSection) {
     sections: sections,
   };
 }
+
+// ---------- S1.2 per-user server profile: boot/sync engine (DEC-027/DEC-035) ----------
+// docs/s1_2-migration-design.md is the spec this implements — §4 (the boot/sync decision table),
+// §5 (pre-migration snapshot), §6 (What-If isolation + the 7 profile-key write channels). The
+// server profile blob IS collectBackupClientKeys()'s output wrapped in {version:3, keys:{...}}
+// (§2) — reused verbatim from the backup/restore machinery just above, not a new format.
+
+// Device-local sync bookkeeping (§4.0) — NEVER a member of BACKUP_CLIENT_KEYS (never rides a
+// blob, never sync'd) and NEVER a WI_SCOPED_KEY (never twinned by What-If). Written by direct
+// localStorage.setItem, bypassing persist() so it can never recurse into the flush hook above.
+const PROFILE_META_KEY = 'itc.profile.meta';
+
+function getProfileMeta() {
+  let raw; try { raw = localStorage.getItem(PROFILE_META_KEY); } catch (e) { return null; }
+  if (!raw) return null;
+  try { const m = JSON.parse(raw); return (m && typeof m === 'object') ? m : null; } catch (e) { return null; }
+}
+// Merge-write: `patch` fields overwrite, everything else carries over from the current meta (or a
+// fresh default shape if none exists yet).
+function setProfileMeta(patch) {
+  const cur = getProfileMeta() || {
+    version: 1, scopeId: null, dirty: false, stateVersion: 0,
+    lastSyncedAt: null, snapshotDone: false, hydrating: null,
+  };
+  const next = Object.assign({}, cur, patch);
+  try { localStorage.setItem(PROFILE_META_KEY, JSON.stringify(next)); } catch (e) {}
+  return next;
+}
+
+// §4.0 derived-state rules — local cache state is derived, never stored twice. Key presence is
+// checked FIRST, against __profileBootKeysSnapshot (captured at true script-start, above) rather
+// than a live re-read — a live re-read would see whatever the Manage-categories panel's read-path
+// default-seed materialized during first render and misclassify a genuinely empty browser (TM-44).
+// A scopeId mismatch (shared browser, different household member) collapses to 'empty' regardless
+// of meta.dirty, and so does a corrupted "meta says dirty but zero keys present at boot"
+// combination (no special-casing needed — the literal rule already resolves it).
+function deriveLocalProfileState(meta, scopeId) {
+  const anyKeyPresent = __profileBootKeysSnapshot.size > 0;
+  if (!anyKeyPresent) return 'empty';
+  if (meta && meta.scopeId != null && meta.scopeId !== scopeId) return 'empty';   // shared-browser guard
+  if (!meta) return 'present-no-meta';
+  return meta.dirty === true ? 'present-dirty' : 'present-clean';
+}
+
+// ---- Mechanism 1 (§6.1): in-session direct-write bypass sites call this after their own
+// setItem/removeItem. What-If-aware — same guard as persist(): a mark can never fire in-mode or
+// during the boot suppression window. (A call placed INSIDE a still-active What-If copy loop —
+// e.g. a mis-wired wiActivate — is deliberately SWALLOWED here; §6.1 calls this out by name.)
+let __profileFlushTimer = null;
+const PROFILE_FLUSH_DEBOUNCE_MS = 800;
+function markProfileDirty() {
+  if (WhatIf.active || WhatIf.suppress) return;
+  setProfileMeta({ dirty: true, scopeId: window.__scopeId || null });
+  scheduleProfileFlush();
+}
+function scheduleProfileFlush() {
+  if (__profileFlushTimer) clearTimeout(__profileFlushTimer);
+  __profileFlushTimer = setTimeout(profileFlushExecutor, PROFILE_FLUSH_DEBOUNCE_MS);
+}
+// The debounced flush executor (§6.3's "executor guard, belt-and-suspenders"): reschedules
+// instead of sending while What-If is active/suppressed, so no network write is ever attempted
+// from an in-mode moment — even though collectBackupClientKeys() always reads the TRUE live keys
+// (frozen in-mode), deferring removes any doubt about ordering. `__profileMigrationPending` (set
+// by runProfileSyncEngine when THIS BOOT's pre-migration snapshot prompt was declined) defers an
+// in-session edit's flush to the NEXT boot rather than re-prompting mid-session — §5.1's retry
+// cadence is per-boot, not per-edit.
+//
+// Boot-race gate (post-review fix): `__profileSyncEngineSettled` (initialized false at
+// script-start, set true only by runProfileSyncEngine on a normal completion — see there) closes
+// the window between boot's fire-and-forget `runProfileSyncEngine().catch()` call and its GET
+// resolving. Without this, a first in-session edit landing inside the 800ms debounce but before
+// that GET resolves would fire a NON-migration doProfileFlush(false) against a still-empty server
+// row — creating it (state_version→1) without ever taking the server's one-time
+// `.pre-profile-migration.bak` snapshot, so the engine's own M-path later finds the row already
+// present and skips the snapshot it exists to take. Deferring (not skipping) here queues that
+// first edit BEHIND the boot decision instead of racing ahead of it; no common-path behavior
+// changes once the engine has settled.
+async function profileFlushExecutor() {
+  __profileFlushTimer = null;
+  if (!window.__profilesEnabled) return;   // R1 gate (DEC-035): engine disabled — dirty state accumulates locally, no flush
+  if (WhatIf.active || WhatIf.suppress) { scheduleProfileFlush(); return; }
+  if (!window.__profileSyncEngineSettled) { scheduleProfileFlush(); return; }
+  if (window.__profileMigrationPending) return;
+  const meta = getProfileMeta();
+  if (!meta || meta.dirty !== true) return;
+  await doProfileFlush(false);
+}
+
+// The actual PUT. `isMigration` is passed through verbatim to the server (§3.2/§5.2) — it only
+// gates the server's ONE-TIME whole-DB pre-migration backup, never whether the write itself
+// succeeds. meta.dirty clears ONLY after a 200 (§8 crash-safety: a client death before the
+// response leaves dirty=true so the next boot/edit re-flushes — idempotent, harmless).
+async function doProfileFlush(isMigration) {
+  const meta = getProfileMeta() || {};
+  const blob = { version: 3, keys: collectBackupClientKeys() };
+  const baseStateVersion = meta.stateVersion || 0;
+  let res;
+  try {
+    res = await fetch('/api/tracking/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blob: blob, baseStateVersion: baseStateVersion, migration: !!isMigration }),
+    });
+  } catch (e) { return false; }   // offline — dirty stays true, retried next boot/edit
+  if (!res.ok) return false;
+  let out; try { out = await res.json(); } catch (e) { return false; }
+  setProfileMeta({
+    dirty: false,
+    stateVersion: out.stateVersion,
+    scopeId: window.__scopeId || meta.scopeId || null,
+    lastSyncedAt: out.updatedAt || new Date().toISOString(),
+  });
+  // TODO-241: this flush displaced a DIFFERENT lineage (not just its own prior save) —
+  // surface the persistent banner. See tracking_store.put_profile's `displaced` computation.
+  if (out.displaced === true) showProfileDisplacementBanner();
+  return true;
+}
+
+// HYDRATE-REPLACE, two-phase (§8 crash-mid-hydrate recovery): mark `hydrating` BEFORE calling
+// writeBackupClientKeys (which clears the allowlist then writes it back — a crash between those
+// two steps could otherwise leave local partially cleared), and only clear it + mark clean AFTER
+// the write-back completes. Only ever invoked against empty/clean local (S2/H1 in §4's table), so
+// a crash here can never destroy un-flushed user edits — at worst it re-runs against the
+// (unchanged) server blob on the next boot.
+async function doHydrate(server, scopeId) {
+  const meta = getProfileMeta();
+  const fromVersion = meta ? (meta.stateVersion || 0) : 0;
+  const toVersion = server.stateVersion || 0;
+  setProfileMeta({ hydrating: { fromVersion: fromVersion, toVersion: toVersion }, scopeId: scopeId });
+  writeBackupClientKeys((server.blob && server.blob.keys) || {});
+  setProfileMeta({
+    dirty: false, stateVersion: toVersion, scopeId: scopeId, hydrating: null,
+    lastSyncedAt: server.updatedAt || new Date().toISOString(),
+  });
+}
+
+// Minimal, honest, non-blocking conflict affordance for D2/X1 (§4/§7) — @designer can polish the
+// copy later; the underlying prev_blob one-level-undo mechanics are what actually protect the
+// data, this is only a courtesy notice. Recorded on window.__profileSync.lastConflictNote too, so
+// a driver/test can assert on it without depending on toast DOM/timing.
+function showProfileConflictNote(kind) {
+  const msg = kind === 'two-device'
+    ? 'Synced — another device had newer changes; those are kept as a recoverable previous version.'
+    : 'Synced from this device — a copy already on the server was kept as a recoverable previous version.';
+  try { window.__profileSync.lastConflictNote = { kind: kind, at: new Date().toISOString(), msg: msg }; } catch (e) {}
+  if (typeof showToast === 'function') showToast(msg);
+}
+
+// ---- Restore-displacement guard (pre-R1 hardening, TODO-241's sibling fix) ----
+// Prevents the incident logged in LESSONS-LEARNED ("A restored backup file is a 'second
+// device with stale data' — LWW will faithfully propagate it"): a user restores an OLDER
+// backup file in a profiles-enabled session; the restore door marks the profile dirty (or,
+// per Mechanism 2, deletes itc.profile.meta so the next boot flushes); the NEXT flush then
+// displaces a NEWER server blob via last-write-wins — silently, unless the user happens to
+// notice. This guard runs BEFORE a restore door writes any BACKUP_CLIENT_KEYS: it fetches the
+// server's current profile version and, if the server is ahead of what this device last knew,
+// blocks with a confirm naming the version so the human can cancel before it happens. It does
+// NOT change the server's LWW mechanics (§7) — prev_blob remains the actual safety net; this
+// is a chance to avoid needing it. Inert (always proceeds) when profiles are disabled.
+async function checkRestoreDisplacement() {
+  if (!window.__profilesEnabled) return { proceed: true };   // R1 flag off — guard is inert
+  let server;
+  try {
+    const res = await fetch('/api/tracking/profile');
+    if (!res.ok) throw new Error('bad status ' + res.status);
+    server = await res.json();
+  } catch (e) {
+    return {
+      proceed: confirm(
+        'Could not reach the server to check for a newer plan before this restore (offline, ' +
+        'or the server is unreachable). If another device or session has synced changes since ' +
+        'this one last synced, restoring this backup could later replace them on the server.\n\n' +
+        'Continue the restore anyway?'
+      ),
+    };
+  }
+  if (!server.hasState) return { proceed: true };   // nothing on the server yet — nothing to displace
+  const meta = getProfileMeta();
+  const localKnownVersion = meta ? meta.stateVersion : null;
+  if (localKnownVersion != null && server.stateVersion <= localKnownVersion) return { proceed: true };
+  const when = server.updatedAt ? new Date(server.updatedAt).toLocaleString() : 'an unknown time';
+  const proceed = confirm(
+    'The server currently holds a newer plan (version ' + server.stateVersion + ', last updated ' +
+    when + ') than this device last synced. Restoring this backup file will REPLACE that newer ' +
+    'server plan the next time this device syncs.\n\n' +
+    'Continue the restore anyway? Click Cancel to leave the server plan untouched.'
+  );
+  return { proceed: proceed };
+}
+
+// ---- TODO-241: non-transient "your plan replaced a newer server version" banner ----
+// Fires when a flush's PUT response reports `displaced:true` (server.py/tracking_store.py
+// put_profile — a different lineage than this device's own prior save got overwritten, e.g.
+// another device's flush, or this device's own restore/reset reload-door flush landing on an
+// already-migrated-elsewhere server). Deliberately NOT a toast — this needs to stay visible
+// until the user reads and dismisses it, unlike the 2-3s conflict toast above.
+function showProfileDisplacementBanner() {
+  const el = $('profile_displacement_banner');
+  if (el) el.hidden = false;
+  try {
+    window.__profileSync.lastDisplacementNote = { at: new Date().toISOString() };
+  } catch (e) {}
+}
+function dismissProfileDisplacementBanner() {
+  const el = $('profile_displacement_banner');
+  if (el) el.hidden = true;
+}
+
+// ---- §5: pre-migration safety snapshot ----
+// Client-side download (§5.1) — the full fps-backup envelope, 'full' for the owner (client +
+// server sections) or 'client-only' for a member (no server data of their own to include yet).
+// Per the design/QA-flagged ambiguity (no reliable browser signal for a cancelled Blob→<a
+// download> trigger): forward progress gates on an EXPLICIT "I saved it — continue" confirm(),
+// never on trying to detect a cancelled download. A declined/failed download aborts the WHOLE
+// migration for this boot — no PUT is ever issued, `meta.snapshotDone` stays false, re-prompted
+// next boot; the app keeps running live off localStorage the whole time.
+async function runPreMigrationSnapshot() {
+  const meta = getProfileMeta();
+  if (meta && meta.snapshotDone === true) return true;
+  const isOwner = window.__role !== 'member';
+  let serverSection = null;
+  if (isOwner) {
+    try {
+      const res = await fetch('/api/tracking/export');
+      if (res.ok) serverSection = await res.json();
+    } catch (e) {}
+  }
+  if (WhatIf.active || WhatIf.suppress) return false;   // re-check across the await above (GUARD-0)
+  const kind = (isOwner && serverSection) ? 'full' : 'client-only';
+  const envelope = buildBackupEnvelope(kind, collectBackupClientKeys(), serverSection);
+  const filename = 'fps-pre-migration-' + (window.__scopeId || 'unknown') + '-' + Date.now() + '.json';
+  try {
+    const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) { return false; }   // couldn't even trigger the download — abort, retry next boot
+  const confirmed = confirm(
+    'Your plan is moving to server-backed storage. A safety-copy file was just downloaded (' +
+    filename + ') — please make sure it saved somewhere safe.\n\n' +
+    'Click OK once you’ve confirmed the file saved, to continue. Click Cancel to postpone — ' +
+    'nothing changes yet; you’ll be asked again next time you open the app.'
+  );
+  if (!confirmed) return false;
+  setProfileMeta({ snapshotDone: true });
+  return true;
+}
+
+// ---- §4: the boot/sync state machine (the gate's core) ----
+// GUARD-0: evaluates exactly once per boot, in LIVE context, after the settling recompute closes
+// the boot suppression window and before any "Resume what-if?" affordance can flip WhatIf.active
+// (wired at the DOMContentLoaded call site below). Hard no-op whenever active||suppress — checked
+// again after every await below too, so a user entering/resuming What-If DURING one of this
+// function's network round-trips can never race a mutation after that point.
+window.__profileMigrationPending = false;   // true when this boot's snapshot prompt was declined
+
+// Boot-completion gate consumed by profileFlushExecutor above. Initialized false at script-start;
+// set true ONLY on a normal (non-throwing) completion of runProfileSyncEngineImpl below — see the
+// runProfileSyncEngine wrapper for exactly how, and the comment there for why a throw must NOT set
+// it. Every cell in §4's table (E1/M/H1/X1/D1-3/S1/S2/S3) and every early-return guard (What-If
+// active, unresolved scopeId, the offline-GET no-op) is a normal `return` out of the impl below, so
+// this always ends up true once the engine has actually made its migration decision for this boot —
+// an in-session edit can therefore never hang behind it forever under normal operation.
+window.__profileSyncEngineSettled = false;
+async function runProfileSyncEngineImpl() {
+  if (WhatIf.active || WhatIf.suppress) return;
+  window.__profileMigrationPending = false;
+  const scopeId = window.__scopeId;
+  if (scopeId == null) return;   // identity not resolved yet — shouldn't happen post-__roleReady
+
+  let server;
+  try {
+    const res = await fetch('/api/tracking/profile');
+    // Unknown server state (non-OK or unreachable): an UNDECIDED engine must not count as
+    // settled — keep __profileMigrationPending set so profileFlushExecutor stays deferred
+    // and a first-migration flush can never fire without the §5 snapshots having run.
+    if (!res.ok) { window.__profileMigrationPending = true; return; }
+    server = await res.json();
+  } catch (e) { window.__profileMigrationPending = true; return; }
+  if (WhatIf.active || WhatIf.suppress) return;
+
+  const meta = getProfileMeta();
+
+  // §8 crash-mid-hydrate recovery: a non-null `hydrating` marker means a PRIOR boot was
+  // interrupted between writeBackupClientKeys' clear and write-back steps. The pre-crash state
+  // was, by construction, hydrate-eligible (empty/clean local — hydrate never runs otherwise), so
+  // resuming from the (unchanged) server blob is always safe and takes priority over the table
+  // below.
+  if (meta && meta.hydrating) {
+    if (server.hasState) { await doHydrate(server, scopeId); }
+    else { setProfileMeta({ hydrating: null }); }
+    return;
+  }
+
+  const localState = deriveLocalProfileState(meta, scopeId);
+  const S = server.stateVersion || 0;
+  const L = meta ? (meta.stateVersion || 0) : 0;
+
+  if (!server.hasState) {
+    if (localState === 'empty') return;   // E1 — NO-OP, nothing anywhere
+    // M1 / M2 / M3 — snapshot → FLUSH regardless of dirty; same code path either way.
+    const ok = await runPreMigrationSnapshot();
+    if (WhatIf.active || WhatIf.suppress) return;
+    if (!ok) { window.__profileMigrationPending = true; return; }
+    await doProfileFlush(true);
+    return;
+  }
+
+  if (localState === 'empty') {
+    await doHydrate(server, scopeId);   // H1 — no client snapshot needed, nothing local to lose
+    return;
+  }
+  if (localState === 'present-no-meta') {
+    // X1 — the ambiguous cell: REFUSE to auto-hydrate → snapshot → FLUSH + conflict note.
+    const ok = await runPreMigrationSnapshot();
+    if (WhatIf.active || WhatIf.suppress) return;
+    if (!ok) { window.__profileMigrationPending = true; return; }
+    await doProfileFlush(false);
+    showProfileConflictNote('migrated-elsewhere');
+    return;
+  }
+  if (localState === 'present-dirty') {
+    // D1/D2/D3 — dirty always flushes; never hydrate over dirty local. Version only shapes the note.
+    await doProfileFlush(false);
+    if (L < S) showProfileConflictNote('two-device');
+    return;
+  }
+  // present-clean
+  if (L === S) return;                                  // S1 — NO-OP, in sync
+  if (L < S) {                                           // S2 — another device advanced; safe to hydrate
+    const ok = await runPreMigrationSnapshot();
+    if (WhatIf.active || WhatIf.suppress) return;
+    if (!ok) { window.__profileMigrationPending = true; return; }
+    await doHydrate(server, scopeId);
+    return;
+  }
+  // L > S — S3: anomaly (server rolled back/restored older). REFUSE to hydrate → FLUSH, re-assert local.
+  await doProfileFlush(false);
+}
+
+// Public entry point. `await`-ing the impl (rather than a try/finally around it) is the load-bearing
+// choice: a normal completion of the impl (any of its `return`s, or falling off the end) resumes
+// execution here and marks the engine settled; a THROWN/rejected impl call does NOT — the throw
+// propagates past this line and `__profileSyncEngineSettled` is left false.
+//
+// DECISION (crash-path, post-review): a naive `finally { settled = true }` would guarantee the flag
+// is always eventually set, but it would ALSO unblock profileFlushExecutor after a crash that
+// happened before the engine reached its snapshot decision — i.e. it could let a non-migration PUT
+// create the server row un-snapshotted, which is exactly the §5 invariant this whole fix protects.
+// That failure is unrecoverable (the missed `.pre-profile-migration.bak` can't be taken retroactively
+// once the row exists), whereas a flush that stays deferred a little longer costs nothing but time —
+// the edit is still safe in localStorage (meta.dirty stays true) and gets flushed once the engine
+// does settle. So: prefer safety (stay deferred, retry the engine) over liveness (unblock flushes) on
+// throw. See bootProfileSyncEngine below, which retries a throwing engine with bounded backoff
+// instead of ever setting the flag itself.
+async function runProfileSyncEngine() {
+  await runProfileSyncEngineImpl();
+  window.__profileSyncEngineSettled = true;
+}
+
+// Boot call-site wrapper only (docs/s1_2-migration-design.md §4.1 GUARD-0 still runs "exactly once
+// per boot" in the sense that only one decision is ever acted on — this just retries getting there
+// if an unexpected exception derails a prior attempt, per the DECISION above). Bounded + backed off
+// so a persistently-throwing engine degrades to "flushes stay deferred for the rest of this session"
+// rather than a tight retry loop; the NEXT full page load resets both the settled flag and this
+// counter and tries fresh.
+let __profileSyncEngineBootRetries = 0;
+const PROFILE_SYNC_ENGINE_MAX_BOOT_RETRIES = 5;
+const PROFILE_SYNC_ENGINE_RETRY_DELAY_MS = 1500;
+function bootProfileSyncEngine() {
+  runProfileSyncEngine().catch(function () {
+    if (__profileSyncEngineBootRetries < PROFILE_SYNC_ENGINE_MAX_BOOT_RETRIES) {
+      __profileSyncEngineBootRetries++;
+      setTimeout(bootProfileSyncEngine, PROFILE_SYNC_ENGINE_RETRY_DELAY_MS);
+    }
+    // else: give up retrying for this boot. __profileSyncEngineSettled stays false by construction
+    // (see runProfileSyncEngine above) — profileFlushExecutor keeps deferring, never un-gated.
+  });
+}
+
+// ---- Test/debug surface (mirrors the WhatIf.* / IR-8 convention above) ----
+window.__profileSync = {
+  PROFILE_META_KEY: PROFILE_META_KEY,
+  getProfileMeta: getProfileMeta, setProfileMeta: setProfileMeta,
+  deriveLocalProfileState: deriveLocalProfileState,
+  markProfileDirty: markProfileDirty, scheduleProfileFlush: scheduleProfileFlush,
+  profileFlushExecutor: profileFlushExecutor, doProfileFlush: doProfileFlush,
+  doHydrate: doHydrate, runPreMigrationSnapshot: runPreMigrationSnapshot,
+  runProfileSyncEngine: runProfileSyncEngine, runProfileSyncEngineImpl: runProfileSyncEngineImpl,
+  bootProfileSyncEngine: bootProfileSyncEngine, showProfileConflictNote: showProfileConflictNote,
+  checkRestoreDisplacement: checkRestoreDisplacement,
+  showProfileDisplacementBanner: showProfileDisplacementBanner,
+  dismissProfileDisplacementBanner: dismissProfileDisplacementBanner,
+};
+window.markProfileDirty = markProfileDirty;
+window.runProfileSyncEngine = runProfileSyncEngine;
 
 // Identify which of the supported backup shapes a parsed JSON file is. Order matters: the
 // fps-backup check MUST run first — a combined backup nests plan/settings data under
@@ -3086,6 +3533,9 @@ function importFpsFinish(scope, sections, summary) {
   if (hasClient) parts.push('settings + plan');
   if (hasServer) parts.push(total + ' actuals row' + (total === 1 ? '' : 's'));
   showToast('Restored ' + parts.join(' + ') + (hasServer && summary && summary.safetyCopy ? ' · safety copy made' : ''));
+  // S1.2 reload-door (Mechanism 2, docs/s1_2-migration-design.md §6.1) — see reset()'s comment for
+  // the full rationale. Must run BEFORE the setTimeout below actually fires the reload.
+  try { localStorage.removeItem(PROFILE_META_KEY); } catch (e) {}
   // Brief delay so the toast is actually visible before the reload wipes the DOM.
   setTimeout(() => location.reload(), 900);
 }
@@ -3097,6 +3547,13 @@ async function importFpsEnvelope(env) {
   // validateFpsEnvelope already refused any envelope where scope.kind and the sections disagree,
   // but the importer doesn't re-trust that: it re-derives independently (belt-and-braces).
   const hasServer = scope === 'full' || scope === 'actuals-only';
+  const hasClient = scope === 'full' || scope === 'client-only';
+  // Restore-displacement guard — must run BEFORE anything below writes/fetches, and must abort
+  // the WHOLE restore (not just the client half) on Cancel: no partial writes, no dirty mark.
+  if (hasClient) {
+    const guard = await checkRestoreDisplacement();
+    if (!guard.proceed) return;
+  }
   const what = scope === 'full' ? 'both your settings/plan and your actuals data'
     : scope === 'actuals-only' ? 'your actuals data'
     : 'your settings & plan';
@@ -3144,11 +3601,18 @@ async function importLegacyServerBackup(rawText, data) {
 
 // Legacy client export (meta/ui/tabs/budget shape) — unchanged behavior from before the
 // fps-backup envelope existed, so old export files still restore correctly.
-function importLegacyClientBackup(data) {
+async function importLegacyClientBackup(data) {
+  // Restore-displacement guard — this door has no pre-existing confirm() of its own, so this
+  // is the only gate before its writes below. Must run BEFORE anything writes/reloads.
+  const guard = await checkRestoreDisplacement();
+  if (!guard.proceed) return;
   const ui = data.ui || data.inputs || data;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(ui)); } catch (e) {}
   if (data.tabs) { try { localStorage.setItem(TABS_KEY, JSON.stringify(data.tabs)); } catch (e) {} }
   if (data.budget) { try { localStorage.setItem('budgetBuilder_v1', JSON.stringify(data.budget)); } catch (e) {} }
+  // S1.2 reload-door (Mechanism 2, docs/s1_2-migration-design.md §6.1) — see reset()'s comment for
+  // the full rationale. Must run BEFORE location.reload() below actually fires.
+  try { localStorage.removeItem(PROFILE_META_KEY); } catch (e) {}
   // Reload so every tab — including the budget builder, which inits at page load —
   // restores cleanly from storage. (Older exports without tabs/budget still load the Tax tab.)
   location.reload();
@@ -3181,7 +3645,7 @@ async function restoreBackupFile(rawText) {
   const plan = planBackupRestore(data);
   if (plan.action === 'import-fps') { await importFpsEnvelope(plan.envelope); return; }
   if (plan.action === 'import-legacy-server') { await importLegacyServerBackup(rawText, plan.payload); return; }
-  if (plan.action === 'import-legacy-client') { importLegacyClientBackup(plan.payload); return; }
+  if (plan.action === 'import-legacy-client') { await importLegacyClientBackup(plan.payload); return; }
   alert(plan.error || 'Invalid JSON file.');
 }
 
@@ -3383,6 +3847,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const el = document.getElementById('wi_resume_banner'); if (el) el.hidden = true;
       showToast('Discarded the saved what-if');
     }; }
+  { const b = document.getElementById('profile_displacement_dismiss_btn');
+    if (b) b.onclick = dismissProfileDisplacementBanner; }
 
   // Boot suppression window (M2): every restore write above + this first settling recompute
   // are suppressed (persist() no-ops) so boot never redundantly rewrites storage before the
@@ -3398,6 +3864,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.__wiBootDone = true;   // test/debug surface (IR-7-lite): boot-complete signal so
                                    // external probes (QA driver, console) don't race the async chain
   }
+  // S1.2 boot/sync engine (docs/s1_2-migration-design.md §4.1 GUARD-0): runs exactly once per
+  // boot, in LIVE context, right after the settling recompute above closes the suppression window
+  // and wiCheckResumeOnBoot() has only OFFERED (not activated) a Resume affordance — What-If
+  // cannot be active yet at this point in the synchronous boot chain. Deliberately NOT awaited:
+  // it can involve a blocking confirm() dialog (the pre-migration snapshot prompt) and must never
+  // stall the rest of boot (accessibility wiring, the initial net-worth render) behind that.
+  // bootProfileSyncEngine (not the bare call) so an unexpected throw retries instead of leaving
+  // __profileSyncEngineSettled permanently unset — see its comment above for the retry/backoff
+  // policy and why a crash must retry rather than unblock profileFlushExecutor outright.
+  // R1 (0.3.0): profiles are ON BY DEFAULT — the deliberate release-step flag flip
+  // (DEC-035 rollback posture fulfilled). ?profiles=0 is the per-session opt-out
+  // (rollback lever without a rebuild); ?profiles=1 stays honored for old bookmarks.
+  window.__profilesEnabled = new URLSearchParams(location.search).get('profiles') !== '0';
+  if (window.__profilesEnabled) bootProfileSyncEngine();
   if (window.renderNetWorth) window.renderNetWorth();   // Overview is the default tab → draw the forecast on load
 
   // Accessibility: tablist semantics + keyboard-operable chips
@@ -4441,6 +4921,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof WhatIf !== 'undefined' && WhatIf.active) { pjPrefsMem = p; return; }   // sandbox-only
     pjPrefsMem = null;
     try { localStorage.setItem(PJ_ACCTS_KEY, JSON.stringify(p)); } catch (e) {}
+    markProfileDirty();   // S1.2 Mechanism 1 (§6.1) — direct-write bypass site
   }
   const pjIncluded = (a, prefs) => prefs[a.id] != null ? !!prefs[a.id] : !PJ_VOLATILE_TYPES.has(a.type);
   function pjAcctSums(prefs) {
@@ -4724,6 +5205,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   function resetMaxout() {
     if (wiBlockIfActive('reset the Max-out planner')) return;
     try { localStorage.removeItem(MAXOUT_KEY); } catch (e) {}
+    markProfileDirty();   // S1.2 Mechanism 1 (§6.1): a removal is a mutation too — without this the
+                           // reset never propagates and a later hydrate resurrects the old plan.
     ['mo_401k', 'mo_hsa', 'mo_ira'].forEach(id => { if ($(id)) $(id).checked = true; });
     if ($('mo_mega')) $('mo_mega').checked = false;
     if ($('mo_roth_pct')) $('mo_roth_pct').value = '0';
@@ -4800,6 +5283,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function saveCategories(list) {
     try { localStorage.setItem(ITC_CAT_KEY, JSON.stringify(list)); } catch (e) {}
+    markProfileDirty();   // S1.2 Mechanism 1 (§6.1) — direct-write bypass site. Deliberately NOT
+                           // called from getCategories()'s read-path default-seed above — a
+                           // default-seed materialization is not a genuine user mutation.
     syncCategoryState();
   }
 
@@ -5838,6 +6324,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       showToast('Activated — ' + (sm.monthsWritten || 0) + ' month plans installed (' + (sm.monthsOverwritten || 0) + ' replaced)');
       WhatIf.suppress = true;
       try { await recompute(); } finally { WhatIf.suppress = false; }
+      // S1.2 Mechanism 1 (§6.1) — DEFERRED, load-bearing placement. The twin→live copy loop above
+      // (WI_SCOPED_KEYS.forEach) runs while WhatIf.active is still true, so a mark placed INSIDE
+      // that loop would be swallowed by markProfileDirty()'s own self-guard. This call sits here,
+      // strictly AFTER mode teardown (WhatIf.active=false above) and the settling recompute
+      // (WhatIf.suppress=false just above), so the guard passes and the activated live keys
+      // actually get flushed.
+      markProfileDirty();
       scRefreshActuals();
     } catch (e) { showToast('Activate failed: ' + (e.message || '')); }
   }

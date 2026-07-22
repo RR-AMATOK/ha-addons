@@ -165,8 +165,20 @@ def resolve_user(request: Request | None) -> dict:
             if trimmed:
                 header_id = trimmed
 
-    seen_id = header_id or os.environ.get("FINANCE_DEV_USER") \
-        or getattr(request, "query_params", {}).get("user")
+    # Dev-override precedence: trusted header always wins; then the env pin; then the
+    # per-request ?user= param; then the sticky sandbox cookie set by GET / (?user=...).
+    # The cookie exists so an in-page API call (which never carries the page's query
+    # string) resolves to the SAME simulated identity as the page that made it —
+    # without it, a "?user=partner" tab silently does all its API work as the owner
+    # (the 2026-07-22 false-alarm "isolation gap"). Ordering keeps it production-inert:
+    # under ingress the header is present on every request and shadows everything else.
+    # "off" is the cookie-clearing sentinel (see GET /), never an identity: the clearing
+    # load itself must already resolve as the owner, not provision a member named "off".
+    _dev_param = getattr(request, "query_params", {}).get("user")
+    _dev_cookie = getattr(request, "cookies", {}).get("fps_dev_user") if header_id is None else None
+    if _dev_param == "off":
+        _dev_param, _dev_cookie = None, None
+    seen_id = header_id or os.environ.get("FINANCE_DEV_USER") or _dev_param or _dev_cookie
 
     # SEV-S1.1-001: "__owner__" is a reserved sentinel (tracking_store._SENTINEL_OWNER_ID)
     # meaning "the owner's data-scope slot", never a real identity. If a trusted header or
@@ -834,7 +846,26 @@ def index(request: Request) -> HTMLResponse:
             inject += ("<script>window.__HA_THEME=" + json.dumps(theme).replace("</", "<\\/") + ";</script>")
 
     # index.html's <head> is a bare literal tag (no attributes) — pinned invariant.
-    return HTMLResponse(html.replace("<head>", "<head>" + inject, 1))
+    resp = HTMLResponse(html.replace("<head>", "<head>" + inject, 1))
+
+    # Sticky sandbox identity (dev override only): anchor ?user=<id> in a cookie so the
+    # page's own API calls resolve to the same simulated identity (see resolve_user's
+    # precedence comment). Only when NO trusted header is present — under ingress the
+    # header rides every request and this whole block is skipped. `?user=off` clears it.
+    client = getattr(request, "client", None)
+    peer_host = getattr(client, "host", None) if client is not None else None
+    has_trusted_header = (
+        peer_host == _SUPERVISOR_PEER
+        and len(request.headers.getlist("X-Remote-User-Id")) == 1
+        and request.headers.getlist("X-Remote-User-Id")[0].strip() != ""
+    )
+    if not has_trusted_header:
+        dev_user = request.query_params.get("user")
+        if dev_user == "off":
+            resp.delete_cookie("fps_dev_user")
+        elif dev_user and dev_user != tracking_store._SENTINEL_OWNER_ID:
+            resp.set_cookie("fps_dev_user", dev_user, httponly=True, samesite="lax")
+    return resp
 
 
 @app.get("/health")
@@ -1950,6 +1981,86 @@ def revert_scenario_endpoint(scenario_id: int, request: Request = None) -> dict:
     if out is None:
         raise HTTPException(status_code=404, detail="scenario not found")
     return out
+
+
+# ----- per-user server profile (S1.2, DEC-027/DEC-035, docs/s1_2-migration-design.md) -----
+# Two endpoints, mirroring the scenario blob endpoints above: `with closing(...)`,
+# scoped by `resolve_user(request)["scopeId"]`, the same `_scenario_blob_guard` size
+# ceiling reused for the blob. Deliberately PER-USER, NOT `require_owner` — every
+# household member (owner AND member) reads/writes their own profile; this differs
+# from the owner-only export/import surface above.
+
+# Mirrors index.html's `BACKUP_CLIENT_KEYS` verbatim (§2 of the design doc) — the
+# blob IS the versioned fps-backup client-section, so this allowlist is the single
+# source of truth on both sides. Structural exclusion, not a denylist: `itc.whatif.*`
+# and `itc.activetab` are simply never members of this set, so a crafted/corrupt blob
+# can never smuggle them in — the PUT validator below rejects any unknown key.
+_PROFILE_BACKUP_CLIENT_KEYS = frozenset({
+    "itc.v3", "itc.tabs.v1", "budgetBuilder_v1", "itc.fire.v1",
+    "itc.categories.v1", "itc.proj.accts.v1", "itc.maxout.v1",
+})
+
+
+class ProfilePutModel(BaseModel):
+    blob: dict
+    # strict=True (§3.2 "reject bool-as-int"): Pydantic's default lax `int` coercion
+    # accepts `True`/`False` as 1/0 (bool is an int subclass) — strict mode is the only
+    # way to actually reject a bool value here rather than silently normalizing it.
+    base_state_version: int = Field(0, alias="baseStateVersion", strict=True)
+    migration: bool = False
+    model_config = {"populate_by_name": True}
+
+
+def _validate_profile_blob(blob) -> None:
+    """422, no mutation (mirrors `_validate_backup`'s posture): the blob must be the
+    versioned fps-backup client-section shape, `{version:3, keys:{...}}`, and `keys`
+    may carry ONLY allowlisted client keys — server-side defense-in-depth mirroring
+    the client's own allowlist (§3.2)."""
+    if not isinstance(blob, dict):
+        raise HTTPException(status_code=422, detail="blob must be an object")
+    version = blob.get("version")
+    if isinstance(version, bool) or version != 3:
+        raise HTTPException(status_code=422, detail="blob.version must be 3")
+    keys = blob.get("keys")
+    if not isinstance(keys, dict):
+        raise HTTPException(status_code=422, detail="blob.keys must be an object")
+    unknown = sorted(k for k in keys if k not in _PROFILE_BACKUP_CLIENT_KEYS)
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"blob.keys contains disallowed key(s): {unknown}")
+
+
+@app.get("/api/tracking/profile")
+def get_profile_endpoint(request: Request = None) -> dict:
+    """§3.1: always 200. `{hasState:false, stateVersion:0, blob:null, updatedAt:null}`
+    when this scope has no row yet — identical code path for owner and member; only the
+    scopeId (the table's PK) differs. No existence-leak: a never-seen scope gets this
+    exact same shape, never a distinguishable 403/404."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return tracking_store.get_profile(c, scope)
+
+
+@app.put("/api/tracking/profile")
+def put_profile_endpoint(m: ProfilePutModel, request: Request = None) -> dict:
+    """§3.2: last-write-wins flush. Always wins — `baseStateVersion` is advisory only in
+    v1 (recorded nowhere, never used to refuse a stale write); the blob it displaces (if
+    any) moves to the store's one-level `prev_blob`/`prev_state_version` undo.
+
+    500 (no mutation) only when the ONE-TIME server-side pre-migration snapshot's
+    `conn.backup()` raises OSError (§5.2) — abort before the upsert, exactly like
+    `import_all`'s pre-mutation copy; the client keeps `dirty` and retries next boot.
+    """
+    scope = resolve_user(request)["scopeId"]
+    _validate_profile_blob(m.blob)
+    _scenario_blob_guard(m.blob, "blob")
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.put_profile(
+                c, scope, m.blob, m.base_state_version, is_migration=m.migration)
+        except OSError as e:
+            raise HTTPException(
+                status_code=500, detail=f"pre-migration safety snapshot failed: {e}")
 
 
 @app.post("/api/scenario/catchup")

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0
+
+- **Your plan now follows you across devices.** Tax inputs, budget setup, FIRE
+  assumptions, and categories are stored in your personal server-side profile
+  (per household member) instead of living only in one browser. The first time
+  you open the app after this update, a one-time migration runs: it saves a
+  backup file to your device and asks you to confirm before anything syncs.
+  Keep that file until you're satisfied everything looks right.
+- **Restore is now guarded.** Restoring a backup that would replace newer data
+  warns you first, with a real Cancel; if a sync ever does replace newer data
+  from another device, a visible notice appears and the previous version is
+  kept one level back.
+- Hardening under the hood: backup restores can no longer rewind profile
+  version history (the cause of "old values coming back" during testing), and
+  malformed backup files are rejected cleanly.
+- Opt-out lever: add `?profiles=0` to the URL to run a session the old way
+  (browser-local only).
+
 ## 0.2.2
 
 - **Each household member now has their own data.** Transactions, accounts,
