@@ -15,13 +15,15 @@ Money is stored as integer cents; `tracking.py` converts to float dollars at the
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
 import re
+import secrets
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import tracking
 
@@ -297,10 +299,20 @@ CREATE TABLE IF NOT EXISTS user_profile (
 -- becomes 'member'. Deliberately NOT in _BACKUP_TABLES: identity is install-local, not
 -- user financial data -- a backup/restore round-trip must never move or overwrite
 -- who's-who between installs (see the constant's comment below).
+-- `display_name` (human-readable roster names): captured from the trusted Supervisor
+-- ingress header (X-Remote-User-Display-Name, falling back to X-Remote-User-Name) by
+-- server.py's resolve_user() at provisioning time, and refreshed whenever the header
+-- value changes on a later request. Nullable -- older Supervisor/Core versions never
+-- send either header, and the dev override never sets it (the id doubles as the name
+-- there). `label` is the owner-editable fallback for that case (PATCH
+-- /api/tracking/users/{id}) -- also nullable, wins over display_name when rendering
+-- (see index.html's owner-transfer picker: label || displayName || id).
 CREATE TABLE IF NOT EXISTS users (
-  user_id    TEXT PRIMARY KEY,
-  role       TEXT NOT NULL CHECK (role IN ('owner','member')),
-  created_at TEXT NOT NULL
+  user_id      TEXT PRIMARY KEY,
+  role         TEXT NOT NULL CHECK (role IN ('owner','member')),
+  display_name TEXT,
+  label        TEXT,
+  created_at   TEXT NOT NULL
 );
 -- At-most-one-owner invariant, enforced at the DB layer (mirrors idx_scenario_active):
 -- a concurrent double-provision-as-owner fails the INSERT (IntegrityError) rather than
@@ -345,6 +357,41 @@ CREATE TABLE IF NOT EXISTS fund_txn (
   txn_id  INTEGER NOT NULL REFERENCES txn(id)  ON DELETE CASCADE,
   role    TEXT NOT NULL CHECK (role IN ('contribute','draw')),
   PRIMARY KEY (txn_id)
+);
+
+-- Account linking / identity aliases ("appoint admins" via linking -- N HA accounts ->
+-- 1 profile): `alias_id` is a raw HA user id that, from this row's insertion onward,
+-- resolves to `primary_user_id` for EVERY identity purpose (role, scopeId, name) --
+-- server.py's resolve_user() performs this resolution (via resolve_identity() below)
+-- BEFORE any provisioning/role lookup, so an aliased id is never independently
+-- provisioned as its own user again. Chains are FORBIDDEN by construction (an alias's
+-- primary must never itself be an alias) -- enforced in code by redeem_link_code()'s
+-- no-chain guard, not by a DB constraint (SQLite has no clean "not a key elsewhere in
+-- the same table" CHECK). Deliberately NOT in _BACKUP_TABLES (mirrors `users`):
+-- identity/linking is install-local, never moved by a backup/restore round-trip.
+-- Placed at the very end of SCHEMA (after the "Sinking funds" block) so the S1.1 QA
+-- harness's synthetic pre-migration schema simulations (tests/test_s1_1_qa_matrix.py's
+-- `_v6_schema`/`_v7_schema`, cut at the "Sinking funds" marker) never see these tables
+-- either -- they didn't exist that far back, same reasoning as `fund`/`fund_txn`'s own
+-- placement note above.
+CREATE TABLE IF NOT EXISTS user_alias (
+  alias_id        TEXT PRIMARY KEY,
+  primary_user_id TEXT NOT NULL,
+  linked_at       TEXT NOT NULL
+);
+
+-- Single-use link codes: the two-sided handshake proving control of both accounts
+-- before a link is created (POST /api/tracking/link-code issues one; POST
+-- /api/tracking/link redeems it). Only the SHA-256 HASH is stored -- never the
+-- plaintext code -- so a DB read (or backup, though this table is excluded from
+-- backups entirely) can never recover a still-live code. 10-minute TTL, single-use
+-- (`used` flips 0->1 on redemption, never reused); a fresh link-code generation
+-- invalidates the issuer's prior outstanding code (see create_link_code()).
+CREATE TABLE IF NOT EXISTS link_code (
+  code_hash      TEXT PRIMARY KEY,
+  issuer_user_id TEXT NOT NULL,
+  expires_at     TEXT NOT NULL,
+  used           INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -680,7 +727,53 @@ def _mig_add_fund_table(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_fund_txn_fund ON fund_txn(fund_id)")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table]
+def _mig_add_user_display_name(conn) -> None:
+    """Migration 10 (household roster human-readable names): additive `display_name` +
+    `label` columns on `users` -- v10 -> v11. `CREATE TABLE IF NOT EXISTS` makes fresh
+    DBs already have both columns from SCHEMA above; this ALTER path only fires on an
+    existing device DB that predates this change. Both columns are nullable, so no
+    DEFAULT is needed for the ALTER (existing rows backfill to NULL for free) -- unlike
+    the S1.1 `user_id` scoping columns, there's no "what should every old row become"
+    question here. Idempotent via the standard PRAGMA table_info guard.
+
+    `display_name` is captured/refreshed by server.py's resolve_user() from the trusted
+    Supervisor-peer X-Remote-User-Display-Name/-Name headers; `label` is the
+    owner-editable fallback (PATCH /api/tracking/users/{id}) for Supervisor versions
+    that never send those headers, or for service accounts. `label` wins over
+    `display_name` at render time (index.html's owner-transfer picker)."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if "display_name" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+    if "label" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN label TEXT")
+
+
+def _mig_add_alias_tables(conn) -> None:
+    """Migration 11 (account linking / identity aliases -- "appoint admins" via linking):
+    additive `user_alias` + `link_code` tables -- v11 -> v12. `CREATE TABLE IF NOT EXISTS`
+    makes it idempotent on fresh DBs that already have both from SCHEMA above (mirrors the
+    goal/venture/user_profile/fund convention exactly). Pure additive `CREATE` -- no ALTER,
+    no data rewrite (DEC-009 #4). Indexes live ONLY here (never in SCHEMA) -- same
+    reasoning as `_mig_add_fund_table`'s index-block comment: a synthetic pre-migration
+    schema simulation (tests/test_s1_1_qa_matrix.py) that creates these tables via a
+    stripped/partial SCHEMA text must never see a CREATE INDEX referencing a column that
+    stripping removed."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_alias (
+  alias_id        TEXT PRIMARY KEY,
+  primary_user_id TEXT NOT NULL,
+  linked_at       TEXT NOT NULL
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_alias_primary ON user_alias(primary_user_id)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS link_code (
+  code_hash      TEXT PRIMARY KEY,
+  issuer_user_id TEXT NOT NULL,
+  expires_at     TEXT NOT NULL,
+  used           INTEGER NOT NULL DEFAULT 0
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_link_code_issuer ON link_code(issuer_user_id)")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables]
 
 
 def _now() -> str:
@@ -762,7 +855,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 _SENTINEL_OWNER_ID = "__owner__"
 
 
-def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
+def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str, display_name: str | None = None) -> dict:
     """Look up *user_id* in the `users` table; provision it if this is the first time
     it's been seen. The very first id ever provisioned becomes 'owner'; every
     subsequently-seen new id becomes 'member' -- at most one owner (also enforced by
@@ -774,14 +867,18 @@ def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
     header or the DEC-022 dev override -- never for the no-identity-signal case (see
     resolve_owner_fallback below).
 
-    First-provision race (SEV-005): two never-seen ids can both observe "no existing
-    owner" (our own SELECT above) and both attempt to INSERT as 'owner'. The
-    idx_users_one_owner unique index lets only one such INSERT succeed; the loser's
-    INSERT raises sqlite3.IntegrityError -- and since it's *this* user_id's own row that
-    failed to land (the winner's id got the owner row, not ours), we retry the INSERT
-    for this same user_id as 'member' instead of surfacing a 500. The DB invariant
-    already prevents two owners; this just turns the race into a graceful member
-    assignment for whoever lost it.
+    *display_name* (human-readable roster names): the trimmed, single-valued
+    X-Remote-User-Display-Name/-Name header value server.py's resolve_user() captured
+    for this request, or None when neither header was present (older Supervisor/Core,
+    or the DEC-022 dev override path, which never supplies one). Stored on first
+    provisioning; on an ALREADY-provisioned row, a truthy, CHANGED value is written
+    over the stored one (people rename their HA account) -- a None or unchanged value
+    never overwrites what's on disk, so a request that happens to omit the header
+    (or repeats the same name) can't blank out a name learned on an earlier request.
+    Deliberately NOT part of this function's RETURN VALUE (still exactly {id, role})
+    -- callers that need the roster's display_name/label read it back via list_users()
+    or get_user(), keeping this function's contract (and every existing exact-dict-
+    equality test against it) unchanged.
 
     Raises
     ------
@@ -799,15 +896,22 @@ def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
             f"sentinel ({_SENTINEL_OWNER_ID!r}); callers must reject this id before "
             "calling here (SEV-S1.1-001)."
         )
-    row = conn.execute("SELECT user_id, role FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    row = conn.execute(
+        "SELECT user_id, role, display_name FROM users WHERE user_id = ?", (user_id,)
+    ).fetchone()
     if row is not None:
+        if display_name and row["display_name"] != display_name:
+            conn.execute(
+                "UPDATE users SET display_name = ? WHERE user_id = ?", (display_name, user_id)
+            )
+            conn.commit()
         return {"id": row["user_id"], "role": row["role"]}
     existing_owner = conn.execute("SELECT 1 FROM users WHERE role = 'owner'").fetchone()
     role = "member" if existing_owner is not None else "owner"
     try:
         conn.execute(
-            "INSERT INTO users (user_id, role, created_at) VALUES (?, ?, ?)",
-            (user_id, role, _now()),
+            "INSERT INTO users (user_id, role, display_name, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, role, display_name, _now()),
         )
         conn.commit()
         return {"id": user_id, "role": role}
@@ -821,8 +925,8 @@ def resolve_or_provision_user(conn: sqlite3.Connection, user_id: str) -> dict:
         # owner exists.
         try:
             conn.execute(
-                "INSERT INTO users (user_id, role, created_at) VALUES (?, 'member', ?)",
-                (user_id, _now()),
+                "INSERT INTO users (user_id, role, display_name, created_at) VALUES (?, 'member', ?, ?)",
+                (user_id, display_name, _now()),
             )
             conn.commit()
             return {"id": user_id, "role": "member"}
@@ -878,11 +982,102 @@ def resolve_owner_fallback(conn: sqlite3.Connection) -> dict:
 def list_users(conn: sqlite3.Connection) -> list[dict]:
     """Every provisioned household member, owner first then by provisioning order.
     Used by GET /api/whoami's owner-only roster view -- never exposed to members
-    (server.py enforces that)."""
+    (server.py enforces that). `displayName`/`label` are the human-readable-names
+    columns (header-captured / owner-edited respectively) -- either may be None;
+    render-time precedence (label wins) is the caller's job (index.html's
+    owner-transfer picker), not this function's.
+
+    ALIASED IDS ARE FILTERED OUT (account linking): a `user_id` that currently appears
+    as a `user_alias.alias_id` is no longer an independent household member -- every
+    request that resolves to it now resolves to its PRIMARY's {id, role, scopeId}
+    instead (server.py's resolve_user() -> tracking_store.resolve_identity()), so
+    listing it here as its own roster row would be misleading (it can't be transferred
+    ownership to, labeled meaningfully, or distinguished from its primary in practice).
+    The underlying `users` row is NOT deleted (still reachable via get_user(), and its
+    own get_user()-shape data is used by list_linked_accounts() to name it in the
+    owning persona's "linked accounts" list) -- only this OWNER-ROSTER view hides it."""
     rows = conn.execute(
-        "SELECT user_id, role, created_at FROM users ORDER BY (role != 'owner'), created_at"
+        "SELECT user_id, role, display_name, label, created_at FROM users "
+        "WHERE user_id NOT IN (SELECT alias_id FROM user_alias) "
+        "ORDER BY (role != 'owner'), created_at"
     ).fetchall()
-    return [{"id": r["user_id"], "role": r["role"], "createdAt": r["created_at"]} for r in rows]
+    return [
+        {
+            "id": r["user_id"],
+            "role": r["role"],
+            "displayName": r["display_name"],
+            "label": r["label"],
+            "createdAt": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+def get_user(conn: sqlite3.Connection, user_id: str) -> dict | None:
+    """Single roster row (id/role/displayName/label/createdAt), or None if *user_id*
+    has never been provisioned. `list_users()` is owner-only (server.py never exposes
+    the full roster to a member); this is the per-id lookup GET /api/whoami uses to
+    attach a MEMBER's own displayName/label to their self-only response."""
+    row = conn.execute(
+        "SELECT user_id, role, display_name, label, created_at FROM users WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["user_id"],
+        "role": row["role"],
+        "displayName": row["display_name"],
+        "label": row["label"],
+        "createdAt": row["created_at"],
+    }
+
+
+class UserLabelError(ValueError):
+    """400: *user_id* is the reserved `__owner__` data-scope sentinel -- never a real
+    household member (SEV-S1.1-001), so it can never receive an owner-editable label.
+    Mirrors OwnerTransferError's same rejection for the same reason."""
+
+
+class UnknownUserError(LookupError):
+    """404: *user_id* has never been provisioned in the `users` roster. Identity is
+    lazily provisioned (DEC-026/031) -- a member must open the app at least once
+    before the owner can label them."""
+
+
+def set_user_label(conn: sqlite3.Connection, user_id: str, label: str | None) -> dict:
+    """Owner-editable label fallback (server.py's PATCH /api/tracking/users/{id}) --
+    covers pre-header Supervisor versions (never send X-Remote-User-Display-Name/-Name)
+    and service accounts that have no meaningful HA display name. `label` wins over
+    `display_name` at render time.
+
+    *label* must already be stripped and length-validated by the caller (server.py) --
+    this function only enforces the identity-level invariants below. Pass None (not
+    "") to clear a previously-set label.
+
+    Raises
+    ------
+    UserLabelError
+        *user_id* is the reserved owner sentinel (SEV-S1.1-001) -- it is the owner's
+        internal data-scope slot, never a real household member, so it can never
+        receive a label (mirrors transfer_ownership's identical rejection).
+    UnknownUserError
+        *user_id* has never been provisioned.
+    """
+    if user_id == _SENTINEL_OWNER_ID:
+        raise UserLabelError(
+            f"{_SENTINEL_OWNER_ID!r} is the reserved owner data-scope sentinel, not a "
+            "real household member -- it can never receive a label."
+        )
+    row = conn.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if row is None:
+        raise UnknownUserError(
+            f"{user_id!r} has never opened the app -- a member must be seen at least "
+            "once (lazily provisioned) before the owner can label them."
+        )
+    conn.execute("UPDATE users SET label = ? WHERE user_id = ?", (label, user_id))
+    conn.commit()
+    return {"id": user_id, "label": label}
 
 
 class OwnerTransferError(ValueError):
@@ -949,7 +1144,15 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
         the reserved `_SENTINEL_OWNER_ID` sentinel.
     UnknownTransferTargetError
         Maps to 404 in server.py. *to_user_id* has never been provisioned -- they must
-        open the app at least once first.
+        open the app at least once first. ALSO raised (fail-closed, account linking) when
+        *to_user_id* is currently a `user_alias.alias_id`: an aliased id never
+        independently resolves through resolve_user() any more (every request using it
+        resolves to its PRIMARY instead -- resolve_identity()), so promoting its `users`
+        row to `role='owner'` would strand the owner seat on an id nobody can ever
+        activate live. Transfer to the alias's PRIMARY id instead -- which, once owner,
+        already carries the seat for every account linked to it (see
+        docs/multiuser-household-plan.md and tests/test_account_linking.py for the
+        "transfer to a primary with aliases moves the seat for all of them" property).
     """
     if to_user_id == _SENTINEL_OWNER_ID:
         raise OwnerTransferError(
@@ -958,6 +1161,14 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
         )
     if to_user_id == current_owner_id:
         raise OwnerTransferError("toUserId is already the current owner; nothing to transfer.")
+    alias_row = conn.execute(
+        "SELECT primary_user_id FROM user_alias WHERE alias_id = ?", (to_user_id,)
+    ).fetchone()
+    if alias_row is not None:
+        raise UnknownTransferTargetError(
+            f"{to_user_id!r} is a linked account, not an independent member -- transfer "
+            f"to its primary account ({alias_row['primary_user_id']!r}) instead."
+        )
     target = conn.execute(
         "SELECT user_id FROM users WHERE user_id = ?", (to_user_id,)
     ).fetchone()
@@ -991,6 +1202,312 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
         conn.rollback()
         raise
     return {"previousOwnerId": current_owner_id, "newOwnerId": to_user_id}
+
+
+# ---------- account linking (identity aliases -- "appoint admins" via linking) ----------
+#
+# User requirement this satisfies (condensed): "I want both my admin accounts in HA to
+# be the same profile because both are me, but I want other users to have their own
+# dedicated instance." I.e. N HA accounts -> 1 profile (persona), opt-in per account via
+# a link-code handshake; unlinked accounts stay dedicated personas. Every account linked
+# to a persona shares that persona's role wholesale -- linking the owner's second login
+# to their primary IS how "appoint an admin" falls out of this design, with no separate
+# admin-grant concept needed.
+
+_LINK_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I -- typo-resistant
+_LINK_CODE_LENGTH = 8
+_LINK_CODE_TTL_SECONDS = 600  # 10 minutes
+
+
+class LinkError(ValueError):
+    """400: the link-code redemption request is structurally invalid -- an unknown,
+    expired, or already-used code, or joiner == issuer (linking an account to itself).
+    Codes are looked up by hash only (the plaintext is never stored), so "unknown",
+    "expired", and "already used" are DELIBERATELY not distinguished in the message --
+    there is no oracle for telling an attacker which failure mode they hit."""
+
+
+class LinkOwnerSeatConflictError(RuntimeError):
+    """409: the joiner currently holds the household owner seat. Linking the owner away
+    from their own seat would silently strand `scopeId='__owner__'` -- nobody would
+    resolve to it any more until a future owner-transfer, an availability bug dressed as
+    a feature. The fix is directional: issue the code FROM the owner account (so the
+    owner becomes the primary and the other account becomes its alias), not the reverse."""
+
+
+class LinkChainConflictError(RuntimeError):
+    """409: the joiner is ALREADY a primary for one or more existing aliases. Linking it
+    to a NEW primary would leave those existing aliases pointing at an id that is now
+    itself an alias -- a two-hop chain, forbidden by design (see redeem_link_code's
+    docstring for the full scenario this prevents). Also raised on a genuine concurrency
+    collision (two requests linking the same joiner at once) -- same remediation either
+    way: reload and retry from one of the already-linked accounts."""
+
+
+class UnknownAliasError(LookupError):
+    """404: the given alias id has no `user_alias` row -- never linked, or already
+    unlinked."""
+
+
+class AliasNotOwnedError(RuntimeError):
+    """403: the caller's resolved identity does not own this alias (isn't its
+    `primary_user_id`) -- only the persona that owns a link (from any of ITS OWN
+    sessions) may remove it."""
+
+
+def _hash_link_code(code: str) -> str:
+    """SHA-256 of the code, UPPERCASED first so client-side casing (or a raw API caller
+    that skips the UI's uppercase-on-submit) never causes a false "invalid code" --
+    codes are generated uppercase-only (see `_LINK_CODE_ALPHABET`), so normalizing here
+    makes comparison case-insensitive without weakening the code's entropy."""
+    return hashlib.sha256(code.strip().upper().encode("utf-8")).hexdigest()
+
+
+def resolve_alias(conn: sqlite3.Connection, seen_id: str) -> str:
+    """One-hop alias -> primary lookup. Returns *seen_id* unchanged when it has no
+    `user_alias` row (the overwhelmingly common case -- an ordinary, unlinked identity).
+
+    Deliberately does NOT loop/recurse to walk a chain: chains are structurally
+    forbidden by construction (redeem_link_code() refuses to create one -- see its
+    docstring), so a second hop should never exist. If one somehow did (a bug, or a
+    hand-edited DB), resolving only one hop fails towards the alias's IMMEDIATE primary
+    rather than silently walking an unbounded/cyclic chain -- a safer failure mode than
+    "resolve identity by looping until it stops changing."""
+    row = conn.execute(
+        "SELECT primary_user_id FROM user_alias WHERE alias_id = ?", (seen_id,)
+    ).fetchone()
+    return row["primary_user_id"] if row is not None else seen_id
+
+
+def resolve_identity(conn: sqlite3.Connection, seen_id: str, display_name: str | None = None) -> dict:
+    """The identity-resolution step server.py's resolve_user() delegates to for every
+    concrete *seen_id* (trusted header or DEC-022 dev override) -- collapses an alias id
+    to its primary BEFORE any provisioning/role lookup, so a linked account NEVER gets
+    its own `users` row from this point on: it resolves to the EXACT SAME {id, role}
+    the primary itself would get on its own request. This is what makes linking
+    transitive for role: once the primary is (or later becomes) the household owner,
+    EVERY account aliased to it resolves `role='owner'` too, with zero extra code at the
+    role-lookup layer -- see transfer_ownership()'s docstring for the "moves the seat for
+    all linked accounts" property this produces.
+
+    Ordinary (never-aliased) ids pass through unchanged to resolve_or_provision_user() --
+    byte-identical to this function not existing, preserving every existing test/caller
+    of that function.
+
+    The `_SENTINEL_OWNER_ID` special case: resolve_or_provision_user() REFUSES to
+    provision the sentinel (SEV-S1.1-001) -- it only ever exists via
+    resolve_owner_fallback()'s no-header path. If an alias's primary IS the sentinel (the
+    household owner, resolved via the no-signal fallback, issued the link code), this
+    function routes to resolve_owner_fallback() instead so that case still resolves
+    cleanly. *display_name* is not applied in that branch -- the fallback path has never
+    captured one (no header exists to supply it there either)."""
+    primary_id = resolve_alias(conn, seen_id)
+    if primary_id == _SENTINEL_OWNER_ID:
+        return resolve_owner_fallback(conn)
+    return resolve_or_provision_user(conn, primary_id, display_name=display_name)
+
+
+def create_link_code(conn: sqlite3.Connection, issuer_user_id: str) -> dict:
+    """Issue a single-use, 10-minute account-linking code for *issuer_user_id* -- ANY
+    signed-in persona may call this (owner or member; there is no owner-only gate --
+    linking is "make another one of MY accounts share this profile," not a household-
+    admin action). *issuer_user_id* is already a PRIMARY by construction: server.py's
+    resolve_user() collapses any pre-existing alias to its primary before an endpoint
+    ever sees a caller's id, so this function never has to re-check that itself.
+
+    The plaintext code is returned exactly ONCE, here -- only its SHA-256 hash
+    (`_hash_link_code`) is ever persisted, so a DB read or backup snapshot can never
+    recover a still-live code. Generating a new code DELETES the issuer's prior
+    outstanding code first (rate-limit sanity: at most one live code per issuer at a
+    time -- an old, possibly-shared code can't linger as a second valid path in).
+
+    Returns ``{"code": <8-char plaintext>, "expiresAt": <iso8601>}``.
+    """
+    conn.execute("DELETE FROM link_code WHERE issuer_user_id = ?", (issuer_user_id,))
+    code = "".join(secrets.choice(_LINK_CODE_ALPHABET) for _ in range(_LINK_CODE_LENGTH))
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=_LINK_CODE_TTL_SECONDS)
+    ).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO link_code (code_hash, issuer_user_id, expires_at, used) VALUES (?, ?, ?, 0)",
+        (_hash_link_code(code), issuer_user_id, expires_at),
+    )
+    conn.commit()
+    return {"code": code, "expiresAt": expires_at}
+
+
+def redeem_link_code(conn: sqlite3.Connection, joiner_user_id: str, code: str) -> dict:
+    """Redeem a link code (POST /api/tracking/link) -- the second half of the two-sided
+    handshake proving control of both accounts. *joiner_user_id* is the CALLER's
+    already-resolved identity (server.py's resolve_user() ran first, so this is already
+    collapsed through any pre-existing alias of the JOINER'S OWN to a primary -- see
+    resolve_identity()'s docstring). On success, *joiner_user_id* becomes an alias of the
+    code's issuer's primary.
+
+    EFFECT: every future request that resolves to *joiner_user_id* (any header/dev-
+    override that used to reach it) instead resolves to the issuer's primary's {id,
+    role, scopeId} -- see resolve_identity(). *joiner_user_id*'s own `users` row, if one
+    exists (they may have already been a provisioned member before linking), is left
+    completely untouched by this function: it becomes ORPHANED, not deleted or merged --
+    identical semantics to transfer_ownership()'s orphaned member-scope data. It is
+    recoverable via DELETE /api/tracking/link/{aliasId} (unlink()), at which point
+    *joiner_user_id* reverts to resolving as its own persona and that row (and any data
+    scoped to it) reappears exactly as left.
+
+    Validations, ALL fail-closed, checked in this order:
+      1. *joiner_user_id* is the reserved `_SENTINEL_OWNER_ID` -- rejected outright.
+         Belt-and-braces alongside #4 below: the sentinel only ever IS the current owner
+         (resolve_owner_fallback's no-header path), so #4 already catches it
+         structurally -- this is defense-in-depth against a future refactor of #4.
+      2. The code: looked up by hash, must exist, be unexpired, and unused. Any failure
+         raises `LinkError` (400) with one generic message -- unknown, expired, and
+         already-used are deliberately NOT distinguished (no oracle for enumerating
+         which failure mode a guessed code hit).
+      3. `joiner_user_id == issuer_user_id` (self-link) -- `LinkError` (400).
+      4. *joiner_user_id* currently holds the household owner seat -- raises
+         `LinkOwnerSeatConflictError` (409): see that class's docstring for why.
+      5. *joiner_user_id* is ALREADY a primary for one or more existing `user_alias`
+         rows -- raises `LinkChainConflictError` (409). Concrete scenario this blocks:
+         suppose A is already aliased to B (`user_alias(alias_id=A, primary_user_id=B)`).
+         B's OWN session (which now resolves as B, per resolve_identity) tries to redeem
+         a code issued by C. Without this check, the code would succeed and insert
+         `user_alias(alias_id=B, primary_user_id=C)` -- now A resolves to B, which itself
+         resolves to C: a two-hop chain, silently re-parenting A's identity onto C, who
+         A's actual human never agreed to share a profile with. Checked via
+         `EXISTS (SELECT 1 FROM user_alias WHERE primary_user_id = joiner_user_id)`,
+         which also correctly catches the "joiner's raw id is itself already an alias"
+         case for free: if joiner_user_id's raw id already resolved to a primary before
+         reaching here, THAT primary is what's being tested here as "joiner_user_id" --
+         and if IT has other aliases pointing at it, the same chain risk applies.
+
+    The code row is marked `used = 1` (not deleted) so redemption is auditable and a
+    second redemption attempt with the same code always fails validation #2, never
+    silently re-links. On a genuine concurrent collision at the final INSERT (two
+    requests linking the same joiner at once -- `user_alias.alias_id` PRIMARY KEY),
+    the whole transaction (including the `used = 1` flip) rolls back and
+    `LinkChainConflictError` is raised so the code remains valid for a clean retry.
+
+    Returns ``{"aliasId": <joiner_user_id>, "primaryUserId": <issuer's primary id>}``.
+    """
+    if joiner_user_id == _SENTINEL_OWNER_ID:
+        raise LinkOwnerSeatConflictError(
+            "you hold the owner seat -- issue the code from this account instead, or "
+            "transfer the seat first"
+        )
+    row = conn.execute(
+        "SELECT issuer_user_id, expires_at, used FROM link_code WHERE code_hash = ?",
+        (_hash_link_code(code),),
+    ).fetchone()
+    if row is None or row["used"] or row["expires_at"] < _now():
+        raise LinkError("this link code is invalid, expired, or already used")
+    issuer_user_id = row["issuer_user_id"]
+    if joiner_user_id == issuer_user_id:
+        raise LinkError("cannot link an account to itself")
+    owner_row = conn.execute("SELECT user_id FROM users WHERE role = 'owner'").fetchone()
+    if owner_row is not None and owner_row["user_id"] == joiner_user_id:
+        raise LinkOwnerSeatConflictError(
+            "you hold the owner seat -- issue the code from this account instead, or "
+            "transfer the seat first"
+        )
+    chain_row = conn.execute(
+        "SELECT 1 FROM user_alias WHERE primary_user_id = ?", (joiner_user_id,)
+    ).fetchone()
+    if chain_row is not None:
+        raise LinkChainConflictError(
+            "this account already has other accounts linked to it -- unlink them first, "
+            "or issue the code from one of those linked accounts instead"
+        )
+    # SEV-001 (2026-07-23 audit): the no-chain invariant must hold on the ISSUER side too.
+    # A code issued while standalone must die the moment its issuer links away — otherwise
+    # a stale code forms user_alias(A->B) while user_alias(B->C) exists.
+    if conn.execute(
+        "SELECT 1 FROM user_alias WHERE alias_id = ?", (issuer_user_id,)
+    ).fetchone() is not None:
+        raise LinkChainConflictError(
+            "the account that issued this code has since been linked to another profile -- "
+            "generate a fresh code from that profile"
+        )
+    # SEV-002 (2026-07-23 audit): the consume IS the single-use gate — atomic
+    # compare-and-swap so two concurrent redeems of one code can never both pass the
+    # earlier SELECT and both link.
+    cur = conn.execute(
+        "UPDATE link_code SET used = 1 WHERE code_hash = ? AND used = 0",
+        (_hash_link_code(code),),
+    )
+    if cur.rowcount != 1:
+        conn.rollback()
+        raise LinkError("this link code is invalid, expired, or already used")
+    try:
+        conn.execute(
+            "INSERT INTO user_alias (alias_id, primary_user_id, linked_at) VALUES (?, ?, ?)",
+            (joiner_user_id, issuer_user_id, _now()),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        conn.rollback()
+        raise LinkChainConflictError(
+            "this account was linked concurrently by another request -- reload and retry"
+        ) from exc
+    return {"aliasId": joiner_user_id, "primaryUserId": issuer_user_id}
+
+
+def unlink_alias(conn: sqlite3.Connection, caller_id: str, alias_id: str) -> dict:
+    """Remove a link (DELETE /api/tracking/link/{aliasId}). Callable by the persona that
+    owns the alias, from ANY of that persona's currently-linked sessions -- including the
+    primary's own session, or a DIFFERENT alias of the same primary -- because
+    server.py's resolve_user() has already collapsed *caller_id* through any alias of ITS
+    OWN before this is ever called, so *caller_id* here is always the caller's resolved
+    persona id, regardless of which physical HA login made the request.
+
+    After removal, *alias_id* reverts to resolving as its OWN persona again on its very
+    next request -- its pre-link `users` row (never deleted, only orphaned by
+    redeem_link_code()) becomes reachable again, byte-for-byte unchanged (identical
+    orphan-then-reappear semantics to transfer_ownership()'s reverse-transfer case).
+
+    Raises
+    ------
+    UnknownAliasError
+        404 -- *alias_id* has no `user_alias` row (never linked, or already unlinked).
+    AliasNotOwnedError
+        403 -- *caller_id* does not own this alias (isn't its `primary_user_id`).
+    """
+    row = conn.execute(
+        "SELECT primary_user_id FROM user_alias WHERE alias_id = ?", (alias_id,)
+    ).fetchone()
+    if row is None:
+        raise UnknownAliasError(f"{alias_id!r} is not a linked account.")
+    if row["primary_user_id"] != caller_id:
+        raise AliasNotOwnedError("you do not own this linked account.")
+    conn.execute("DELETE FROM user_alias WHERE alias_id = ?", (alias_id,))
+    conn.commit()
+    return {"aliasId": alias_id, "unlinkedFrom": row["primary_user_id"]}
+
+
+def list_linked_accounts(conn: sqlite3.Connection, primary_user_id: str) -> list[dict]:
+    """Every alias currently pointing at *primary_user_id* -- GET /api/whoami's
+    `linkedAccounts` field. Unlike `list_users()` (owner-only, whole-household), this is
+    ALWAYS scoped to the CALLER'S OWN resolved persona -- any signed-in user (owner or
+    member) sees only their own linked accounts, never anyone else's.
+
+    `displayName`/`label` are read from the alias id's own (now-orphaned) `users` row --
+    it always has one by construction (redeem_link_code() only ever aliases an id that
+    just resolved ITS OWN identity via resolve_user(), which lazily provisions it first),
+    but the lookup defensively falls back to id-only fields (None/None) if that invariant
+    is ever violated, rather than raising."""
+    rows = conn.execute(
+        "SELECT alias_id, linked_at FROM user_alias WHERE primary_user_id = ? "
+        "ORDER BY linked_at", (primary_user_id,)
+    ).fetchall()
+    out = []
+    for r in rows:
+        u = get_user(conn, r["alias_id"])
+        out.append({
+            "id": r["alias_id"],
+            "displayName": u["displayName"] if u else None,
+            "label": u["label"] if u else None,
+            "linkedAt": r["linked_at"],
+        })
+    return out
 
 
 # ---------- accounts ----------

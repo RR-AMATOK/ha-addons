@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from contextlib import asynccontextmanager, closing
 from datetime import date as _date
@@ -82,6 +83,25 @@ app = FastAPI(title="Income Tax Calculator", version="1.0", lifespan=_lifespan)
 # anywhere else, so a header arriving from any other peer must be treated as absent.
 _SUPERVISOR_PEER = "172.30.32.2"
 
+# SEV-003 (2026-07-23 audit): per-caller failed link-code-redeem timestamps (monotonic
+# seconds) for the 10-failures-per-10-min throttle on /api/tracking/link. In-memory by
+# design — single uvicorn process; resets on add-on restart, which is acceptable for a
+# defense-in-depth cap on an already ingress-authenticated, 40-bit-space endpoint.
+_LINK_REDEEM_FAILURES: dict = {}
+
+
+def _trusted_single_header(request: Request, name: str) -> str | None:
+    """Read a single-valued, trimmed header with the SAME discipline `resolve_user`
+    applies to ``X-Remote-User-Id`` (SEV-S1.1-002): a header repeated on more than one
+    line, or one that strips down to nothing, is treated as wholly ABSENT rather than
+    guessed at. Callers are responsible for the peer-IP trust gate (`_SUPERVISOR_PEER`)
+    -- this helper only handles the header's shape, not who's allowed to send it."""
+    values = request.headers.getlist(name)
+    if len(values) != 1:
+        return None
+    trimmed = values[0].strip()
+    return trimmed or None
+
 
 def resolve_user(request: Request | None) -> dict:
     """The ONE identity resolver (DEC-026 "Verified contract" paragraph; DEC-031 §3).
@@ -136,10 +156,21 @@ def resolve_user(request: Request | None) -> dict:
          `users` table is still empty (first boot, sandbox, or a pre-header HA Core
          version). This closes the DEC-026 fallback vulnerability by design.
 
+    ACCOUNT LINKING (identity aliases -- "appoint admins" via linking, N HA accounts ->
+    1 profile): once a concrete `seen_id` is determined above (trusted header or dev
+    override), it is resolved ALIAS -> PRIMARY (tracking_store.resolve_identity(),
+    one hop, via the `user_alias` table) BEFORE any provisioning/role lookup happens.
+    A linked id therefore NEVER gets its own `users` row from that point on -- it
+    resolves to the EXACT SAME {id, role} its primary would get, including scopeId, so
+    linking one of the owner's OWN second logins to their primary is how "appoint an
+    admin" falls out of this design with no separate admin-grant concept. This is why
+    provisioning happens inside resolve_identity() rather than here directly (see below).
+
     Any id resolved via a trusted header or the dev override is lazily provisioned in
-    the `users` table (tracking_store.resolve_or_provision_user): the very first id
-    ever seen this way becomes 'owner'; every subsequently-seen new id becomes
-    'member' (at most one owner).
+    the `users` table (tracking_store.resolve_identity(), which delegates to
+    resolve_or_provision_user() once any alias has been collapsed to its primary): the
+    very first id ever seen this way becomes 'owner'; every subsequently-seen new id
+    becomes 'member' (at most one owner).
 
     RESERVED SENTINEL (SEV-S1.1-001): ``"__owner__"`` (tracking_store._SENTINEL_OWNER_ID)
     is not a real identity -- it is the internal data-scope slot for the owner role. If
@@ -149,10 +180,26 @@ def resolve_user(request: Request | None) -> dict:
     access to whoever supplied it. This is unreachable given the hardened ingress
     contract (HA always sends real 32-hex UUIDs; the dev override never runs in
     production), but is enforced here in code, not by convention alone.
+
+    HUMAN-READABLE NAMES (household roster naming): when a trusted header supplies an
+    id, this also reads ``X-Remote-User-Display-Name`` (preferred), falling back to
+    ``X-Remote-User-Name`` when Display-Name is absent/empty -- DEC-026's "Verified
+    contract" documents BOTH as possibly absent (older Supervisor/Core, or an HA user
+    with no display name configured). Same single-value + trim-once discipline as the
+    id itself (SEV-S1.1-002): a duplicated or all-whitespace header is treated as
+    absent, never guessed at. The captured value (or None) is passed to
+    ``resolve_or_provision_user`` — stored at first provisioning and refreshed on a
+    later request whenever it changes (people rename their HA account); it is NEVER
+    read from the dev override or owner-fallback paths, so a sandbox session's id
+    doubles as its own name there, matching pre-this-feature behavior. When neither
+    header is ever sent, the roster falls back to the owner-editable ``label``
+    (PATCH /api/tracking/users/{id}) -- this is a complete fallback, not a partial one:
+    a pre-header Supervisor version or a service account can still get a friendly name.
     """
     client = getattr(request, "client", None)
     peer_host = getattr(client, "host", None) if client is not None else None
     header_id = None
+    header_display_name = None
     if peer_host == _SUPERVISOR_PEER:
         header_values = request.headers.getlist("X-Remote-User-Id")
         if len(header_values) == 1:
@@ -164,6 +211,10 @@ def resolve_user(request: Request | None) -> dict:
             trimmed = header_values[0].strip()
             if trimmed:
                 header_id = trimmed
+                header_display_name = (
+                    _trusted_single_header(request, "X-Remote-User-Display-Name")
+                    or _trusted_single_header(request, "X-Remote-User-Name")
+                )
 
     # Dev-override precedence: trusted header always wins; then the env pin; then the
     # per-request ?user= param; then the sticky sandbox cookie set by GET / (?user=...).
@@ -194,7 +245,14 @@ def resolve_user(request: Request | None) -> dict:
 
     with closing(tracking_store.connect()) as c:
         if seen_id:
-            user = tracking_store.resolve_or_provision_user(c, seen_id)
+            # header_display_name is only ever non-None when header_id was resolved
+            # (it's assigned inside that same `if trimmed:` block above), and header_id
+            # always wins seen_id's precedence when present -- so this is never a stray
+            # header name riding along with a dev-override id. resolve_identity()
+            # collapses any alias to its primary (account linking) BEFORE this ever
+            # provisions/looks up a role -- see this function's ACCOUNT LINKING
+            # paragraph above.
+            user = tracking_store.resolve_identity(c, seen_id, display_name=header_display_name)
         else:
             user = tracking_store.resolve_owner_fallback(c)
     user["scopeId"] = "__owner__" if user["role"] == "owner" else user["id"]
@@ -2420,13 +2478,46 @@ def whoami_endpoint(request: Request) -> dict:
     criteria). Always resolves via resolve_user() — never reads the ingress header
     directly. The owner sees the full picture (their own id/role plus the provisioned
     household roster); a member sees ONLY their own id and role — never who else is
-    in the household."""
+    in the household.
+
+    Human-readable names: every roster entry in `users` (owner included) carries
+    `displayName` (header-captured, may be None) and `label` (owner-edited via PATCH
+    /api/tracking/users/{id}, may be None) — render-time precedence is `label ||
+    displayName || id` (index.html's owner-transfer picker). The caller's own
+    top-level entry gains the same two fields, whichever branch they're in, so a
+    member who never sees the roster can still learn their own name.
+
+    ACCOUNT LINKING: every caller (owner or member) also gets `linkedAccounts` —
+    the accounts currently aliased to THEIR OWN resolved persona (server.py's
+    resolve_user() already collapsed the caller's own identity through any alias of
+    its own before this ever runs, so `user["id"]` here is always a primary). This is
+    always self-scoped, unlike `users` — a member sees their own linkedAccounts just
+    like the owner sees theirs, never anyone else's. The owner-only `users` roster
+    array no longer lists ids that are currently aliased to something (see
+    tracking_store.list_users()'s docstring) — they're reachable only via
+    `linkedAccounts` now, not as independent roster rows."""
     user = resolve_user(request)
-    if user["role"] == "owner":
-        with closing(tracking_store.connect()) as c:
+    with closing(tracking_store.connect()) as c:
+        linked_accounts = tracking_store.list_linked_accounts(c, user["id"])
+        if user["role"] == "owner":
             users = tracking_store.list_users(c)
-        return {"id": user["id"], "role": user["role"], "users": users}
-    return {"id": user["id"], "role": user["role"]}
+            own = next((u for u in users if u["id"] == user["id"]), None)
+            return {
+                "id": user["id"],
+                "role": user["role"],
+                "displayName": own["displayName"] if own else None,
+                "label": own["label"] if own else None,
+                "users": users,
+                "linkedAccounts": linked_accounts,
+            }
+        own = tracking_store.get_user(c, user["id"])
+    return {
+        "id": user["id"],
+        "role": user["role"],
+        "displayName": own["displayName"] if own else None,
+        "label": own["label"] if own else None,
+        "linkedAccounts": linked_accounts,
+    }
 
 
 # ----- owner transfer (SEV-004 follow-up, addon/DOCS.md; 0.2.1 explicitly deferred this) -----
@@ -2469,3 +2560,186 @@ def owner_transfer_endpoint(m: OwnerTransferModel, request: Request) -> dict:
             raise HTTPException(status_code=404, detail=str(e))
         except tracking_store.OwnerTransferConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
+
+
+# ----- owner-editable roster label (human-readable household roster names) -----
+
+_USER_LABEL_MAX_LEN = 64
+
+
+class UserLabelModel(BaseModel):
+    label: str = Field(...)
+
+
+@app.patch("/api/tracking/users/{user_id}")
+def set_user_label_endpoint(user_id: str, m: UserLabelModel, request: Request) -> dict:
+    """Owner-editable fallback name for a household member -- covers Supervisor
+    versions that never send X-Remote-User-Display-Name/-Name (pre-2023.08.2) or
+    service accounts, where resolve_user()'s header capture has nothing to work with.
+    `label` wins over the header-captured `displayName` at render time (index.html's
+    owner-transfer picker: label || displayName || id).
+
+    Owner-only (require_owner) -- a member gets 403 before this ever runs, same
+    posture as every other roster-mutating control.
+
+    Body: ``{"label": "..."}``. The value is stripped server-side; an empty (or
+    all-whitespace) string CLEARS the label (stored as NULL), matching "leave it
+    blank to fall back to the header name / raw id." 422 if the stripped value
+    exceeds `_USER_LABEL_MAX_LEN` characters. 400 if `user_id` is the reserved
+    `__owner__` data-scope sentinel (SEV-S1.1-001) -- never a real household member.
+    404 if `user_id` has never been provisioned (must open the app at least once
+    first, DEC-026/031). 200 ``{"id", "label"}`` on success.
+    """
+    require_owner(request)
+    stripped = m.label.strip()
+    if len(stripped) > _USER_LABEL_MAX_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"label must be {_USER_LABEL_MAX_LEN} characters or fewer",
+        )
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.set_user_label(c, user_id, stripped or None)
+        except tracking_store.UserLabelError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except tracking_store.UnknownUserError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+
+# ----- account linking (identity aliases -- "appoint admins" via linking) -----
+#
+# User requirement (condensed): "I want both my admin accounts in HA to be the same
+# profile because both are me, but I want other users (dashboard and my partner) to
+# have their dedicated instance." I.e. N HA accounts -> 1 profile (persona), opt-in
+# per account via a two-sided link-code handshake; unlinked accounts stay dedicated
+# personas. Every account linked to a persona shares that persona's role wholesale --
+# linking the owner's second login to their primary IS how "appoint an admin" falls
+# out of this design, with no separate admin-grant concept. NO new HA API surface is
+# introduced (DEC-021) -- this is entirely a `users`/`user_alias`/`link_code` table
+# affair behind the existing ingress-authenticated identity resolver.
+
+class LinkCodeRedeemModel(BaseModel):
+    code: str = Field(...)
+
+
+@app.post("/api/tracking/link-code")
+def create_link_code_endpoint(request: Request) -> dict:
+    """Issue a single-use, 10-minute account-linking code for the CALLER's own persona.
+    ANY signed-in persona may call this -- owner or member alike; there is no
+    `require_owner` gate, because linking is "make another one of MY OWN accounts share
+    this profile," not a household-admin action on someone else. Response:
+    ``{"code": "<8 chars>", "expiresAt": "<iso8601>"}``.
+
+    THREAT MODEL: the plaintext code is the ONLY secret in this handshake -- possessing
+    it, within its 10-minute TTL, is treated as proof "this browser also controls the
+    issuer's account," without ever comparing HA credentials directly. It is generated
+    with `secrets.choice` over a 40-bit-entropy typo-resistant alphabet (no `0`/`O`/`1`/
+    `I`) and only its SHA-256 hash is ever persisted (tracking_store.create_link_code) --
+    a stolen DB file, WAL, or `/api/tracking/export` backup can never recover a still-
+    live code, and the plaintext itself is returned exactly once, in this response body,
+    never logged. Because redemption GRANTS THE JOINER WHATEVER ROLE THE ISSUER'S
+    PRIMARY HOLDS -- immediately, including owner rights if the issuer is (or later
+    becomes) the household owner -- a code intercepted in flight during its 10-minute
+    window is a genuine privilege-escalation vector. Mitigated by: (a) ingress-only
+    exposure, no direct port (DEC-021), (b) single-use (redemption invalidates it
+    immediately -- tracking_store.redeem_link_code marks `used=1`), (c) the short TTL,
+    and (d) generating a new code deletes the issuer's prior outstanding one first
+    (bounds the live-code surface to at most one per issuer at a time -- rate-limit
+    sanity, not a formal rate limiter). There is deliberately no server-side notification
+    to the issuer when their code is redeemed (v1) -- the issuer must be present on their
+    OTHER device to type the code there in the first place, which is itself the
+    real-world proof of intent this whole flow is modeling.
+    """
+    user = resolve_user(request)
+    with closing(tracking_store.connect()) as c:
+        return tracking_store.create_link_code(c, user["id"])
+
+
+@app.post("/api/tracking/link")
+def redeem_link_code_endpoint(m: LinkCodeRedeemModel, request: Request) -> dict:
+    """Redeem a link code, called from the JOINING account's OWN session. The endpoint
+    operates purely on the caller's own resolved identity (`resolve_user(request)`),
+    which is always a PRIMARY by construction -- resolve_user() already collapsed any
+    pre-existing alias of the caller's own before this handler ever runs. On success the
+    caller's id becomes an alias of the code's issuer's primary; see
+    tracking_store.redeem_link_code's docstring for the full mechanics, orphan-data
+    semantics, and no-chain proof. Body: ``{"code": "..."}``. Success 200:
+    ``{"aliasId", "primaryUserId"}``.
+
+    THREAT MODEL: fail-closed on every validated axis, checked inside
+    tracking_store.redeem_link_code in this order:
+      - **Bad code (400):** unknown, expired, or already-used codes are looked up by
+        hash only and return ONE generic message -- there is no oracle that lets an
+        attacker distinguish "never existed," "expired," or "already redeemed," which
+        would otherwise leak information useful for guessing or timing attacks against
+        the (already large, 40-bit) code space.
+      - **Self-link (400):** joiner == issuer is rejected outright -- a no-op that would
+        otherwise silently succeed and clutter the alias table.
+      - **Owner-seat holder as joiner (409):** if the caller currently holds the
+        household owner seat, linking them away from it would strand
+        `scopeId='__owner__'` -- nobody would resolve to it until a future
+        owner-transfer, an availability bug dressed as a feature. The caller is told the
+        fix is directional: issue the code from the owner account instead (making the
+        owner the primary), or transfer the seat first.
+      - **No-chain (409):** if the caller (joiner) is ALREADY a primary for one or more
+        existing aliases, linking it to a NEW primary would leave those existing aliases
+        silently re-parented onto a THIRD party through a two-hop chain -- structurally
+        forbidden (an alias's primary must never itself be an alias). This is the one
+        check that most directly defends the "N accounts -> 1 profile" invariant this
+        entire feature exists to provide: without it, profile identity could drift
+        transitively instead of staying a flat, auditable one-hop mapping.
+    """
+    joiner = resolve_user(request)
+    # SEV-003 (2026-07-23 audit): per-caller failed-redeem throttle. In-memory is fine
+    # (single uvicorn process); 10 failures / 10 min -> 429. A success clears the slate.
+    now = time.monotonic()
+    window = _LINK_REDEEM_FAILURES.setdefault(joiner["id"], [])
+    window[:] = [t for t in window if now - t < 600]
+    if len(window) >= 10:
+        raise HTTPException(status_code=429,
+                            detail="too many failed link attempts -- try again later")
+    with closing(tracking_store.connect()) as c:
+        try:
+            result = tracking_store.redeem_link_code(c, joiner["id"], m.code)
+            _LINK_REDEEM_FAILURES.pop(joiner["id"], None)
+            return result
+        except tracking_store.LinkError as e:
+            window.append(now)
+            raise HTTPException(status_code=400, detail=str(e))
+        except tracking_store.LinkOwnerSeatConflictError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except tracking_store.LinkChainConflictError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.delete("/api/tracking/link/{alias_id}")
+def unlink_account_endpoint(alias_id: str, request: Request) -> dict:
+    """Remove a link. Callable by the persona that owns it, from ANY of its currently-
+    linked sessions -- the primary's own session, or a DIFFERENT alias of the same
+    persona -- because `resolve_user(request)` has already collapsed the CALLER's own
+    identity through any alias of its own before this ever runs, so `user["id"]` here is
+    always the owning persona's id regardless of which physical HA login made the
+    request. Success 200: ``{"aliasId", "unlinkedFrom"}``.
+
+    THREAT MODEL: ownership is checked by RESOLVED identity, not by trusting the caller
+    to only ever pass their own alias ids -- `tracking_store.unlink_alias` independently
+    verifies `caller_id == user_alias.primary_user_id` before deleting anything, so one
+    persona can never unlink an alias belonging to a DIFFERENT persona by guessing or
+    enumerating alias ids (403, `AliasNotOwnedError`), and unlinking a never-linked or
+    already-unlinked id 404s rather than silently no-op-succeeding (`UnknownAliasError`)
+    -- both distinguishable failure modes are safe to expose here (unlike the redeem
+    path above) because they only ever reveal information about links the CALLER already
+    has some relationship to (either they own it, or they guessed a nonexistent id --
+    neither leaks another persona's link graph). After removal, `alias_id` reverts to
+    resolving as its own persona on its very next request -- its pre-link data (never
+    deleted, only orphaned by the original link) becomes reachable again.
+    """
+    user = resolve_user(request)
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.unlink_alias(c, user["id"], alias_id)
+        except (tracking_store.UnknownAliasError, tracking_store.AliasNotOwnedError):
+            # SEV-005 (2026-07-23 audit): not-owned vs not-found must be
+            # indistinguishable — same status AND same message — or a member can
+            # enumerate which ids are currently aliases.
+            raise HTTPException(status_code=404, detail="no such linked account.")

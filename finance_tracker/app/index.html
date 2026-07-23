@@ -739,6 +739,8 @@
           <label class="backup-popup-radio"><input type="radio" name="theme_choice" value="dark"> Classic dark</label>
         </div>
         <div style="border-top:1px solid var(--line);margin:8px 0"></div>
+        <button id="btnLinkedAccounts">Linked accounts&hellip;</button>
+        <div style="border-top:1px solid var(--line);margin:8px 0"></div>
         <button id="btnOwnerTransfer">Transfer ownership&hellip;</button>
         <div style="border-top:1px solid var(--line);margin:8px 0"></div>
         <button id="btnReset">Reset</button>
@@ -748,6 +750,21 @@
         <div class="mini muted" style="margin-bottom:6px">They keep all of the household's data and admin actions; you become an ordinary member with a fresh, empty workspace.</div>
         <div id="owner_transfer_list" class="mini">Loading&hellip;</div>
         <button class="seed-btn" id="owner_transfer_cancel" type="button" style="margin-top:8px;width:100%">Cancel</button>
+      </div>
+      <div id="linked_accounts_panel" class="backup-popup settings-popup" aria-labelledby="linked_accounts_panel_h" hidden>
+        <div class="subhead" id="linked_accounts_panel_h" style="margin-top:0">Linked accounts</div>
+        <div class="mini muted" style="margin-bottom:6px">Link another sign-in that's also you (e.g. a second Home Assistant admin account) so both share this one profile and its access &mdash; unlinked accounts stay their own separate workspace.</div>
+        <div id="linked_accounts_list" class="mini">Loading&hellip;</div>
+        <div style="border-top:1px solid var(--line);margin:10px 0"></div>
+        <button class="seed-btn" id="link_code_gen_btn" type="button" style="width:100%">Generate link code</button>
+        <div id="link_code_display" class="mini" hidden style="margin-top:6px"></div>
+        <div style="border-top:1px solid var(--line);margin:10px 0"></div>
+        <div class="mini muted" style="margin-bottom:4px">Have a code from your other account?</div>
+        <div style="display:flex;gap:6px">
+          <input id="link_code_input" type="text" placeholder="8-character code" maxlength="8" style="flex:1;min-width:0;text-transform:uppercase">
+          <button class="seed-btn" id="link_code_submit_btn" type="button">Link</button>
+        </div>
+        <button class="seed-btn" id="linked_accounts_cancel" type="button" style="margin-top:8px;width:100%">Close</button>
       </div>
     </span>
     <input type="file" id="fileImport" accept="application/json" style="display:none" />
@@ -2249,7 +2266,8 @@ const CAD_NEXT  = { annual: 'monthly', monthly: 'paycheck', paycheck: 'annual' }
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
 window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence,
-  sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange };
+  sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
+  rosterDisplayName };
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -2969,8 +2987,12 @@ function restoreState(s) {
 //     (#btnExport / #btnBackupMenu / #backup_popup, covering full/actuals-only/settings-only
 //     backups AND the transactions CSV export) all front owner-only server endpoints that
 //     already 403 members; hiding them here is belt-and-braces on top of that.
-// What-If Mode, Print/PDF, the theme picker, and the disclaimer toggle are left untouched —
-// members are full users of the planning tools, only destructive/export actions are gated.
+// What-If Mode, Print/PDF, the theme picker, the disclaimer toggle, and "Linked accounts…"
+// are left untouched — members are full users of the planning tools, only destructive/
+// export actions (plus the household-admin-only "Transfer ownership…") are gated. Account
+// linking is deliberately NOT owner-only: it links one of the CALLER'S OWN accounts, not a
+// household-admin action on someone else (server.py's create_link_code_endpoint has no
+// require_owner gate either — see its threat-model docstring).
 function applyMemberGating() {
   if (window.__role !== 'member') return;
   const backupSplit = document.querySelector('.actions .backup-split');
@@ -2998,6 +3020,19 @@ function applyMemberGating() {
 // trigger button at all (applyMemberGating above removes it); the server independently 403s a
 // member who somehow calls the endpoint directly (require_owner) — belt-and-braces, same
 // posture as every other owner-only control in this popup.
+// Household roster human-readable name resolution (pure, DOM-free — unit-testable via
+// window.__clientMath: tests/test_client_math.js). Precedence: `label` (owner-edited,
+// PATCH /api/tracking/users/{id}) wins over `displayName` (header-captured by
+// server.py's resolve_user()) wins over the raw id — mirrors GET /api/whoami's field
+// names exactly. `shortId` is the first-8-chars disambiguator shown alongside a
+// resolved name (two members can share a label/displayName); `isId` tells the caller
+// whether the resolved name IS the raw id, so it can skip the redundant suffix.
+function rosterDisplayName(u) {
+  const id = (u && u.id) || '';
+  const label = u && typeof u.label === 'string' ? u.label.trim() : '';
+  const name = label || (u && u.displayName) || id;
+  return { name, shortId: String(id).slice(0, 8), isId: name === id };
+}
 async function renderOwnerTransferList() {
   const el = $('owner_transfer_list');
   if (!el) return;
@@ -3019,18 +3054,33 @@ async function renderOwnerTransferList() {
     return;
   }
   el.innerHTML = '';
+  // Human-readable names via rosterDisplayName() (label > displayName > id) — built via
+  // textContent throughout, never innerHTML, so a hostile/unexpected name string can
+  // never inject markup. The short id is only shown when the resolved name ISN'T
+  // already the raw id (no point suffixing an id onto itself).
   members.forEach(u => {
+    const { name, shortId, isId } = rosterDisplayName(u);
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = u.id;
     btn.title = 'Transfer ownership to this member';
-    btn.onclick = () => ownerTransferTo(u.id);
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = name;
+    btn.appendChild(nameSpan);
+    if (!isId) {
+      const idSpan = document.createElement('span');
+      idSpan.className = 'muted';
+      idSpan.style.marginLeft = '6px';
+      idSpan.style.fontSize = 'var(--fs-xs)';
+      idSpan.textContent = shortId;
+      btn.appendChild(idSpan);
+    }
+    btn.onclick = () => ownerTransferTo(u.id, name);
     el.appendChild(btn);
   });
 }
-async function ownerTransferTo(toUserId) {
+async function ownerTransferTo(toUserId, displayLabel) {
   const ok = confirm(
-    toUserId + ' becomes the owner and gains all household data + admin actions; ' +
+    (displayLabel || toUserId) + ' becomes the owner and gains all household data + admin actions; ' +
     'you become a member with a fresh workspace; this cannot be undone in-app — the new ' +
     'owner would transfer back.\n\nContinue?'
   );
@@ -3056,6 +3106,125 @@ async function ownerTransferTo(toUserId) {
   // naturally hydrates whichever scope it now resolves to instead of showing stale local state.
   location.reload();
 }
+
+// ---------- Account linking (identity aliases — "appoint admins" via linking) ----------
+// Visible to EVERY user (owner and member alike, unlike the owner-transfer picker above) —
+// linking is "make another one of MY OWN accounts share this profile," not a household-admin
+// action on someone else. GET /api/whoami's `linkedAccounts` array (server.py, always scoped
+// to the caller's own resolved persona) drives the list; rosterDisplayName() (defined above,
+// for the owner-transfer picker) is reused as-is since linkedAccounts entries share the exact
+// same {id, displayName, label} shape as a roster row.
+async function renderLinkedAccountsPanel() {
+  const listEl = $('linked_accounts_list');
+  const codeDisplay = $('link_code_display');
+  if (codeDisplay) { codeDisplay.hidden = true; codeDisplay.innerHTML = ''; }
+  if (!listEl) return;
+  listEl.textContent = 'Loading…';
+  let data;
+  try {
+    const r = await fetch('/api/whoami');
+    if (!r.ok) throw new Error('whoami ' + r.status);
+    data = await r.json();
+  } catch (e) {
+    listEl.innerHTML = '<div class="warn-box">Could not load linked accounts.</div>';
+    return;
+  }
+  const linked = data.linkedAccounts || [];
+  if (!linked.length) {
+    listEl.innerHTML = '<div class="mini muted">No other accounts linked yet.</div>';
+    return;
+  }
+  listEl.innerHTML = '';
+  // textContent throughout (never innerHTML for the name) — same hostile-name defense as
+  // the owner-transfer roster list above.
+  linked.forEach(u => {
+    const { name, shortId, isId } = rosterDisplayName(u);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px';
+    const label = document.createElement('span');
+    label.textContent = isId ? name : (name + ' (' + shortId + ')');
+    row.appendChild(label);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Unlink';
+    btn.title = 'Unlink this account';
+    btn.onclick = () => unlinkAccount(u.id, name);
+    row.appendChild(btn);
+    listEl.appendChild(row);
+  });
+}
+async function generateLinkCode() {
+  const codeDisplay = $('link_code_display');
+  try {
+    const r = await fetch('/api/tracking/link-code', { method: 'POST' });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch (e) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    if (!codeDisplay) return;
+    codeDisplay.hidden = false;
+    codeDisplay.innerHTML = '';
+    const codeSpan = document.createElement('div');
+    codeSpan.style.cssText = 'font-family:monospace;font-size:1.15em;font-weight:bold;letter-spacing:2px;padding:6px;background:var(--chip);border-radius:4px;text-align:center';
+    codeSpan.textContent = data.code;
+    codeDisplay.appendChild(codeSpan);
+    const exp = document.createElement('div');
+    exp.className = 'mini muted';
+    exp.style.marginTop = '4px';
+    exp.textContent = 'Enter this on your other account within 10 minutes (expires ' +
+      new Date(data.expiresAt).toLocaleTimeString() + ').';
+    codeDisplay.appendChild(exp);
+  } catch (e) {
+    alert('Could not generate a link code: ' + (e.message || e));
+  }
+}
+async function submitLinkCode() {
+  const input = $('link_code_input');
+  const code = input ? input.value.trim() : '';
+  if (!code) return;
+  try {
+    const r = await fetch('/api/tracking/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code }),
+    });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch (e) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+  } catch (e) {
+    alert('Link failed: ' + (e.message || e));
+    return;
+  }
+  // Same reload rationale as ownerTransferTo above — a fresh GET /api/whoami re-resolves
+  // window.__role/__scopeId and re-arms the S1.2 scopeId-mismatch guard so this browser
+  // naturally hydrates whatever scope it now resolves to.
+  location.reload();
+}
+async function unlinkAccount(aliasId, displayLabel) {
+  const ok = confirm(
+    'Unlink ' + (displayLabel || aliasId) + '? It stops sharing this profile and reverts ' +
+    'to its own separate workspace — any data it had before linking becomes reachable ' +
+    'there again.\n\nContinue?'
+  );
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/tracking/link/' + encodeURIComponent(aliasId), { method: 'DELETE' });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).detail || ''; } catch (e) {}
+      throw new Error(detail || ('HTTP ' + r.status));
+    }
+  } catch (e) {
+    alert('Unlink failed: ' + (e.message || e));
+    return;
+  }
+  renderLinkedAccountsPanel();
+}
+
 function reset() {
   if (wiBlockIfActive('reset')) return;
   if (!confirm('Reset all values to defaults?')) return;
@@ -4091,6 +4260,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.addEventListener('click', e => { if (!panel.hidden && !panel.contains(e.target) && e.target !== b) panel.hidden = true; });
       document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
     }
+  }
+  // Linked-accounts panel: same sibling-popup pattern as the owner-transfer picker above,
+  // but never removed by applyMemberGating() below — visible to owner AND member alike.
+  { const b = $('btnLinkedAccounts'), panel = $('linked_accounts_panel'), cancelBtn = $('linked_accounts_cancel');
+    if (b && panel) {
+      b.onclick = () => { panel.hidden = false; renderLinkedAccountsPanel(); };
+      if (cancelBtn) cancelBtn.onclick = () => { panel.hidden = true; };
+      document.addEventListener('click', e => { if (!panel.hidden && !panel.contains(e.target) && e.target !== b) panel.hidden = true; });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+    }
+    const genBtn = $('link_code_gen_btn'); if (genBtn) genBtn.onclick = generateLinkCode;
+    const subBtn = $('link_code_submit_btn'); if (subBtn) subBtn.onclick = submitLinkCode;
   }
   applyMemberGating();
   { const x = $('btnDisclaimerX'); if (x) x.onclick = () => { setDisclaimerDismissed(true); applyDisclaimerVisibility(); }; }

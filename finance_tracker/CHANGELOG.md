@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2
+
+- **Link your accounts.** If one person has multiple Home Assistant logins,
+  link them into a single profile: Settings gear → Linked accounts →
+  generate a code on the profile you're keeping, enter it from the other
+  account within 10 minutes. Both logins then share the same data and
+  rights; unlink any time. Codes are single-use and rate-limited; treat a
+  live code like a house key — whoever enters it joins the profile that
+  issued it.
+- **Names instead of ids.** The household roster, transfer-ownership picker,
+  and linked-accounts list now show each account's Home Assistant display
+  name (with a short id suffix); the owner can rename entries in-app where
+  no name is available.
+
 ## 0.3.1
 
 - **Sinking funds.** Set aside money monthly for irregular expenses (car
