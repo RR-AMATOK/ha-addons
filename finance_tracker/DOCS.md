@@ -50,24 +50,42 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   by default. Open Settings to switch between **Full light**, **Shiro accent** (dark app,
   gold accent), and **Classic dark** — your choice is remembered in the browser. If no
   theme is bundled, the app falls back to the classic dark palette automatically.
-- **Multiple household users:** since 0.2.1 the panel opens to every Home Assistant
-  user in the household, not just admins. **Restore**, both backup downloads (full and
-  Actuals only), and the transactions CSV export are restricted to the household
-  **owner** — other members won't see those buttons and get a friendly refusal if they
-  try the underlying API directly.
+- **Sinking funds (since 0.3.1):** for irregular expenses (car maintenance, travel),
+  create a fund in the Budget tab with an optional target and reserve the monthly
+  amount in your plan with one tap. In Actuals, link a real transaction as a
+  contribution to or draw from the fund — the fund lens shows the reserve building up
+  and how much of a big expense was pre-funded, so a fully-funded draw doesn't count
+  as going over plan.
+- **Ledger filter (since 0.3.3):** the Actuals ledger's filter is a single, compact
+  **Filter** control instead of a wall of tag chips — open it to search and pick a tag,
+  or click a card or category anywhere else in the app to filter the ledger to it. The
+  active filter always shows as one removable chip; a month with no matches explains
+  the active filter instead of rendering an empty table.
+- **Multiple household users:** the panel opens to every Home Assistant user in the
+  household, not just admins (since 0.2.1). **Since 0.3.0, each household member has
+  their own data** — transactions, accounts, budget, goals, ventures, sinking funds,
+  and tax/plan inputs are all scoped to the person who's logged in and synced to their
+  profile server-side, instead of one shared dataset with browser-local settings. Open
+  Finance as yourself and you see (and can only change) your own numbers.
 
-  > **Note — one shared dataset.** This add-on does not yet have per-user profiles.
-  > Every household member who opens the panel is reading and writing the **same**
-  > actuals ledger — if a member logs a transaction, it lands in the same shared data
-  > as everyone else's, with no per-user separation. Plan and tax inputs are stored
-  > per-device (in each browser), not per-user on the server. Treat this as one
-  > household account shared by everyone with access, not a multi-user tool with
-  > individual data — that's planned for a later release. One side effect: the
-  > **Back up** button is owner-only in 0.2.1 (it bundles the full/Actuals
-  > backups with the per-device "Settings only" backup), so members can't yet
-  > download their own settings-only backup file — their plan/tax inputs are
-  > still safely stored in their browser, they just can't export them until
-  > per-user profiles land.
+  > **Owner-only actions.** **Restore**, both backup downloads (full and Actuals only),
+  > and the transactions CSV export are restricted to the household **owner** — other
+  > members won't see those buttons and get a friendly refusal if they try the
+  > underlying API directly. The full backup is labeled **household-full**: it contains
+  > every member's data, not just the owner's.
+
+  > **Linked accounts (since 0.3.2).** If one person has more than one Home Assistant
+  > login (e.g. two admin accounts), link them into a single profile instead of ending
+  > up with two separate personas: Settings gear → **Linked accounts** → generate a
+  > code on the profile you're keeping → enter it from the other account within 10
+  > minutes. Both logins then share the same data and rights; unlink any time from
+  > either side. Codes are single-use and rate-limited — treat a live code like a house
+  > key, since whoever enters it joins the profile that issued it. The account
+  > currently holding the owner seat can't be linked away from itself (transfer
+  > ownership first if you need to link it). The household roster and the
+  > transfer-ownership picker show each account's Home Assistant display name (with a
+  > short id suffix) rather than a raw id; the owner can rename entries in-app where no
+  > name is available.
 
   > **Note — the first person in becomes the owner.** With `panel_admin: false`,
   > whichever household member opens **Finance** first becomes the owner — the
