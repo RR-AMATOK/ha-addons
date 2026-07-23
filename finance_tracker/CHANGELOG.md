@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.3
+
+- **A cleaner transactions filter.** The wall of tag chips is gone — one
+  compact "Filter" control opens a searchable picker, and the active filter
+  (tag, card, or category) shows as a single removable chip. A month with
+  no matches now explains the active filter instead of showing an empty
+  table.
+- **Forms look sharper.** Input fields stand out clearly from their cards in
+  both themes (the light theme especially), with a theme-matched focus
+  glow, and every input column now starts and ends on the same pixel —
+  no more ragged edges from differing unit labels.
+- Fixed: the link-code entry box was squeezed to a sliver by its button;
+  stacked buttons in the settings panels were offset a few pixels from
+  each other; a styling leak drew a double border around inputs.
+
 ## 0.3.2
 
 - **Link your accounts.** If one person has multiple Home Assistant logins,

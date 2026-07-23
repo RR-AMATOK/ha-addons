@@ -51,6 +51,15 @@
     /* Input-unit chip ($/%/yr) colors (part C2): dark defaults byte-for-byte the prior
        .input-pair .unit / .unit.cad:hover literals; shiro-full overrides these three below. */
     --unit-bg: #1a1e28; --unit-hover-bg: #232a3c;
+    /* Field-pop treatment (0.3.3): one crisp, tactile input surface app-wide. Text inputs
+       (.input-pair, bare input/select/textarea, .tab-panel select, .ac-amt) share --field fill +
+       --field-border (a step crisper than the structural --line) + a subtle inset --field-shadow;
+       focus swaps the inset for --field-focus-ring. Dark defaults here; applyHaTheme() overrides
+       border+shadow for shiro-full, and --field itself already remaps per theme. */
+    --field-border: #363d4c;
+    --field-shadow: inset 0 1px 2px rgba(0,0,0,0.28);
+    --field-focus-ring: 0 0 0 2px rgba(122,167,255,0.32);                              /* fallback first */
+    --field-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent); /* themed; keep BOTH lines */
     /* Type scale (TODO-230 typography audit): size / weight / family / letter-spacing / line-height tokens.
        Folds vs the pre-audit sizes are intentional: 15->16 (verdict tiles + .ac-add), 19->18 (composer $ unit),
        22->24 (composer amount input). */
@@ -109,6 +118,11 @@
   .settings-split { position: relative; display: inline-flex; }
   .settings-popup button { display: block; width: 100%; text-align: left; margin-bottom: 6px; }
   .settings-popup button:last-child { margin-bottom: 0; }
+  /* Stacked popup controls must share one left/right origin: .seed-btn ships margin-left:6px
+     for INLINE use (e.g. "use planned →" beside a field), which pushes full-width stacked popup
+     buttons 6px right of the sibling radios / code-input row (user: "boxes do not start on the
+     same x axis"). Zero it for seed-btns inside any backup/settings popup panel. */
+  .backup-popup .seed-btn { margin-left: 0; }
   /* S1.2 pre-migration snapshot dialog (amended 2026-07-22 — replaces the old auto-triggered
      download + confirm() per the user's "can we not have this auto pop up to download a backup?"
      request; see docs/s1_2-migration-design.md §5 amendment and runPreMigrationSnapshot below).
@@ -151,14 +165,16 @@
   .row { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; margin: 6px 0; }
   .row label { color: var(--muted); font-size: var(--fs-md); }
   .row .hint { color: var(--muted); font-size: var(--fs-xs); }
-  .input-pair { display: inline-flex; align-items: stretch; gap: 0;
-    border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+  .input-pair { display: inline-flex; align-items: stretch; gap: 0; width: 168px;
+    border: 1px solid var(--field-border); border-radius: 6px; overflow: hidden;
+    background: var(--field); box-shadow: var(--field-shadow); }
+  .input-pair:focus-within { border-color: var(--accent); box-shadow: var(--field-focus-ring); }
   .input-pair input {
-    background: transparent; border: none; color: var(--text); outline: none;
-    padding: 6px 8px; width: 124px; font: inherit; text-align: right;
+    background: transparent; border: none; box-shadow: none; color: var(--text); outline: none;
+    padding: 6px 8px; flex: 1 1 auto; width: auto; min-width: 0; font: inherit; text-align: right;
   }
   .input-pair .unit {
-    display: inline-flex; align-items: center; padding: 0 8px;
+    display: inline-flex; align-items: center; justify-content: center; min-width: 2.6em; padding: 0 8px;
     color: var(--muted); font-size: var(--fs-sm); border-left: 1px solid var(--line);
     background: var(--unit-bg); cursor: pointer; user-select: none;
   }
@@ -188,9 +204,16 @@
   .salary-grid .field .input-pair .unit { padding: 0 6px; }
   .salary-grid .field.active .input-pair { border-color: var(--accent); }
   .salary-grid .field.active .lbl { color: var(--accent); }
-  select, input[type="text"], input[type="number"] {
-    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-    padding: 6px 8px; border-radius: 6px; font: inherit;
+  /* Bare field surfaces (NOT wrapped in .input-pair): selects, standalone inputs, textareas take
+     the fill+border+shadow directly. Inputs INSIDE .input-pair are excluded via :not(.input-pair *)
+     so the WRAPPER stays the sole field surface — exactly ONE border per control group, never a
+     nested double border (the wrapper carries fill/border/shadow; the inner input stays transparent). */
+  select, input[type="text"]:not(.input-pair *), input[type="number"]:not(.input-pair *), input[type="search"]:not(.input-pair *), textarea {
+    background: var(--field); color: var(--text); border: 1px solid var(--field-border);
+    padding: 6px 8px; border-radius: 6px; font: inherit; box-shadow: var(--field-shadow);
+  }
+  select:focus, input[type="text"]:not(.input-pair *):focus, input[type="number"]:not(.input-pair *):focus, input[type="search"]:not(.input-pair *):focus, textarea:focus {
+    border-color: var(--accent); box-shadow: var(--field-focus-ring); outline: none;
   }
   /* Actuals ledger — inline-edit fields: clearly "in edit mode" against the dark row.
      td-qualified to beat the global input rule + `.tab-panel select` (both 0,1,1). */
@@ -228,7 +251,29 @@
     border-radius: 8px; padding: 1px 7px; font-size: var(--fs-2xs); text-decoration: none; white-space: nowrap;
   }
   a.ac-tag:hover { color: var(--text); border-color: var(--line); filter: brightness(1.25); }
-  a.ac-tag.is-active { color: var(--text); outline: 1px solid var(--accent); border-color: transparent; }
+  /* DEC-036: the ledger's unified active-filter chip (tag/account/category all render through
+     this one rule now — TODO-242) — same treatment as .chip.active/button.primary. */
+  a.ac-tag.is-active { background: var(--selected-bg); color: var(--selected-ink); border-color: var(--selected-bg); font-weight: var(--fw-semibold); }
+  /* Ledger filter zone (TODO-242): "Filter ▾" control + popover, replacing the old "Filter by
+     tag:" chip wall. .filter-popup is a marker class on top of .backup-popup (same pattern as
+     .settings-popup) — surface/position/shadow are inherited, only anchor + inner layout differ. */
+  .ac-filterbar { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .ac-filter-btn { padding: 4px 10px; }
+  .ac-filter-caret { color: var(--muted); }
+  .filter-popup { left: 0; right: auto; }
+  .filter-popup .filter-title { font-size: var(--fs-sm); color: var(--muted); font-weight: var(--fw-semibold); margin: 0 0 8px; }
+  .filter-popup .filter-crossnote { font-size: var(--fs-xs); color: var(--muted); margin: 0 0 8px; }
+  .filter-search { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
+  .filter-list { max-height: 300px; overflow-y: auto; }
+  .filter-opt {
+    display: block; width: 100%; box-sizing: border-box; text-align: left; padding: 6px 8px;
+    min-height: 32px; font-size: var(--fs-sm); color: var(--text); background: transparent;
+    border: none; border-radius: 6px; cursor: pointer;
+  }
+  .filter-opt:hover { background: var(--chip); }
+  .filter-opt.is-selected { background: var(--selected-bg); color: var(--selected-ink); }
+  .filter-opt-all { border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 4px; padding-bottom: 8px; }
+  .filter-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .ac-catlink { color: inherit; text-decoration: none; cursor: pointer; }
   .ac-catlink:hover { color: var(--accent); }
   .ac-catlink.is-active { color: var(--accent); text-decoration: underline; }
@@ -315,8 +360,8 @@
   .ac-lbl { font-size: var(--fs-2xs); color: var(--muted); text-transform: uppercase; letter-spacing: var(--ls-caps); }
   .ac-field > input, .ac-field > select { width: 100%; }
   .ac-field .input-pair { width: 100%; display: inline-flex; align-items: center; }
-  .ac-amt .input-pair { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 2px 10px; }
-  .ac-amt .input-pair:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,167,255,.25); }
+  .ac-amt .input-pair { background: var(--field); border: 1px solid var(--field-border); border-radius: 8px; padding: 2px 10px; box-shadow: var(--field-shadow); }
+  .ac-amt .input-pair:focus-within { border-color: var(--accent); box-shadow: var(--field-focus-ring); }
   .ac-amt .unit, #ac_tx_partner_wrap .unit { background: none; border-left: none; padding: 0 4px 0 2px; }
   .ac-amt .unit { font-size: var(--fs-xl); color: var(--muted); }
   .ac-amt input { flex: 1; min-width: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); background: none; border: none; padding: 7px 4px; outline: none; font-variant-numeric: tabular-nums; }
@@ -498,7 +543,8 @@
      contrast (dark theme: brightness(1.15) dropped white-on-#437dff to 3.74:1, failing AA).
      Darkening only raises white-ink contrast, so it's safe in every theme. */
   .calc-btn:hover { background:var(--selected-bg); filter:brightness(0.92); }
-  .tab-panel select { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 8px; font-size:var(--fs-md); min-width:120px; }
+  .tab-panel select { background:var(--field); border:1px solid var(--field-border); color:var(--text); border-radius:6px; padding:6px 8px; font-size:var(--fs-md); min-width:120px; box-shadow:var(--field-shadow); }
+  .tab-panel select:focus { border-color:var(--accent); box-shadow:var(--field-focus-ring); outline:none; }
   .tab-panel .row label { font-size:var(--fs-md); }
   .tab-panel input[type=checkbox] { width:auto; }
   .borrower-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px 8px; align-items:end; margin:4px 0; }
@@ -652,6 +698,11 @@
     .seed-btn { min-height: 40px; }
     .ac-tool, .ac-refund-toggle { padding-block: 10px; }
     td a.ac-act-edit, td a.ac-act-del, .gl-act { padding: 9px 11px; }
+    /* Ledger filter zone (TODO-242): full-width popover + 44px tap targets below 480px. */
+    .ac-filter-btn { min-height: 44px; }
+    .filter-opt, .filter-search { min-height: 44px; box-sizing: border-box; }
+    .ac-filterbar .ac-tag.is-active { min-height: 44px; display: inline-flex; align-items: center; padding-block: 12px; }
+    .filter-popup { left: 0; right: 0; width: auto; }
   }
 
   /* landscape / short-viewport popup guard (P1) — max-height query, independent of the
@@ -760,9 +811,9 @@
         <div id="link_code_display" class="mini" hidden style="margin-top:6px"></div>
         <div style="border-top:1px solid var(--line);margin:10px 0"></div>
         <div class="mini muted" style="margin-bottom:4px">Have a code from your other account?</div>
-        <div style="display:flex;gap:6px">
-          <input id="link_code_input" type="text" placeholder="8-character code" maxlength="8" style="flex:1;min-width:0;text-transform:uppercase">
-          <button class="seed-btn" id="link_code_submit_btn" type="button">Link</button>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="link_code_input" type="text" placeholder="8-char code" maxlength="8" autocapitalize="characters" autocomplete="off" spellcheck="false" style="flex:1 1 auto;min-width:10ch;font-family:var(--font-mono);font-weight:var(--fw-bold);letter-spacing:2px;text-align:center;text-transform:uppercase">
+          <button class="seed-btn" id="link_code_submit_btn" type="button" style="width:auto;flex:0 0 auto;margin-left:0">Link</button>
         </div>
         <button class="seed-btn" id="linked_accounts_cancel" type="button" style="margin-top:8px;width:100%">Close</button>
       </div>
@@ -1768,7 +1819,7 @@
 
           <div class="subhead" style="margin-top:14px">Paste from Excel / import CSV</div>
           <div class="mini muted" style="margin:4px 0">Paste rows straight from <b>Excel / Google Sheets</b> (tab-separated) or CSV. Header row required, columns: <span class="mono">date,account,direction,amount,bucket,category,description</span></div>
-          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px;font-size:var(--fs-sm);font-family:var(--font-mono)" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
+          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--field-border);color:var(--text);border-radius:6px;padding:6px;font-size:var(--fs-sm);font-family:var(--font-mono)" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
           <button class="seed-btn" id="ac_csv_go" type="button" style="margin-top:6px">Preview & import</button>
           <div id="ac_csv_out" class="mini" style="margin-top:6px"></div>
 
@@ -1974,6 +2025,12 @@ function applyHaTheme(theme, presentation) {
       root.setProperty('--unit-bg', 'var(--chip)');
       root.setProperty('--unit-hover-bg', 'var(--md-sys-color-surface-container-highest)');
       root.setProperty('--unit-hover-ink', 'var(--text)');
+
+      // Field-pop (0.3.3): the white paper field needs a crisper edge than the faint Bone
+      // divider — use the theme's real outline (Warm Grey) + a barely-there warm inset. The
+      // focus ring auto-themes to gold via --accent through color-mix, so no override here.
+      root.setProperty('--field-border', 'var(--md-sys-color-outline, #9a9080)');
+      root.setProperty('--field-shadow', 'inset 0 1px 2px rgba(60,50,40,0.07)');
     }
   } catch (e) {
     // A malformed/unexpected theme object must never break boot — fall through silently,
@@ -8197,26 +8254,92 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = h;
   }
 
+  // Ledger filter zone (TODO-242): tag/account/category filters unify into one .ac-filterbar —
+  // a "Filter ▾" popover (tag picker, the only filter with no other origin) plus one removable
+  // active-filter chip, whichever of the three is set. See docs/ledger-filter-redesign.md.
+  // acFilterActive() is the single source of truth for "which of the three is on" so the chip,
+  // the popover's cross-filter note, and the zero-match empty state all read the same state.
+  function acFilterActive() {
+    if (ACT.acctFilter != null) { const v = acAcctName(ACT.acctFilter); return { type: 'acct', value: v, label: 'Card: ' + v, clearAttr: 'data-acctclear' }; }
+    if (ACT.catFilter) {
+      const cf = ACT.catFilter, kindLabel = KINDS[cf.kind] ? KINDS[cf.kind].label : cf.kind;
+      const v = cf.name || ('Unplanned (' + kindLabel + ')');
+      return { type: 'cat', value: v, label: cf.name ? 'Category: ' + v : v, clearAttr: 'data-catclear' };
+    }
+    if (ACT.tagFilter) return { type: 'tag', value: ACT.tagFilter, label: 'Tag: ' + ACT.tagFilter, clearAttr: 'data-tagclear' };
+    return null;
+  }
+  // allTags is this MONTH's tag set (for the popover list); filterActive is driven by ACT.*Filter
+  // (persisted state), not allTags — that split is what fixes the old silently-blank-ledger bug
+  // (state 8: a persisted tag filter that has zero rows this month still renders its chip).
+  function acFilterZoneHtml(allTags, filterActive) {
+    const showControl = allTags.length > 0;
+    if (!showControl && !filterActive) return '';
+    let h = '<div class="ac-filterbar">';
+    if (showControl) {
+      h += '<button type="button" class="ac-filter-btn" id="ac_filter_btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="ac_filter_popup" data-filter-open="1">Filter <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
+    }
+    if (filterActive) {
+      h += '<a href="#" class="ac-tag is-active" ' + filterActive.clearAttr + '="1" aria-label="Clear filter: ' + esc(filterActive.value) + '">' + esc(filterActive.label) + ' ✕</a>';
+    }
+    if (showControl) {
+      const showSearch = allTags.length >= 12;
+      const tagInList = ACT.tagFilter != null && allTags.includes(ACT.tagFilter);
+      const crossNote = (filterActive && filterActive.type !== 'tag')
+        ? '<div class="filter-crossnote">Currently filtered by <b>' + esc(filterActive.label) + '</b>. Picking a tag replaces it.</div>'
+        : '';
+      h += '<div class="backup-popup filter-popup" id="ac_filter_popup" hidden>'
+        + '<div class="filter-title">Filter by tag</div>'
+        + crossNote
+        + (showSearch ? '<input type="search" id="ac_filter_search" class="filter-search" placeholder="Search tags…" aria-label="Search tags" autocomplete="off">' : '')
+        + '<div class="filter-list" role="listbox" id="ac_filter_list" aria-label="Tags">'
+        + '<button type="button" class="filter-opt filter-opt-all' + (!ACT.tagFilter ? ' is-selected' : '') + '" role="option" aria-selected="' + (!ACT.tagFilter) + '" data-filter-all="1" tabindex="' + (!tagInList ? '0' : '-1') + '">All transactions</button>'
+        + allTags.map(tg => {
+            const sel = ACT.tagFilter === tg;
+            return '<button type="button" class="filter-opt' + (sel ? ' is-selected' : '') + '" role="option" aria-selected="' + sel + '" data-filter-pick="' + esc(tg) + '" data-filter-label="' + esc(tg.toLowerCase()) + '" tabindex="' + (sel ? '0' : '-1') + '">' + esc(tg) + '</button>';
+          }).join('')
+        + '</div></div>';
+    }
+    h += '</div>';
+    return h;
+  }
+  // Single small function so a future multi-select "Apply" button (§5 of the spec) only has to
+  // change the caller, not this apply/close/refocus step.
+  async function acApplyFilterPick() {
+    await acRenderLedger();
+    const btn = $('ac_filter_btn'); if (btn) btn.focus();
+  }
+  function acToggleFilterPopup() {
+    const popup = $('ac_filter_popup'); if (!popup) return;
+    if (popup.hidden) acOpenFilterPopup(); else acCloseFilterPopup();
+  }
+  function acOpenFilterPopup() {
+    const popup = $('ac_filter_popup'), btn = $('ac_filter_btn'); if (!popup || !btn) return;
+    popup.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    const search = $('ac_filter_search');
+    if (search) search.focus();
+    else { const first = popup.querySelector('.filter-opt'); if (first) first.focus(); }
+  }
+  function acCloseFilterPopup() {
+    const popup = $('ac_filter_popup'), btn = $('ac_filter_btn'); if (!popup || !btn) return;
+    popup.hidden = true; btn.setAttribute('aria-expanded', 'false');
+  }
+  function acFilterApplySearch(q) {
+    const list = $('ac_filter_list'); if (!list) return;
+    const needle = (q || '').trim().toLowerCase();
+    list.querySelectorAll('.filter-opt:not(.filter-opt-all)').forEach(o => {
+      o.hidden = needle.length > 0 && !(o.dataset.filterLabel || '').includes(needle);
+    });
+  }
+
   async function acRenderLedger() {
     const el = $('ac_ledger'); if (!el) return;
     let txns; try { txns = (await getJSON('/api/tracking/transactions?month=' + ACT.month)).transactions; } catch (e) { return; }
     ACT.txns = txns;
     if (!txns.length) { ACT.tagFilter = null; ACT.catFilter = null; ACT.acctFilter = null; el.innerHTML = '<span class="muted">No transactions logged for ' + acMonthLabel(ACT.month) + '.</span>'; return; }
     const allTags = [...new Set(txns.flatMap(t => t.tags || []))].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    let bar = '';
-    if (ACT.acctFilter != null) {
-      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-acctclear="1">' + esc('Card: ' + acAcctName(ACT.acctFilter)) + ' ✕</a></div>';
-    } else if (ACT.catFilter) {
-      const cf = ACT.catFilter;
-      const kindLabel = KINDS[cf.kind] ? KINDS[cf.kind].label : cf.kind;
-      const chipLabel = cf.name ? 'Category: ' + cf.name : 'Unplanned (' + kindLabel + ')';
-      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter:</span> <a href="#" class="ac-tag is-active" data-catclear="1">' + esc(chipLabel) + ' ✕</a></div>';
-    } else if (allTags.length) {
-      bar = '<div style="margin-bottom:8px;font-size:var(--fs-xs)"><span class="muted">Filter by tag:</span> '
-        + '<a href="#" data-tagfilter="" class="ac-tag' + (!ACT.tagFilter ? ' is-active' : '') + '" style="margin:0 4px">all</a>'
-        + allTags.map(tg => '<a href="#" data-tagfilter="' + esc(tg) + '" class="ac-tag' + (ACT.tagFilter === tg ? ' is-active' : '') + '" style="margin:0 2px">' + esc(tg) + '</a>').join('')
-        + '</div>';
-    }
+    const filterActive = acFilterActive();
+    const bar = acFilterZoneHtml(allTags, filterActive);
     let shown;
     if (ACT.acctFilter != null) {
       shown = txns.filter(t => t.accountId === ACT.acctFilter);
@@ -8227,9 +8350,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       shown = txns;
     }
-    let h = bar + '<table class="res-table"><tr><th>Date</th><th>Flow</th><th>Bucket</th><th>Category / tags</th><th>Payee / note</th><th>Account</th><th class="num">Amount</th><th>Status</th><th></th></tr>';
-    shown.forEach(t => { h += acLedgerRow(t); });
-    el.innerHTML = h + '</table>';
+    let h = bar;
+    if (filterActive && !shown.length) {
+      // State 8 fix: a persisted filter with zero matches this month must explain itself
+      // instead of silently rendering a blank table — the chip above is driven by ACT.*Filter,
+      // not by this month's own tag/account/category set, so it always has something to show.
+      const typeWord = { tag: 'tagged', acct: 'on', cat: 'for' }[filterActive.type];
+      h += '<div style="padding:10px 0;font-size:var(--fs-sm)"><span class="muted">No transactions ' + typeWord + ' “' + esc(filterActive.value) + '” in ' + esc(acMonthLabel(ACT.month)) + '.</span> <a href="#" class="ac-tag" ' + filterActive.clearAttr + '="1" style="margin-left:6px">Clear filter ✕</a></div>';
+      el.innerHTML = h;
+    } else {
+      h += '<table class="res-table"><tr><th>Date</th><th>Flow</th><th>Bucket</th><th>Category / tags</th><th>Payee / note</th><th>Account</th><th class="num">Amount</th><th>Status</th><th></th></tr>';
+      shown.forEach(t => { h += acLedgerRow(t); });
+      el.innerHTML = h + '</table>';
+    }
   }
 
   // Readable bucket chip: tinted background + matching text/border, instead of a tiny dot.
@@ -8390,7 +8523,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       const cf = ev.target.closest('[data-catfilter]'); if (cf) { ev.preventDefault(); const s = cf.dataset.catfilter; const i = s.indexOf('|'); ACT.catFilter = { kind: s.slice(0, i), name: s.slice(i + 1) }; ACT.tagFilter = null; ACT.acctFilter = null; await acRenderLedger(); const led = $('ac_ledger'); if (led) led.scrollIntoView({ behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'start' }); return; }
       const cc = ev.target.closest('[data-catclear]'); if (cc) { ev.preventDefault(); ACT.catFilter = null; acRenderLedger(); return; }
-      const tf = ev.target.closest('[data-tagfilter]'); if (tf) { ev.preventDefault(); ACT.catFilter = null; ACT.acctFilter = null; ACT.tagFilter = tf.dataset.tagfilter || null; acRenderLedger(); return; }
+      // Ledger filter zone (TODO-242): the "Filter ▾" control + popover — open/toggle, the
+      // "All transactions" reset row, a tag pick (both clear the other two filters, same
+      // mutual-exclusivity rule the old chip wall used), and the unified chip's clear.
+      const fo = ev.target.closest('[data-filter-open]'); if (fo) { ev.preventDefault(); ev.stopPropagation(); acToggleFilterPopup(); return; }
+      const fa = ev.target.closest('[data-filter-all]'); if (fa) { ev.preventDefault(); ACT.catFilter = null; ACT.acctFilter = null; ACT.tagFilter = null; await acApplyFilterPick(); return; }
+      const fp = ev.target.closest('[data-filter-pick]'); if (fp) { ev.preventDefault(); ACT.catFilter = null; ACT.acctFilter = null; ACT.tagFilter = fp.dataset.filterPick; await acApplyFilterPick(); return; }
+      const tc = ev.target.closest('[data-tagclear]'); if (tc) { ev.preventDefault(); ACT.tagFilter = null; acRenderLedger(); return; }
       // Card detail → "show these N transactions": account filter, third of the filter family
       const cx2 = ev.target.closest('[data-card-txns]'); if (cx2) { ev.preventDefault(); ACT.acctFilter = +cx2.dataset.cardTxns; ACT.catFilter = null; ACT.tagFilter = null; await acRenderLedger(); const led = $('ac_ledger'); if (led) led.scrollIntoView({ behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'start' }); return; }
       const ac2 = ev.target.closest('[data-acctclear]'); if (ac2) { ev.preventDefault(); ACT.acctFilter = null; acRenderLedger(); return; }
@@ -8533,10 +8672,51 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     // Card payment form keyboard: Esc closes + restores focus; Enter in amount submits
     if (panel) panel.addEventListener('keydown', ev => {
+      // Ledger filter popover (TODO-242): roving-listbox Arrow ↑/↓ + Enter/Space select. Escape
+      // is handled by the document-level listener below (it must fire even when focus is on the
+      // "Filter ▾" control itself, which sits outside #ac_filter_popup).
+      const filterPopup = ev.target.closest('#ac_filter_popup');
+      if (filterPopup) {
+        const list = $('ac_filter_list');
+        if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && list) {
+          ev.preventDefault();
+          const opts = Array.from(list.querySelectorAll('.filter-opt')).filter(o => !o.hidden);
+          if (opts.length) {
+            const cur = ev.target.closest('.filter-opt');
+            let idx = cur ? opts.indexOf(cur) : -1;
+            idx = ev.key === 'ArrowDown' ? (idx + 1) % opts.length : (idx - 1 + opts.length) % opts.length;
+            opts.forEach(o => o.tabIndex = -1);
+            opts[idx].tabIndex = 0; opts[idx].focus();
+          }
+          return;
+        }
+        if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('filter-opt')) { ev.preventDefault(); ev.target.click(); return; }
+        return;
+      }
       const form = ev.target.closest('.ac-pay-form');
       if (!form) return;
       if (ev.key === 'Escape') { ev.preventDefault(); const aid = form.id.replace('ac_pay_form_', ''); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) { trig.setAttribute('aria-expanded', 'false'); trig.focus(); } }
       else if (ev.key === 'Enter' && ev.target.matches('[data-pay="amt"]')) { ev.preventDefault(); const sub = form.querySelector('[data-pay-submit]'); if (sub) sub.click(); }
+    });
+    // Ledger filter popover search: delegated (not per-render) so re-rendering #ac_ledger never
+    // orphans the listener (§8 of docs/ledger-filter-redesign.md).
+    if (panel) panel.addEventListener('input', ev => {
+      const si = ev.target.closest('#ac_filter_search');
+      if (si) acFilterApplySearch(si.value);
+    });
+    // Ledger filter popover: Escape / outside-click — mirrors the backup/settings popup pattern
+    // (closeBackupPopup/closeSettingsPopup above) exactly. Document-level and registered once
+    // (guarded by ACT.wired at the top of acWire), so it survives every #ac_ledger re-render —
+    // it looks up #ac_filter_popup/#ac_filter_btn fresh on each event rather than closing over a
+    // stale reference.
+    document.addEventListener('click', e => {
+      const popup = $('ac_filter_popup'), btn = $('ac_filter_btn');
+      if (popup && !popup.hidden && !popup.contains(e.target) && !(btn && btn.contains(e.target))) acCloseFilterPopup();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      const popup = $('ac_filter_popup'), btn = $('ac_filter_btn');
+      if (popup && !popup.hidden) { acCloseFilterPopup(); if (btn) btn.focus(); }
     });
   }
 
