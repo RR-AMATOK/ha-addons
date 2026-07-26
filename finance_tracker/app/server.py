@@ -1796,6 +1796,10 @@ class FundModel(BaseModel):
     monthly_contribution: float = Field(0, ge=0, alias="monthlyContribution")   # dollars
     target: float | None = Field(None, gt=0)                                   # dollars
     target_date: str | None = Field(None, alias="targetDate")                  # YYYY-MM-DD
+    # TODO-238 amendment: 'none' (default, one-time target — today's behavior,
+    # unchanged) or 'yearly' (target_date's month/day recurs annually; see
+    # tracking.fund_effective_target_date / docs/sinking-funds-design.md §amendment).
+    recurrence: Literal["none", "yearly"] = "none"
     model_config = {"populate_by_name": True}
 
 
@@ -1806,6 +1810,7 @@ class FundUpdateModel(BaseModel):
     target: float | None = Field(None, gt=0)
     target_date: str | None = Field(None, alias="targetDate")
     clear_target: bool = Field(False, alias="clearTarget")   # unsets target + targetDate together
+    recurrence: Literal["none", "yearly"] | None = None
     status: Literal["active", "archived"] | None = None
     model_config = {"populate_by_name": True}
 
@@ -1832,7 +1837,7 @@ def create_fund_endpoint(m: FundModel, request: Request = None) -> dict:
                 c, scope, m.name, bucket=m.bucket,
                 monthly_contribution_cents=_cents(m.monthly_contribution),
                 target_cents=None if m.target is None else _cents(m.target),
-                target_date=m.target_date)
+                target_date=m.target_date, recurrence=m.recurrence)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
@@ -1855,6 +1860,8 @@ def update_fund_endpoint(fund_id: int, m: FundUpdateModel, request: Request = No
             fields["target_cents"] = _cents(m.target)
         if m.target_date is not None:
             fields["target_date"] = m.target_date
+    if m.recurrence is not None:
+        fields["recurrence"] = m.recurrence
     if m.status is not None:
         fields["status"] = m.status
     with closing(tracking_store.connect()) as c:
@@ -1908,7 +1915,15 @@ def fund_rollup_endpoint(month: str, includeArchived: bool = False, request: Req
     """The fund lens (Phase 1, DEC-034 §5) — per-fund reserve trajectory for `month`,
     mirroring /api/tracking/card-rollup's shape. Purely additive: does not read or write
     aggregate_actuals/plan_vs_actual (Phase 2 folds the funded-draw excusal into the
-    headline on-track number via the month_actuals seam — not built here)."""
+    headline on-track number via the month_actuals seam — not built here).
+
+    TODO-238 amendment (yearly recurrence): two ADDITIVE response fields per fund —
+    `effectiveTargetDate` (target_date unchanged for 'none'; the next rolled-forward
+    anniversary strictly after `month` for 'yearly') and `cycle` (`None` for 'none' /
+    no target_date; else `{cycleStart, cycleEnd, contributedThisCycle,
+    drawnThisCycle}` for the current annual cycle). Reserve math (`reserve`,
+    `trajectory`, the *Total fields) is completely unaffected by recurrence — existing
+    consumers of this endpoint keep working unchanged."""
     scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         funds = tracking_store.list_funds(c, scope, include_archived=includeArchived)
@@ -1917,7 +1932,9 @@ def fund_rollup_endpoint(month: str, includeArchived: bool = False, request: Req
             flows = tracking_store.fund_monthly_flows(c, scope, f["id"], upto_month=month)
             rollup = tracking.fund_rollup(flows, upto_month=month)
             history = tracking_store.list_fund_txns(c, scope, f["id"])
-            out.append({**f, **rollup, "history": history})
+            effective_target_date = tracking.fund_effective_target_date(f["targetDate"], f["recurrence"], month)
+            cycle = tracking.fund_cycle_summary(f["targetDate"], f["recurrence"], month, rollup["trajectory"])
+            out.append({**f, **rollup, "effectiveTargetDate": effective_target_date, "cycle": cycle, "history": history})
     return {"month": month, "funds": out}
 
 

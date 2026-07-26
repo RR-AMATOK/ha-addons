@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.4
+
+- **What-if picker with cross-device parking.** The What-If button now opens
+  a picker: jump straight into any saved what-if by name (rename/delete
+  inline), start a new one, or resume your **parked** what-if — "Exit — keep"
+  now saves it to your account, so a what-if parked on one device can be
+  resumed on another.
+- **Pick your own category colors.** Every category — including the built-in
+  Need/Want/Investment/Travel/Other — can be recolored in Manage Categories,
+  and the color applies everywhere (bars, chips, filters, fund labels), with
+  one-tap reset to the default.
+- **"Counts toward" budget math.** Each category can be assigned to Need,
+  Want, or Investment for the 50/30/20 comparison (or kept standalone). The
+  framework rows fold assigned categories in ("incl. Car"), so the targets
+  finally compare against everything — no more invisible spending.
+- **Budget buckets: collapse & reorder.** Minimize any bucket and drag whole
+  buckets into your preferred order — useful for keeping two same-kind
+  buckets separate.
+- **Yearly sinking funds.** Mark a fund (car insurance, annual credit-card
+  fees) as renewing yearly: the target date rolls forward automatically and
+  the fund lens shows the next renewal plus what you've saved/drawn this
+  cycle.
+- Fixed: the category autocomplete dropdown was near-unreadable in the light
+  theme (it now follows the app's theme).
+
 ## 0.3.3
 
 - **A cleaner transactions filter.** The wall of tag chips is gone — one

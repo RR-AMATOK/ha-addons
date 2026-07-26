@@ -6,6 +6,20 @@
 <title>Income Tax Calculator — 2026 (Single)</title>
 <style>
   :root {
+    /* Native form-control chrome (select dropdowns, the <datalist> autocomplete popup,
+       scrollbars, spin buttons) is drawn by the BROWSER, not by our CSS variables below — it
+       follows the `color-scheme` property (or, absent that, the OS/browser's own light/dark
+       default) completely independently of --bg/--text/etc. Root cause of the category
+       autocomplete (Actuals composer's `<input list="ac_cat_list">`) rendering illegible
+       suggestion text in shiro-full: this property was never declared anywhere, so the native
+       popup silently followed whatever scheme the browser defaulted to instead of tracking our
+       actual theme — coincidentally OK against the classic dark palette, wrong the moment
+       shiro-full's light surfaces ship. Declaring it explicitly (and flipping it alongside every
+       other token in applyHaTheme()'s shiro-full branch below) makes the native popup's own
+       background/ink pairing correct in both themes. This is the browser's only exposed lever
+       for native-popup theming — it cannot set hover/active row colors (no such CSS hook exists
+       for <datalist> in any engine), only the overall light/dark chrome. */
+    color-scheme: dark;
     --bg: #0f1115;
     --panel: #171a21;
     --panel-2: #1e222c;
@@ -334,13 +348,22 @@
   .bgb-alias-accept:hover { border-color:var(--good); }
   /* Scenario planner (TODO-219): what-if comp + catch-up ledger, Budget tab */
   .sc-badge { display:inline-flex; align-items:center; height:18px; padding:0 8px; border-radius:999px; font-size:var(--fs-2xs); font-weight:var(--fw-semibold); letter-spacing:var(--ls-caps); text-transform:uppercase; border:1px solid var(--line); color:var(--muted); }
-  .sc-badge.is-active { color:var(--good); border-color:var(--good); background:rgba(80,220,140,.08); }
+  /* DEC-036 selected-state unification: "Active" is the one row that IS the current/selected
+     item in the list, so it takes the shared --selected-bg/--selected-ink pair (same vocabulary
+     as .chip.active / .filter-opt.is-selected) instead of a bespoke green. */
+  .sc-badge.is-active { color:var(--selected-ink); border-color:var(--selected-bg); background:var(--selected-bg); }
   .sc-list { display:flex; flex-direction:column; gap:6px; margin:8px 0 4px; }
   .sc-row  { display:flex; align-items:center; flex-wrap:wrap; gap:8px; font-size:var(--fs-sm); padding:6px 10px; border:1px solid var(--line); border-radius:8px; }
-  .sc-row.is-active { border-color:var(--good); }
+  .sc-row.is-active { border-color:var(--selected-bg); }
+  .sc-row:hover { background: var(--chip); }
   .sc-row .sc-name { font-weight:var(--fw-semibold); }
   .sc-row .sc-meta { color:var(--muted); }
   .sc-row .sc-actions { margin-left:auto; display:flex; gap:6px; }
+  /* What-If picker popover (TODO-243 Feature 2): wraps the header "What-If Mode" button; reuses
+     .backup-popup for surface/position/shadow (same convention as .settings-popup/.filter-popup). */
+  .wi-picker-split { position: relative; display: inline-flex; }
+  .wi-popup { width: 320px; }
+  .wi-rename-input { flex: 1 1 auto; min-width: 0; }
   .sc-grid { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin:8px 0; }
   .sc-tbl input[type="text"], .sc-tbl input[type="number"], .sc-tbl input[type="month"] { height:26px; box-sizing:border-box; font-size:var(--fs-sm); padding:0 6px; max-width:120px; }
   .sc-tbl input[type="text"].sc-lbl { max-width:170px; }
@@ -570,6 +593,12 @@
   .bgb-addgroup { margin-top:2px; }
   .bgb-grip { cursor:grab; color:#5a6473; user-select:none; width:14px; text-align:center; padding-right:0 !important; }
   .bgb-grip:active { cursor:grabbing; }
+  /* Bucket-level collapse/reorder (DEC-036-neutral — these are structural controls, not
+     selection state, so they deliberately stay off the accent/selected-pair vocabulary). */
+  .bgb-bucket-grip { cursor:grab; color:#5a6473; user-select:none; flex-shrink:0; font-size:var(--fs-sm); }
+  .bgb-bucket-grip:active { cursor:grabbing; }
+  .bgb-collapse-btn { color:var(--muted) !important; padding:0 2px !important; font-size:var(--fs-sm); flex-shrink:0; }
+  .bgb-collapse-btn:hover { color:var(--text) !important; filter:none; }
   .bgb-items tr { transition:background .1s; }
   .bgb-isplit { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 3px; }
   .bgb-ipreset { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:3px 4px; font-size:var(--fs-xs); max-width:130px; }
@@ -674,6 +703,13 @@
     .bgb-items input.bgb-bname, .bgb-items input.bgb-gname { min-width: 140px; }
     .bgb-ipreset { max-width: none; width: 100%; }
 
+    /* Bucket header (name + grip + collapse chevron + kind select + total + delete) no longer
+       fits on one line at ≤480px once the grip/chevron are added — wrap it two-line, name on
+       its own full-width line 1 (same "name gets its own line" pattern the item rows already
+       use above), grip/chevron/kind/total/delete on line 2. */
+    .bgb-bhead { flex-wrap: wrap; row-gap: var(--space-1); }
+    .bgb-bhead .bgb-bname { order: -1; flex: 1 1 100%; }
+
     /* FIRE net-worth fields */
     .nw-field { flex: 1 1 140px; }
     .nw-field .input-pair, .nw-field input { width: 100%; }
@@ -703,6 +739,7 @@
     .filter-opt, .filter-search { min-height: 44px; box-sizing: border-box; }
     .ac-filterbar .ac-tag.is-active { min-height: 44px; display: inline-flex; align-items: center; padding-block: 12px; }
     .filter-popup { left: 0; right: 0; width: auto; }
+    .wi-popup { left: 0; right: 0; width: auto; }
   }
 
   /* landscape / short-viewport popup guard (P1) — max-height query, independent of the
@@ -773,7 +810,23 @@
         <button class="seed-btn" id="backup_csv_dl" type="button" style="margin-top:8px;width:100%">Download CSV</button>
       </div>
     </span>
-    <button id="wi_start_btn" title="Model a what-if change without touching your real numbers">What-If Mode</button>
+    <span class="wi-picker-split">
+      <button id="wi_start_btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="wi_picker_popup" title="Model a what-if change without touching your real numbers">What-If Mode</button>
+      <!-- TODO-243 Feature 2: the picker replaces the old bare prompt() entry. "Parked" (top,
+           server-backed per §0 decision 2) and "Your saved what-ifs" are rendered by
+           wiRefreshDraftsList(); "Start a new what-if" is the always-present bottom section. -->
+      <div id="wi_picker_popup" class="backup-popup wi-popup" role="dialog" aria-modal="false" aria-labelledby="wi_picker_h" hidden>
+        <div class="subhead" id="wi_picker_h" style="margin-top:0">What-If Mode</div>
+        <div id="wi_picker_parked"></div>
+        <div id="wi_picker_saved"></div>
+        <div style="border-top:1px solid var(--line);margin:10px 0"></div>
+        <div class="subhead" style="margin:0 0 6px">Start a new what-if</div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input type="text" id="wi_picker_name_input" placeholder="e.g. Senior promo" autocomplete="off" style="flex:1 1 auto;min-width:0">
+          <button type="button" class="seed-btn" id="wi_picker_start_btn" style="width:auto;flex:0 0 auto;margin-left:0">Start</button>
+        </div>
+      </div>
+    </span>
     <span id="calcErrorDot" class="calc-error-dot" hidden aria-hidden="true" title="Calculation error — see notification"></span>
     <span class="settings-split">
       <button id="btnSettings" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings_popup" aria-label="Settings" title="Settings">&#9881;</button>
@@ -843,7 +896,6 @@
   <span id="wi_banner_deltas" class="mini wi-banner-deltas" aria-live="polite"></span>
   <span class="wi-banner-actions">
     <button type="button" id="wi_peek_btn" title="Press and hold to see your real numbers; release to come back">&#128065; hold: real</button>
-    <button type="button" id="wi_drafts_toggle">Drafts&hellip;</button>
     <button type="button" id="wi_save_btn">Save draft</button>
     <button type="button" id="wi_saveas_btn" title="Save this what-if as a separate new scenario">Save as&hellip;</button>
     <button type="button" id="wi_exit_btn" title="Leave What-If Mode without losing this sandbox — resume it any time">Exit &mdash; keep</button>
@@ -851,9 +903,11 @@
     <button type="button" id="wi_discard_btn">Discard</button>
   </span>
 </div>
-<div id="wi_drafts_panel" class="wi-banner" hidden>
-  <div id="wi_drafts_list" class="mini" style="width:100%">Loading&hellip;</div>
-</div>
+<!-- TODO-243 Feature 2: the old buried #wi_drafts_panel (reached only via an in-banner
+     "Drafts…" toggle) is retired — its wiRefreshDraftsList()/wiLoadDraftIntoMode() machinery is
+     promoted to the always-reachable header picker (#wi_picker_popup above). Switching to a
+     different saved what-if while already mid-session now goes through Exit, then the picker —
+     the picker is the one entry surface (spec §4.4). -->
 
 <!-- TODO-241 / pre-R1 hardening: non-transient (not a toast) notice that a profile flush
      displaced a different lineage than the one it was based on — kept visible until dismissed,
@@ -1543,6 +1597,7 @@
     <div class="row" style="margin:0"><label class="mini">Monthly</label><span class="input-pair"><input id="sf_monthly" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
     <div class="row" style="margin:0"><label class="mini">Target <span class="muted">(optional)</span></label><span class="input-pair"><input id="sf_target" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
     <div class="row" style="margin:0"><label class="mini">By <span class="muted">(optional)</span></label><input id="sf_date" type="date"/></div>
+    <div class="row" style="margin:0"><label class="mini">Recurs</label><select id="sf_recur" style="min-width:110px"><option value="none">One-time</option><option value="yearly">Yearly</option></select></div>
     <button class="seed-btn" id="sf_add" type="button">+ Add fund</button>
     <button class="ac-tool" id="sf_cancel_edit" type="button" style="display:none">Cancel edit</button>
   </div>
@@ -1971,6 +2026,11 @@ function applyHaTheme(theme, presentation) {
       // per @designer (the theme's own gold/blue/red are calibrated for a dark ink, not a
       // light one, so they can't be reused verbatim here).
       document.documentElement.classList.add('theme-shiro-full');
+      // Flips native form-control chrome (select dropdowns, the category-autocomplete
+      // <datalist> popup, scrollbars) to light — see the :root color-scheme comment above for
+      // why this is a separate lever from every --token override in this block. shiro-accent
+      // stays dark (no override needed) since only the accent family moves in that preset.
+      root.setProperty('color-scheme', 'light');
       root.setProperty('--bg', 'var(--primary-background-color)');
       root.setProperty('--panel', 'var(--card-background-color)');
       root.setProperty('--panel-2', 'var(--md-sys-color-surface-container-high)');
@@ -2321,10 +2381,40 @@ const DEDUCTION_FIELDS = Object.keys(fieldCadence);
 const CAD_LABEL = { annual: '/yr', monthly: '/mo', paycheck: '/pay' };
 const CAD_NEXT  = { annual: 'monthly', monthly: 'paycheck', paycheck: 'annual' };
 
+// Pure fold: the "counts toward" 50/30/20 framework grouping (0.3.4 batch, docs/sinking-funds-
+// design.md's sibling feature — itc.categories.v1's countsAs field). `categories` is the
+// itc.categories.v1 list (each { key, label, countsAs }, where countsAs is
+// 'need'|'want'|'investment' or null/undefined for standalone); `rawTotals` is a
+// { [categoryKey]: number } map of that category's own spend (bgbTotals()'s kindT, BEFORE any
+// Tax-tab investment fold-in — callers add that separately). Every category is counted EXACTLY
+// ONCE — either folded into one of the three framework totals, or listed standalone — so
+// framework.need + framework.want + framework.investment + Σstandalone always reconciles to the
+// sum of rawTotals, which is what keeps the budget summary's 100%-of-take-home math intact
+// regardless of how countsAs is assigned. A framework category (need/want/investment) folding
+// into ITSELF (the default) is excluded from its own foldedIncludes list — only genuinely
+// EXTRA categories folded in are named there, for the "incl. Car" table suffix.
+function foldCategoriesByCountsAs(categories, rawTotals) {
+  const FRAMEWORK_KINDS = ['need', 'want', 'investment'];
+  const framework = { need: 0, want: 0, investment: 0 };
+  const foldedIncludes = { need: [], want: [], investment: [] };
+  const standalone = [];
+  (categories || []).forEach(c => {
+    const total = (rawTotals && rawTotals[c.key]) || 0;
+    const target = FRAMEWORK_KINDS.indexOf(c.countsAs) !== -1 ? c.countsAs : null;
+    if (target) {
+      framework[target] += total;
+      if (c.key !== target) foldedIncludes[target].push(c.label);
+    } else {
+      standalone.push({ key: c.key, label: c.label, total: total });
+    }
+  });
+  return { framework: framework, foldedIncludes: foldedIncludes, standalone: standalone };
+}
+
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
 window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
-  rosterDisplayName };
+  rosterDisplayName, foldCategoriesByCountsAs };
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -4252,7 +4342,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (bp && bm && !bp.hidden) { bp.hidden = true; bm.setAttribute('aria-expanded', 'false'); }
     const sp = $('settings_popup'), sg = $('btnSettings');
     if (sp && sg && !sp.hidden) { sp.hidden = true; sg.setAttribute('aria-expanded', 'false'); }
+    // TODO-243 Feature 2: the What-If picker popover is wired up in a LATER, separate closure
+    // (the big feature-tabs IIFE further down the file), so it can't share this function by
+    // reference — only by DOM lookup, exactly like the two popups above. Exposed on window (see
+    // bottom of this block) so that later closure's own open handler can call back into this one
+    // for the same mutual-exclusion behavior the backup/settings popups already give each other.
+    const wp = $('wi_picker_popup'), wb = $('wi_start_btn');
+    if (wp && wb && !wp.hidden) { wp.hidden = true; wb.setAttribute('aria-expanded', 'false'); }
   }
+  window.closeAllHeaderPopups = closeAllHeaderPopups;
   // Header split-button popup: selective backups (Everything/Actuals/Settings) + CSV analysis
   // export. The single home for both — Actuals → Manage used to duplicate this UI.
   { const menuBtn = $('btnBackupMenu'), popup = $('backup_popup');
@@ -4571,7 +4669,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const wSolid = pct(p.spent), wHatch = pct(p.fixedLeft), wFade = Math.max(0, pct(p.projMid) - wSolid - wHatch), marker = pct(p.budget);
     const fadeCol = (p.verdict === 'over' || p.verdict === 'over_budget') ? 'var(--bad)' : 'var(--good)';
     const hatch = 'repeating-linear-gradient(45deg,rgba(138,146,166,.5) 0,rgba(138,146,166,.5) 2px,transparent 2px,transparent 7px)';
-    const cul = p.culprit ? ' · biggest driver: <span style="color:' + (KINDS[p.culprit.bucket] ? KINDS[p.culprit.bucket].color : 'var(--muted)') + '">●</span> ' + esc(KINDS[p.culprit.bucket] ? KINDS[p.culprit.bucket].label : p.culprit.bucket) + ' (~' + r25(p.culprit.gap) + ' over)' : '';
+    const cul = p.culprit ? ' · biggest driver: <span style="color:' + categoryColor(p.culprit.bucket) + '">●</span> ' + esc(KINDS[p.culprit.bucket] ? KINDS[p.culprit.bucket].label : p.culprit.bucket) + ' (~' + r25(p.culprit.gap) + ' over)' : '';
     el.innerHTML = '<div class="subhead" style="display:flex;justify-content:space-between"><span>Am I on track this month?</span><span class="mini muted" style="font-weight:var(--fw-normal)">' + (typeof acMonthLabel === 'function' ? acMonthLabel(month) : month) + ' · day ' + p.day + '/' + p.daysInMonth + '</span></div>'
       + '<div class="tiles" style="margin-bottom:8px"><div class="tile ' + tileClass + '"><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + head + '</div><div class="s" style="font-size:var(--fs-sm);line-height:1.5">' + sub + '</div></div></div>'
       + '<div style="position:relative;height:14px;background:var(--chip);border-radius:5px;overflow:hidden;display:flex">'
@@ -5110,6 +5208,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // fund's identity + monthly contribution, mirroring the goal card's split. ----
   const SF = { funds: [], editingId: null };
   const sfMoney = n => '$' + (Math.round((+n || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Formats a 'YYYY-MM-DD' date as "Mon D, YYYY" without going through Date() (avoids the
+  // UTC/local timezone shift that can roll the day back by one) — used only for the yearly-
+  // recurrence cycle display (§amendment 2026-07-26); the plain target/targetDate line above
+  // keeps its existing raw-ISO rendering unchanged (out of scope for this pass).
+  function sfDateLabel(iso) {
+    const parts = String(iso || '').split('-');
+    if (parts.length !== 3) return iso || '';
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const y = +parts[0], mo = +parts[1], d = +parts[2];
+    if (!y || !mo || mo < 1 || mo > 12 || !d) return iso;
+    return MON[mo - 1] + ' ' + d + ', ' + y;
+  }
   // Maps a fund's spend-bucket kind (need/want/travel/other/custom) to the budget builder's
   // display bucket name for addBudgetItem() — 'Sinking funds' group lands inside the matching
   // top-level bucket (need→Needs, want→Wants, travel→Travel) so it reconciles against the
@@ -5140,9 +5250,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     else {
       el.innerHTML = active.map(f => {
         const target = f.target ? sfMoney(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') : '';
+        const recur = f.recurrence === 'yearly' ? ' · renews yearly' : '';
         return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px">'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
-          + '<b>' + esc(f.name) + '</b><span class="muted">' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + sfMoney(f.monthlyContribution) + '/mo' + (target ? ' · target ' + target : '') + '</span>'
+          + '<b>' + esc(f.name) + '</b><span class="muted"><span style="color:' + categoryColor(f.bucket || 'need') + '">●</span> ' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + sfMoney(f.monthlyContribution) + '/mo' + (target ? ' · target ' + target : '') + recur + '</span>'
           + '<span style="margin-left:auto;white-space:nowrap">'
           + (f.monthlyContribution > 0 ? '<a href="#" class="gl-act gl-act-primary" data-sf-budget="' + f.id + '" title="reserve the monthly amount in the budget" style="margin-right:6px">→ Budget line</a>' : '')
           + '<a href="#" class="gl-act" data-sf-edit="' + f.id + '" title="edit" style="margin-right:6px">✎</a>'
@@ -5161,6 +5272,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   function sfResetForm() {
     $('sf_name').value = ''; $('sf_monthly').value = ''; $('sf_target').value = ''; $('sf_date').value = '';
+    $('sf_recur').value = 'none';
     sfFillBuckets();
   }
   function sfCancelEdit() {
@@ -5178,6 +5290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('sf_monthly').value = f.monthlyContribution ? String(f.monthlyContribution) : '';
     $('sf_target').value = f.target ? String(f.target) : '';
     $('sf_date').value = f.targetDate || '';
+    $('sf_recur').value = f.recurrence || 'none';
     formatUSDFields();
     $('sf_add').textContent = 'Save changes';
     $('sf_cancel_edit').style.display = '';
@@ -5190,8 +5303,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const monthly = rn($('sf_monthly').value);
     const target = rn($('sf_target').value);
     const date = $('sf_date').value;
+    const recurrence = $('sf_recur').value || 'none';
     if (!name) { showToast('Name the fund'); return; }
-    const body = { name: name, bucket: bucket, monthlyContribution: monthly || 0 };
+    const body = { name: name, bucket: bucket, monthlyContribution: monthly || 0, recurrence: recurrence };
     if (target > 0) body.target = target; else if (SF.editingId) body.clearTarget = true;
     if (target > 0 && date) body.targetDate = date;
     try {
@@ -5895,15 +6009,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ===== Category store — localStorage key: itc.categories.v1 =====
   // Single source of truth for all bucket types. Built-ins are locked; customs append.
+  //
+  // Reserved shape (do not remove): each entry is a plain object, additive-only, never a fixed
+  // tuple — this is deliberate so a future field can land without another migration. Today: a
+  // built-in's `colorOverride` (optional hex string; absent = theme-default `color`), and every
+  // category's `countsAs` (`'need'|'want'|'investment'|null`, 0.3.4 batch) — folds a category
+  // into the 50/30/20 framework math in bgbTotals() (see foldCategoriesByCountsAs()). Built-ins
+  // default to their own kind (need→'need' etc.; travel/other→null/standalone); customs default
+  // to null. countsAs is user-editable for EVERY category, including built-ins (the "counts
+  // toward" select in Manage Categories), so it survives the built-in label/color/locked resync
+  // below via the same spread that already protects colorOverride. Every reader of a category
+  // entry (getCategories()'s migration merge, categoryColor() below, etc.) must keep tolerating
+  // unknown sibling fields via spread (`{ ...c, ... }`), never a fixed field allowlist.
   const ITC_CAT_KEY = 'itc.categories.v1';
   // Colors deliberately use the same CSS variable tokens as the original hardcoded KINDS object
   // so built-in bucket colors never visually regress.
   const BUILTIN_CATS = [
-    { key: 'need',       label: 'Need',       color: 'var(--accent)', locked: true },
-    { key: 'want',       label: 'Want',       color: 'var(--warn)',   locked: true },
-    { key: 'investment', label: 'Investment', color: 'var(--good)',   locked: true },
-    { key: 'travel',     label: 'Travel',     color: 'var(--travel)', locked: true },
-    { key: 'other',      label: 'Other',      color: 'var(--muted)',  locked: true },
+    { key: 'need',       label: 'Need',       color: 'var(--accent)', locked: true, countsAs: 'need' },
+    { key: 'want',       label: 'Want',       color: 'var(--warn)',   locked: true, countsAs: 'want' },
+    { key: 'investment', label: 'Investment', color: 'var(--good)',   locked: true, countsAs: 'investment' },
+    { key: 'travel',     label: 'Travel',     color: 'var(--travel)', locked: true, countsAs: null },
+    { key: 'other',      label: 'Other',      color: 'var(--muted)',  locked: true, countsAs: null },
   ];
   const BUILTIN_KEYS = new Set(BUILTIN_CATS.map(c => c.key));
   let catEditKey = null;
@@ -5917,11 +6043,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { localStorage.setItem(ITC_CAT_KEY, JSON.stringify(list)); } catch (e) {}
       return list;
     }
-    // Migration: ensure all built-ins are present and their immutable fields are correct
+    // Migration: ensure all built-ins are present and their immutable fields (label/color/locked)
+    // are re-synced from BUILTIN_CATS — but spread the STORED entry first so any sibling field a
+    // user or a later feature has attached to it (colorOverride today; the reserved countsAs
+    // field above, tomorrow) survives this resync untouched instead of being silently dropped.
     BUILTIN_CATS.forEach(b => { if (!list.some(c => c.key === b.key)) list.unshift(b); });
     list = list.map(c => {
       const b = BUILTIN_CATS.find(x => x.key === c.key);
-      return b ? { key: b.key, label: b.label, color: b.color, locked: true } : c;
+      // countsAs: spread already carries the stored value forward; only fall back to the
+      // built-in's default when the field has never been written (pre-0.3.4 data) — an
+      // explicit null (user chose "Standalone") must never be overwritten back to the default.
+      return b ? { ...c, key: b.key, label: b.label, color: b.color, locked: true, countsAs: (c.countsAs !== undefined ? c.countsAs : b.countsAs) } : c;
     });
     return list;
   }
@@ -5949,7 +6081,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (BUILTIN_KEYS.has(key)) { showToast('"' + key + '" is a built-in category — cannot add'); return false; }
     const list = getCategories();
     if (list.some(c => c.key === key)) { showToast('Category key "' + key + '" already exists'); return false; }
-    list.push({ key, label: trimmed, color: color || '#7aa7ff', locked: false });
+    list.push({ key, label: trimmed, color: color || '#7aa7ff', locked: false, countsAs: null });
     saveCategories(list);
     return true;
   }
@@ -6012,22 +6144,90 @@ document.addEventListener('DOMContentLoaded', async () => {
     return true;
   }
 
+  // Built-in categories only: recolor via the additive `colorOverride` field (never touches
+  // label/locked — those stay immutable, re-synced from BUILTIN_CATS on every getCategories()
+  // read). Pass a falsy hex to clear the override and fall back to the theme-default `color`.
+  // Custom categories don't use this path — their mutable `color` field IS their color, edited
+  // directly via editCategory() above.
+  function setCategoryColorOverride(key, hex) {
+    if (wiBlockIfActive('manage categories')) return false;
+    if (!BUILTIN_KEYS.has(key)) return false;
+    const list = getCategories();
+    const cat = list.find(c => c.key === key);
+    if (!cat) return false;
+    if (hex) cat.colorOverride = hex; else delete cat.colorOverride;
+    saveCategories(list);
+    catEditKey = null;
+    catManageRender();
+    if (typeof bgbRender === 'function') bgbRender();
+    acPopulateBuckets();
+    if (typeof ACT !== 'undefined' && ACT.month) { try { acRefresh(); } catch (e) {} }
+    return true;
+  }
+  function resetCategoryColor(key) { return setCategoryColorOverride(key, null); }
+
+  // "Counts toward" (0.3.4 batch): unlike colorOverride (built-in only) and label/color edits
+  // (custom only), countsAs is editable on EVERY category, built-in or custom — a built-in's own
+  // framework kind can even be repointed (e.g. "Travel" folded into "Need"), which is exactly why
+  // the fold in bgbTotals() is generic instead of special-casing need/want/investment. `value`
+  // must be 'need'|'want'|'investment' or a falsy value to clear back to standalone.
+  function setCategoryCountsAs(key, value) {
+    if (wiBlockIfActive('manage categories')) return false;
+    const list = getCategories();
+    const cat = list.find(c => c.key === key);
+    if (!cat) return false;
+    cat.countsAs = (value === 'need' || value === 'want' || value === 'investment') ? value : null;
+    saveCategories(list);
+    catManageRender();
+    if (typeof bgbRender === 'function') bgbRender();   // bgbRender() ends with bgbTotals(), refreshing the framework fold
+    acPopulateBuckets();
+    if (typeof ACT !== 'undefined' && ACT.month) { try { acRefresh(); } catch (e) {} }
+    return true;
+  }
+
+  // Resolves a `<canvas>`-free CSS color (var(...) chain or literal) to a #rrggbb hex string by
+  // letting the browser's own cascade compute it, via a detached probe element — used only to
+  // seed the <input type=color> when a built-in has no override yet (that control can't accept
+  // a raw `var(--accent)` string, only hex/rgb), so the picker opens on the color the user
+  // actually sees today rather than defaulting to some arbitrary swatch.
+  function resolveCssColorToHex(cssValue) {
+    try {
+      const probe = document.createElement('span');
+      probe.style.display = 'none';
+      probe.style.color = cssValue;
+      document.body.appendChild(probe);
+      const rgb = getComputedStyle(probe).color;
+      probe.remove();
+      const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(rgb || '');
+      if (!m) return '#7aa7ff';
+      const h = n => Math.max(0, Math.min(255, +n)).toString(16).padStart(2, '0');
+      return '#' + h(m[1]) + h(m[2]) + h(m[3]);
+    } catch (e) { return '#7aa7ff'; }
+  }
+
   // syncCategoryState: rebuild KINDS and TRACK_BUCKETS from the store, set window.__categories.
   // Called: (a) once after TRACK_BUCKETS is declared, (b) on every saveCategories call.
   // KINDS and TRACK_BUCKETS must already be declared (let) before this is called.
+  // KINDS[key].color is already the FULLY RESOLVED color (a locked entry's colorOverride wins
+  // verbatim over its theme-default color) — categoryColor() below is the one function every
+  // consumer should call, so this resolution logic never has to be duplicated at a call site.
   function syncCategoryState() {
     const cats = getCategories();
     window.__categories = cats;
-    KINDS = Object.fromEntries(cats.map(c => [c.key, { label: c.label, color: c.color }]));
+    KINDS = Object.fromEntries(cats.map(c => [c.key, { label: c.label, color: (c.locked && c.colorOverride) ? c.colorOverride : c.color }]));
     // TRACK_BUCKETS = spend categories only (investment excluded per spec)
     TRACK_BUCKETS = cats.filter(c => c.key !== 'investment').map(c => c.key);
   }
 
   // Helpers for server buckets absent from the local store (cross-device or after a delete).
   // labelForBucket: local label if known, otherwise the raw server key (never "Uncategorized").
-  // colorForBucket: local color if known, otherwise the neutral muted token.
+  // categoryColor: THE single color resolver — local (override-aware) color if known, otherwise
+  // the neutral muted token. Every consumer of a bucket/category color (PVA bars, budget-builder
+  // bucket accents, ledger chips/pills, the filter chip, sinking-fund lens labels, etc.) must
+  // route through this function rather than reading KINDS[key].color directly, so a future change
+  // to how colors resolve only ever has to touch one place.
   function labelForBucket(key) { return KINDS[key] ? KINDS[key].label : key; }
-  function colorForBucket(key) { return KINDS[key] ? KINDS[key].color : 'var(--muted)'; }
+  function categoryColor(key) { return KINDS[key] ? KINDS[key].color : 'var(--muted)'; }
 
   function catManageRender() {
     ['bgb_cat_manage', 'ac_cat_manage'].forEach(id => {
@@ -6035,7 +6235,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       const cats = getCategories();
       let h = '<div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px">';
       cats.forEach(c => {
-        if (c.key === catEditKey && !c.locked) {
+        const resolved = categoryColor(c.key);
+        if (c.key === catEditKey && c.locked) {
+          // Built-ins: color-only edit — label/lock stay immutable. Seed the picker from the
+          // current resolved color (override if set, else the theme default resolved to hex,
+          // since <input type=color> can't accept a raw var(...) string).
+          const seedHex = c.colorOverride || resolveCssColorToHex(c.color);
+          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
+            + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(seedHex) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
+            + '<span style="flex:1">' + esc(c.label) + ' <span class="mini" style="color:var(--muted)">(built-in — color only)</span></span>'
+            + '<button class="bgb-x" data-savecat="' + esc(id) + '" title="save" aria-label="save" style="font-size:var(--fs-xs);padding:1px 6px;color:var(--accent)">&#10003;</button>'
+            + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:var(--fs-xs);padding:1px 6px">&#10005;</button>'
+            + '</div>';
+        } else if (c.key === catEditKey && !c.locked) {
           h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(c.color) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
             + '<input id="' + esc(id) + '_editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '" style="flex:1;min-width:0">'
@@ -6043,10 +6255,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:var(--fs-xs);padding:1px 6px">&#10005;</button>'
             + '</div>';
         } else {
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
-            + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + c.color + ';vertical-align:middle"></span>'
-            + '<span style="flex:1">' + esc(c.label) + '</span>'
+          // "Counts toward" (0.3.4 batch): a compact select on EVERY category row — built-in or
+          // custom — that writes c.countsAs via setCategoryCountsAs(). flex-wrap on the row lets
+          // this extra control drop to its own line at narrow widths instead of clipping the
+          // existing swatch/label/edit-button cluster (see technique_scgrid_inline_align_items_trap
+          // precedent: new elements in an existing row need an actual mobile-width check, not an
+          // assumption).
+          const caOpts = ['need', 'want', 'investment', ''].map(v =>
+            '<option value="' + v + '"' + ((c.countsAs || '') === v ? ' selected' : '') + '>' + (v ? esc(KINDS[v].label) : 'Standalone') + '</option>').join('');
+          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0;flex-wrap:wrap">'
+            + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + resolved + ';vertical-align:middle"></span>'
+            + '<span style="flex:1;min-width:60px">' + esc(c.label) + '</span>'
             + (c.locked ? '<span style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)">built-in</span>' : '')
+            + '<select class="cat-countsas" data-countsas="' + esc(c.key) + '" title="counts toward the 50/30/20 framework" aria-label="' + esc(c.label) + ' counts toward" style="font-size:var(--fs-2xs);padding:1px 3px;border-radius:4px;max-width:108px;flex-shrink:0">' + caOpts + '</select>'
+            + (c.locked ? '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="recolor ' + esc(c.label) + '" aria-label="recolor ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#9998;</button>' : '')
+            + (c.locked && c.colorOverride ? '<button class="bgb-x" data-resetcat="' + esc(c.key) + '" title="reset to default color" aria-label="reset ' + esc(c.label) + ' to default color" style="font-size:var(--fs-xs);padding:1px 6px">&#8635;</button>' : '')
             + (c.locked ? '' : '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="edit ' + esc(c.label) + '" aria-label="edit ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#9998;</button>')
             + (c.locked ? '' : '<button class="bgb-x" data-delcat="' + esc(c.key) + '" title="delete ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#215;</button>')
             + '</div>';
@@ -6078,8 +6301,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function catManageHandleSave(containerId) {
-    const labelEl = $(containerId + '_editlbl'), colorEl = $(containerId + '_editclr');
-    if (!labelEl || !catEditKey) return;
+    if (!catEditKey) return;
+    const cats = getCategories();
+    const cat = cats.find(c => c.key === catEditKey);
+    const colorEl = $(containerId + '_editclr');
+    if (cat && cat.locked) {
+      // Built-in: color-only save via the override path (no label field exists on this row).
+      setCategoryColorOverride(catEditKey, colorEl ? colorEl.value : null);
+      return;
+    }
+    const labelEl = $(containerId + '_editlbl');
+    if (!labelEl) return;
     const ok = editCategory(catEditKey, labelEl.value, colorEl ? colorEl.value : null);
     if (ok) catEditKey = null;
     // On invalid (ok === false): leave catEditKey set, don't re-render so in-progress input is preserved
@@ -6091,12 +6323,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (da) { e.preventDefault(); await deleteCategory(da.dataset.delcat); return; }
     const aa = e.target.closest('[data-addcat]');
     if (aa) { e.preventDefault(); catManageHandleAdd(aa.dataset.addcat); return; }
+    const ra = e.target.closest('[data-resetcat]');
+    if (ra) { e.preventDefault(); resetCategoryColor(ra.dataset.resetcat); return; }
     const ea = e.target.closest('[data-editcat]');
     if (ea) {
       e.preventDefault();
       catEditKey = ea.dataset.editcat;
       catManageRender();
-      const f = $('bgb_cat_manage_editlbl') || $('ac_cat_manage_editlbl');
+      const f = $('bgb_cat_manage_editlbl') || $('ac_cat_manage_editlbl') || $('bgb_cat_manage_editclr') || $('ac_cat_manage_editclr');
       if (f) f.focus();
       return;
     }
@@ -6104,6 +6338,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sa) { e.preventDefault(); catManageHandleSave(sa.dataset.savecat); return; }
     const ca = e.target.closest('[data-cancelcat]');
     if (ca) { e.preventDefault(); catEditKey = null; catManageRender(); return; }
+  });
+
+  // "Counts toward" select (0.3.4 batch) — its own change listener rather than folding into the
+  // click handler above since a <select> fires 'change', not 'click'.
+  document.addEventListener('change', function(e) {
+    const sel = e.target.closest && e.target.closest('[data-countsas]');
+    if (!sel) return;
+    setCategoryCountsAs(sel.dataset.countsas, sel.value);
   });
 
   // Keyboard shortcuts for the inline category edit row
@@ -6285,24 +6527,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   function bgbRender() {
     let h = '';
     bgb.buckets.forEach((b, bi) => {
-      h += '<div class="bgb-bucket" style="border-left:3px solid ' + (KINDS[b.kind] || KINDS.other).color + '"><div class="bgb-bhead">'
+      const collapsed = !!b.collapsed;
+      h += '<div class="bgb-bucket" style="border-left:3px solid ' + categoryColor(KINDS[b.kind] ? b.kind : 'other') + '"><div class="bgb-bhead">'
+        // Bucket drag handle — same ⠿ vocabulary as the item/group grip (.bgb-grip), kept as a
+        // distinct class (.bgb-bucket-grip) so the shared dragstart listener can tell "reorder a
+        // whole bucket" apart from "move an item" without one accidentally matching the other.
+        + '<span class="bgb-bucket-grip" draggable="true" data-bidx="' + bi + '" title="drag to reorder buckets" aria-hidden="true">⠿</span>'
+        + '<button type="button" class="bgb-x bgb-collapse-btn" data-collapse="' + bi + '" aria-expanded="' + (!collapsed) + '" aria-controls="bgb_body_' + bi + '" title="' + (collapsed ? 'expand bucket' : 'collapse bucket') + '" aria-label="' + (collapsed ? 'expand' : 'collapse') + ' ' + esc(b.name) + '">' + (collapsed ? '&#9656;' : '&#9662;') + '</button>'
         + '<input type="text" class="bgb-bname" data-b="' + bi + '" value="' + esc(b.name) + '">'
         + '<select class="bgb-bkind" data-b="' + bi + '" title="bucket type — need / want / investment">' + Object.keys(KINDS).map(k => '<option value="' + k + '"' + ((b.kind || 'other') === k ? ' selected' : '') + '>' + esc(KINDS[k].label) + '</option>').join('') + '</select>'
         + '<span class="bgb-bsum" data-b="' + bi + '"></span>'
         + '<button class="bgb-x" data-delb="' + bi + '" title="remove bucket">✕</button></div>';
-      // direct (ungrouped) items live right under the bucket — no group required
-      h += itemsTable(bi, 'd', b.items)
-        + '<button class="seed-btn bgb-additem" data-add="' + bi + '_d">+ item</button>';
-      // optional named sub-groups
-      b.groups.forEach((g, gi) => {
-        h += '<div class="bgb-group"><div class="bgb-ghead">'
-          + '<input type="text" class="bgb-gname" data-b="' + bi + '" data-g="' + gi + '" value="' + esc(g.name) + '">'
-          + '<span class="bgb-gsum" data-b="' + bi + '" data-g="' + gi + '"></span>'
-          + '<button class="bgb-x" data-delg="' + bi + '_' + gi + '" title="remove group">✕</button></div>'
-          + itemsTable(bi, gi, g.items)
-          + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
-      });
-      h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button></div>';
+      // Collapsed: header row (grip/chevron/name/kind/total/delete) only — items, groups and the
+      // add-item/add-group affordances are omitted entirely (not just visually hidden) until
+      // re-expanded. bgbTotals() still fills .bgb-bsum correctly either way since it sums from
+      // the `bgb` model, not the DOM.
+      if (!collapsed) {
+        h += '<div id="bgb_body_' + bi + '">';
+        // direct (ungrouped) items live right under the bucket — no group required
+        h += itemsTable(bi, 'd', b.items)
+          + '<button class="seed-btn bgb-additem" data-add="' + bi + '_d">+ item</button>';
+        // optional named sub-groups
+        b.groups.forEach((g, gi) => {
+          h += '<div class="bgb-group"><div class="bgb-ghead">'
+            + '<input type="text" class="bgb-gname" data-b="' + bi + '" data-g="' + gi + '" value="' + esc(g.name) + '">'
+            + '<span class="bgb-gsum" data-b="' + bi + '" data-g="' + gi + '"></span>'
+            + '<button class="bgb-x" data-delg="' + bi + '_' + gi + '" title="remove group">✕</button></div>'
+            + itemsTable(bi, gi, g.items)
+            + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
+        });
+        h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button>';
+        h += '</div>';
+      }
+      h += '</div>';
     });
     $('bgBuilder').innerHTML = h;
     formatUSDFields();   // comma-format the freshly-rendered item amount inputs
@@ -6361,14 +6618,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       const pctOf = v => (incomeBase > 0 ? (v / incomeBase * 100).toFixed(1) : '0.0') + '%';
       const pf = payFreq();                          // paychecks per year (e.g. 24 = semi-monthly)
       const pp = v => f2(v * 12 / pf);               // monthly → per-paycheck
-      const kindT = {}; getCategories().forEach(c => { kindT[c.key] = 0; });
+      const categories = getCategories();
+      const kindT = {}; categories.forEach(c => { kindT[c.key] = 0; });
       cats.forEach(c => { kindT[c.kind] = (kindT[c.kind] || 0) + c.total; });
-      kindT.investment += taxInvest;
-      const order = getCategories().map(c => c.key);
       const allocTot = allocated + taxInvest;
 
+      // "Counts toward" framework fold (0.3.4 batch, foldCategoriesByCountsAs() above): kindT is
+      // per-CATEGORY raw spend and window.__budgetPlan.kindMonthly below stays keyed on that raw
+      // shape unchanged — the Actuals plan-vs-actual lens (acRenderPVA) compares per-BUCKET, never
+      // per-framework-kind, so it never needed folding. This fold only feeds the "By type vs
+      // strategy" table + "Spending by type" bars just below, a pure display concern.
+      const fold = foldCategoriesByCountsAs(categories, kindT);
+      fold.framework.investment += taxInvest;   // Tax-tab investments always count as Investment — not a category, bypasses countsAs entirely
+
       // Verdict headline: investment rate vs the strategy's investment target
-      const _invPct = incomeBase > 0 ? kindT.investment / incomeBase : 0;
+      const _invPct = incomeBase > 0 ? fold.framework.investment / incomeBase : 0;
       const _invTgt = T.investment != null ? T.investment : 0.20;
       // Expose the derived monthly plan baseline so the Actuals tab can lock it for plan-vs-actual.
       const planLines = {};
@@ -6377,11 +6641,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         partnerSplits: { household: Math.round(household * 100) / 100, yourShare: Math.round(allocated * 100) / 100, partner: Math.round(Math.max(0, partner) * 100) / 100 } };
       bgbRenderAliasGroups(); bgbFillAliasTargets();
       let cs = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Investing ' + (_invPct * 100).toFixed(0) + '% of after-tax income — ' + (_invPct >= _invTgt ? 'at or above' : 'below') + ' the ' + (_invTgt * 100).toFixed(0) + '% target</div><div class="s">vs ' + esc(bgb.strategy) + '</div></div></div>';
-      // 1) By type vs the selected strategy — per-paycheck + monthly + yearly + target + Δ
+      // 1) By type vs the selected strategy — per-paycheck + monthly + yearly + target + Δ. The
+      // three rows are always the framework kinds (folded per countsAs); anything standalone
+      // (countsAs=null) gets its own visually-distinct group below with no target — see
+      // foldCategoriesByCountsAs() above. framework+standalone always sums to the same total as
+      // before the fold, so "Spent + invested" / "Unallocated" and the 100% reconciliation are
+      // unaffected by construction.
+      const standaloneRows = fold.standalone.filter(s => s.total > 0.005);
       cs += '<div class="subhead">By type vs <b>' + esc(bgb.strategy) + '</b> <span class="mini" style="font-weight:var(--fw-normal)">(% of after-tax income · pp = per paycheck, ' + pf + '×/yr)</span></div>'
         + '<table class="res-table"><tr><th>Type</th><th>/ pp</th><th>/ mo</th><th>/ yr</th><th>%</th><th>Target</th><th>Δ</th></tr>';
-      order.forEach(k => {
-        const tot = kindT[k] || 0; if (tot <= 0 && T[k] == null) return;
+      ['need', 'want', 'investment'].forEach(k => {
+        const tot = fold.framework[k] || 0;
         const tgt = T[k];
         let tcell = '<span class="muted">—</span>', dcell = '<span class="muted">—</span>';
         if (tgt != null) {
@@ -6390,28 +6660,44 @@ document.addEventListener('DOMContentLoaded', async () => {
           tcell = (tgt * 100).toFixed(0) + '%';
           dcell = '<span class="' + (better ? 'good-text' : 'bad-text') + '">' + (delta >= 0 ? '+' : '') + delta.toFixed(1) + '%</span>';
         }
-        cs += '<tr><td><span style="color:' + KINDS[k].color + '">●</span> ' + esc(KINDS[k].label) + '</td><td class="num">' + pp(tot) + '</td><td class="num">' + f2(tot) + '</td><td class="num">' + f2(tot * 12) + '</td><td class="num">' + pctOf(tot) + '</td><td class="num">' + tcell + '</td><td class="num">' + dcell + '</td></tr>';
+        const inclList = fold.foldedIncludes[k];
+        const inclSuffix = inclList.length ? ' <span class="mini" style="color:var(--muted);font-weight:var(--fw-normal)">(incl. ' + inclList.map(esc).join(', ') + ')</span>' : '';
+        cs += '<tr><td><span style="color:' + categoryColor(k) + '">●</span> ' + esc(KINDS[k].label) + inclSuffix + '</td><td class="num">' + pp(tot) + '</td><td class="num">' + f2(tot) + '</td><td class="num">' + f2(tot * 12) + '</td><td class="num">' + pctOf(tot) + '</td><td class="num">' + tcell + '</td><td class="num">' + dcell + '</td></tr>';
       });
+      if (standaloneRows.length) {
+        cs += '<tr><td colspan="7" style="padding-top:10px;border-top:1px solid var(--line)"><span class="mini" style="color:var(--muted);text-transform:uppercase;letter-spacing:.03em">Standalone <span style="text-transform:none;font-weight:var(--fw-normal)">— not counted toward the framework</span></span></td></tr>';
+        standaloneRows.forEach(s => {
+          cs += '<tr><td><span style="color:' + categoryColor(s.key) + '">●</span> ' + esc(s.label) + '</td><td class="num">' + pp(s.total) + '</td><td class="num">' + f2(s.total) + '</td><td class="num">' + f2(s.total * 12) + '</td><td class="num">' + pctOf(s.total) + '</td><td class="num"><span class="muted">—</span></td><td class="num"><span class="muted">—</span></td></tr>';
+        });
+      }
       cs += '<tr class="total"><td>Spent + invested</td><td class="num">' + pp(allocTot) + '</td><td class="num">' + f2(allocTot) + '</td><td class="num">' + f2(allocTot * 12) + '</td><td class="num">' + pctOf(allocTot) + '</td><td></td><td></td></tr>';
       cs += '<tr><td>Unallocated take-home</td><td class="num ' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + pp(rem) + '</td><td class="num ' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + f2(rem) + '</td><td class="num">' + f2(rem * 12) + '</td><td class="num">' + pctOf(rem) + '</td><td></td><td></td></tr>';
       cs += '</table>';
       if (taxInvest > 0) cs += '<div class="note-box">Investment includes your <b>' + f2(taxInvest) + '/mo</b> of 401k/HSA/Roth/ESPP from the <b>Tax</b> tab, on top of budget investments. Percentages are of after-tax income (take-home + investments).</div>';
 
-      // 2) Bar graph by type (% of after-tax income)
+      // 2) Bar graph by type (% of after-tax income) — same framework fold + standalone group
+      // as the table above, for consistency (0.3.4 batch sweep).
       cs += '<div class="subhead">Spending by type (% of after-tax income)</div>';
-      order.forEach(k => {
-        const tot = kindT[k] || 0; if (tot <= 0) return;
+      ['need', 'want', 'investment'].forEach(k => {
+        const tot = fold.framework[k] || 0; if (tot <= 0) return;
         const w = incomeBase > 0 ? Math.min(100, tot / incomeBase * 100) : 0;
         cs += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-xs)">'
           + '<span style="width:74px;color:var(--muted)">' + esc(KINDS[k].label) + '</span>'
-          + '<span style="flex:1;background:var(--chip);border-radius:4px;overflow:hidden"><span style="display:block;height:11px;width:' + w + '%;background:' + KINDS[k].color + '"></span></span>'
+          + '<span style="flex:1;background:var(--chip);border-radius:4px;overflow:hidden"><span style="display:block;height:11px;width:' + w + '%;background:' + categoryColor(k) + '"></span></span>'
           + '<span style="width:48px;text-align:right">' + pctOf(tot) + '</span></div>';
+      });
+      standaloneRows.forEach(s => {
+        const w = incomeBase > 0 ? Math.min(100, s.total / incomeBase * 100) : 0;
+        cs += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-xs)">'
+          + '<span style="width:74px;color:var(--muted)">' + esc(s.label) + '</span>'
+          + '<span style="flex:1;background:var(--chip);border-radius:4px;overflow:hidden"><span style="display:block;height:11px;width:' + w + '%;background:' + categoryColor(s.key) + '"></span></span>'
+          + '<span style="width:48px;text-align:right">' + pctOf(s.total) + '</span></div>';
       });
 
       // 3) By bucket — monthly + yearly (+ the Tax-tab investments row)
       cs += '<div class="subhead">By bucket (per paycheck · monthly · yearly)</div><table class="res-table"><tr><th>Bucket</th><th>Type</th><th>/ pp</th><th>/ mo</th><th>/ yr</th><th>%</th></tr>';
-      cats.forEach(c => { cs += '<tr><td>' + esc(c.name) + '</td><td><span style="color:' + KINDS[c.kind].color + '">●</span> ' + esc(KINDS[c.kind].label) + '</td><td class="num">' + pp(c.total) + '</td><td class="num">' + f2(c.total) + '</td><td class="num">' + f2(c.total * 12) + '</td><td class="num">' + pctOf(c.total) + '</td></tr>'; });
-      if (taxInvest > 0) cs += '<tr><td><i>Investments (Tax tab)</i></td><td><span style="color:' + KINDS.investment.color + '">●</span> ' + esc(KINDS.investment.label) + '</td><td class="num">' + pp(taxInvest) + '</td><td class="num">' + f2(taxInvest) + '</td><td class="num">' + f2(taxInvest * 12) + '</td><td class="num">' + pctOf(taxInvest) + '</td></tr>';
+      cats.forEach(c => { cs += '<tr><td>' + esc(c.name) + '</td><td><span style="color:' + categoryColor(c.kind) + '">●</span> ' + esc(KINDS[c.kind].label) + '</td><td class="num">' + pp(c.total) + '</td><td class="num">' + f2(c.total) + '</td><td class="num">' + f2(c.total * 12) + '</td><td class="num">' + pctOf(c.total) + '</td></tr>'; });
+      if (taxInvest > 0) cs += '<tr><td><i>Investments (Tax tab)</i></td><td><span style="color:' + categoryColor('investment') + '">●</span> ' + esc(KINDS.investment.label) + '</td><td class="num">' + pp(taxInvest) + '</td><td class="num">' + f2(taxInvest) + '</td><td class="num">' + f2(taxInvest * 12) + '</td><td class="num">' + pctOf(taxInvest) + '</td></tr>';
       cs += '</table>';
 
       cse.innerHTML = cs;
@@ -6442,16 +6728,45 @@ document.addEventListener('DOMContentLoaded', async () => {
       else if (d.delg != null) { p = d.delg.split('_'); bgb.buckets[+p[0]].groups.splice(+p[1], 1); saveBgb(); bgbRender(); }
       else if (d.addg != null) { bgb.buckets[+d.addg].groups.push({ name: 'New group', items: [] }); saveBgb(); bgbRender(); }
       else if (d.delb != null) { bgb.buckets.splice(+d.delb, 1); saveBgb(); bgbRender(); }
+      else if (d.collapse != null) { const bk = bgb.buckets[+d.collapse]; if (bk) { bk.collapsed = !bk.collapsed; saveBgb(); bgbRender(); } }
     });
-    // drag-and-drop: reorder items within a group, or move them between groups/buckets
+    // drag-and-drop: reorder items within a group, or move them between groups/buckets — plus a
+    // second, independent drag flow (bucketDragSrc) for reordering whole buckets. The bucket grip
+    // carries its OWN class (.bgb-bucket-grip, not .bgb-grip) specifically so these two flows
+    // never both match the same dragstart — group/item drag behavior below is untouched.
     let dragSrc = null;
+    let bucketDragSrc = null;
     bgRoot.addEventListener('dragstart', e => {
+      const bgrip = e.target.closest && e.target.closest('.bgb-bucket-grip');
+      if (bgrip) {
+        bucketDragSrc = +bgrip.dataset.bidx;
+        e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', 'bucket'); } catch (_) {}
+        return;
+      }
       const grip = e.target.closest && e.target.closest('.bgb-grip'); if (!grip) return;
       const r = grip.closest('tr'); dragSrc = { b: r.dataset.b, g: r.dataset.g, i: r.dataset.i };
       e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', 'x'); } catch (_) {}
     });
-    bgRoot.addEventListener('dragover', e => { if (dragSrc) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+    bgRoot.addEventListener('dragover', e => { if (dragSrc || bucketDragSrc != null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
     bgRoot.addEventListener('drop', e => {
+      if (bucketDragSrc != null) {
+        e.preventDefault();
+        const buckets = Array.from(bgRoot.querySelectorAll(':scope > .bgb-bucket'));
+        const bucketEl = e.target.closest('.bgb-bucket');
+        const idx = bucketEl ? buckets.indexOf(bucketEl) : -1;
+        if (idx > -1 && idx !== bucketDragSrc) {
+          const [moved] = bgb.buckets.splice(bucketDragSrc, 1);
+          bgb.buckets.splice(idx, 0, moved);
+          saveBgb(); bgbRender();
+        } else if (!bucketEl && e.target === bgRoot) {
+          // dropped in the empty space below the last bucket — move to the end
+          const [moved] = bgb.buckets.splice(bucketDragSrc, 1);
+          bgb.buckets.push(moved);
+          saveBgb(); bgbRender();
+        }
+        bucketDragSrc = null;
+        return;
+      }
       if (!dragSrc) return; e.preventDefault();
       let tgt = null; const row = e.target.closest('tr[data-i]');
       if (row) tgt = { b: row.dataset.b, g: row.dataset.g, i: +row.dataset.i };
@@ -6738,7 +7053,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   function wiHideBanner() {
     const el = $('wi_banner'); if (el) el.hidden = true;
-    const dp = $('wi_drafts_panel'); if (dp) dp.hidden = true;
     const startBtn = $('wi_start_btn'); if (startBtn) startBtn.hidden = false;
     document.body.classList.remove('whatif-active');
     document.body.classList.remove('wi-peek');
@@ -6870,10 +7184,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- EXIT (KEEP): park the sandbox and return to live reality without losing anything ----
-  // The session blob is already persisted on every in-mode edit, so parking just means:
-  // leave the blob in place, free the lock, restore the live view, and offer Resume.
+  // The session blob is already persisted on every in-mode edit, so the LOCAL side of parking
+  // just means: leave the blob in place, free the lock, restore the live view, and offer Resume
+  // (unchanged — still the device-local fallback for a sandbox that never gets network-parked).
+  //
+  // TODO-243 §0 decision 2 (cross-device parking): "Exit — keep" now ALSO upserts a single
+  // per-user server scenario row (see wiParkUpsert/WI_PARKED_NAME below) so the picker's
+  // "Parked" entry can resume this sandbox from any device. The write is best-effort and never
+  // blocks the exit; a failure leaves the local blob as the only copy, which is exactly the
+  // "device-local until its first successful exit-keep" fallback the decision allows.
   async function wiExitKeep() {
     if (!WhatIf.active) return;
+    // Capture the spec BEFORE any teardown below: wiBuildSpecFromLive() reads
+    // window.__budgetPlan/__taxResult (derived from whatever the DOM is currently showing —
+    // still the sandbox's edited values at this point) and WhatIf.session.live. Once
+    // WhatIf.active flips false and wiRepopulateDom()+recompute() run a few lines down, those
+    // globals reflect LIVE reality instead — capturing after that point would park the wrong data.
+    const actMonth = (WhatIf.session.meta && WhatIf.session.meta.activationMonth) || scDefaultMonth();
+    const parkSpec = wiBuildSpecFromLive(actMonth);
     WhatIf.suppress = true;
     WhatIf.active = false;
     wiReleaseLock();
@@ -6883,7 +7211,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
     wiCheckResumeOnBoot();   // offer the Resume bar right away, same as after a reload
-    showToast('What-if parked — these are your real numbers again. Resume it any time.');
+    // The network park runs strictly AFTER the mode teardown above (WhatIf.active is already
+    // false) — mirrors wiActivate's "never mid-mode" placement for real-data writes, even though
+    // a scenario-table row is hypothetical-by-definition, not real Actuals data (M4 is unaffected).
+    if (parkSpec) {
+      const parked = await wiParkUpsert(parkSpec);
+      showToast(parked
+        ? 'What-if parked — saved to your account, resume it from any device.'
+        : 'What-if parked on this device — could not reach the server to sync it.');
+    } else {
+      showToast('What-if parked — these are your real numbers again. Resume it any time.');
+    }
   }
 
   // ---- SAVE AS: branch the current what-if into a separate NEW scenario draft ----
@@ -6980,36 +7318,160 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { showToast('Activate failed: ' + (e.message || '')); }
   }
 
-  // ---- Drafts list (banner dropdown) + "load a draft into mode" ----
-  async function wiRefreshDraftsList() {
-    const el = $('wi_drafts_list'); if (!el) return;
-    let data;
-    try { data = await scGet('/api/tracking/scenarios'); }
-    catch (e) { el.innerHTML = '<span class="mini muted">Could not load drafts (is the server running?)</span>'; return; }
-    const rows = data.scenarios || [];
-    if (!rows.length) { el.innerHTML = '<span class="mini muted">No saved what-ifs yet.</span>'; return; }
-    el.innerHTML = rows.map(x => {
-      const act = x.status === 'active';
-      return '<div class="sc-row' + (act ? ' is-active' : '') + '" style="display:flex;gap:8px;align-items:center;padding:2px 0">'
-        + '<span class="sc-badge' + (act ? ' is-active' : '') + '">' + (act ? 'Active' : 'Draft') + '</span>'
-        + '<span class="sc-name">' + esc(x.name) + '</span>'
-        + '<span class="sc-actions" style="margin-left:auto">'
-        + (act ? '<button type="button" class="seed-btn" data-wirev="' + x.id + '">↩ Revert</button>'
-               : '<button type="button" class="seed-btn" data-wiload="' + x.id + '">Load into mode</button>'
-                 + '<button type="button" class="bgb-x" data-widel="' + x.id + '" title="delete draft">✕</button>')
-        + '</span></div>';
-    }).join('');
+  // ---- Parked slot (TODO-243 §0 decision 2) ----
+  // Reserved-name convention: NOT a new scenario-table column/flag -- the parked slot is an
+  // ordinary per-user scenario row whose `name` is this exact sentinel string, deliberately
+  // distinctive so a name typed via prompt()/rename would essentially never collide with it by
+  // accident (not a hard security boundary -- a determined API caller could still craft this
+  // exact string, but the only consequence is a cosmetic collision, never a data leak: scenarios
+  // stay per-user/scope-isolated regardless of name). A row named this way is filtered OUT of
+  // "Your saved what-ifs" everywhere below and surfaced only via the picker's "Parked" group.
+  // "Exit -- keep" (wiExitKeep, above) PUTs/POSTs this exact row every time -- one slot,
+  // overwritten on each park, distinct from any named saved draft.
+  const WI_PARKED_NAME = 'wi-reserved-parked-slot-v1';
+  async function wiFetchScenarioRows() {
+    const data = await scGet('/api/tracking/scenarios');
+    return data.scenarios || [];
   }
-  async function wiLoadDraftIntoMode(id) {
+  function wiParkedRowFrom(rows) {
+    // status !== 'active' is defensive, not load-bearing: wiPickerResumeParked() detaches the
+    // session from this row (clears draftId, assigns a real name) the instant it's opened, so a
+    // later Activate always targets a freshly-created normal row — an ACTIVE row still bearing
+    // the reserved name should never occur, but a stray one is simply hidden rather than resumed.
+    const candidates = rows.filter(r => r.name === WI_PARKED_NAME && r.status !== 'active');
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    return candidates[0];
+  }
+  async function wiParkUpsert(spec) {
+    let existing = null;
+    try { existing = wiParkedRowFrom(await wiFetchScenarioRows()); } catch (e) {}
+    try {
+      if (existing) { await scSend('PUT', '/api/tracking/scenarios/' + existing.id, { name: WI_PARKED_NAME, spec: spec }); return true; }
+      await scSend('POST', '/api/tracking/scenarios', { name: WI_PARKED_NAME, spec: spec });
+      return true;
+    } catch (e) {
+      // The existing row raced to 'active' (or some other conflict) between the list and the PUT
+      // — fall back to a fresh row rather than losing the park.
+      try { await scSend('POST', '/api/tracking/scenarios', { name: WI_PARKED_NAME, spec: spec }); return true; }
+      catch (e2) { return false; }
+    }
+  }
+
+  // Relative-time formatter for the picker's "Parked · 2h ago" / last-touched rows. Never throws
+  // on a missing/unparseable timestamp — falls back to an empty string.
+  function wiRelTime(iso) {
+    if (!iso) return '';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!isFinite(ms)) return '';
+    if (ms < 60000) return 'just now';
+    const m = Math.floor(ms / 60000);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  // Cheap delta hint (spec §4.3): drawn only from the stored spec (comp.base / takeHome) — never
+  // a live recompute, so it's honest and can't drift. list_scenarios returns summaries only (no
+  // payload), so this fetches each row's full record; counts are always small (a handful of
+  // drafts), so N parallel GETs on popover-open is acceptable and touches no endpoint contract.
+  async function wiScenarioDeltaHint(id) {
+    try {
+      const full = await scGet('/api/tracking/scenarios/' + id);
+      const spec = (full.payload || {}).spec || {};
+      const parts = [];
+      if (spec.comp && spec.comp.base) parts.push('base ' + fmt$(Math.round(spec.comp.base)));
+      if (spec.takeHome) parts.push('take-home ' + fmt$(Math.round(spec.takeHome / 12)) + '/mo');
+      return parts.join(' · ');
+    } catch (e) { return ''; }
+  }
+  async function wiFetchDeltaHints(rows) {
+    const hints = {};
+    await Promise.all(rows.map(async r => { hints[r.id] = await wiScenarioDeltaHint(r.id); }));
+    return hints;
+  }
+
+  // ---- Picker list rendering (TODO-243 Feature 2): Parked group + Your saved what-ifs group ----
+  let wiPickerRenameId = null;
+  async function wiRefreshDraftsList() {
+    const parkedEl = $('wi_picker_parked'), savedEl = $('wi_picker_saved');
+    if (!parkedEl || !savedEl) return;   // popup not in the DOM
+    let rows;
+    try { rows = await wiFetchScenarioRows(); }
+    catch (e) {
+      parkedEl.innerHTML = '';
+      savedEl.innerHTML = '<div class="subhead" style="margin:0 0 4px">Your saved what-ifs</div><span class="mini muted">Could not load your what-ifs (is the server running?)</span>';
+      return;
+    }
+    const parked = wiParkedRowFrom(rows);
+    parkedEl.innerHTML = !parked ? '' : (
+      '<div class="subhead" style="margin:0 0 4px">Parked</div>'
+      + '<div class="sc-list">'
+      + '<div class="sc-row">'
+        + '<span class="sc-badge">Parked</span>'
+        + '<span class="sc-meta">' + esc(wiRelTime(parked.updatedAt)) + '</span>'
+        + '<span class="sc-actions"><button type="button" class="seed-btn" data-wiparkresume="' + parked.id + '">Resume</button></span>'
+      + '</div></div>'
+    );
+    const saved = rows.filter(r => r.name !== WI_PARKED_NAME)
+      .sort((a, b) => (b.status === 'active') - (a.status === 'active') || new Date(b.updatedAt) - new Date(a.updatedAt));
+    if (!saved.length) {
+      savedEl.innerHTML = '<div class="subhead" style="margin:0 0 4px">Your saved what-ifs</div><span class="mini muted">No saved what-ifs yet.</span>';
+      return;
+    }
+    const hints = await wiFetchDeltaHints(saved);
+    savedEl.innerHTML = '<div class="subhead" style="margin:0 0 4px">Your saved what-ifs</div><div class="sc-list">'
+      + saved.map(x => {
+          const act = x.status === 'active';
+          if (x.id === wiPickerRenameId && !act) {
+            return '<div class="sc-row" data-wirenamerow="' + x.id + '">'
+              + '<span class="sc-badge">Draft</span>'
+              + '<input type="text" class="wi-rename-input" data-wirename-input="' + x.id + '" value="' + esc(x.name) + '">'
+              + '<span class="sc-actions">'
+                + '<button type="button" class="bgb-x" data-wirename-save="' + x.id + '" title="save name" aria-label="save name" style="color:var(--accent)">&#10003;</button>'
+                + '<button type="button" class="bgb-x" data-wirename-cancel="' + x.id + '" title="cancel rename" aria-label="cancel rename">&#10005;</button>'
+              + '</span></div>';
+          }
+          const hint = hints[x.id] ? '<div class="mini muted" style="flex-basis:100%">' + esc(hints[x.id]) + '</div>' : '';
+          return '<div class="sc-row' + (act ? ' is-active' : '') + '">'
+            + '<span class="sc-badge' + (act ? ' is-active' : '') + '">' + (act ? 'Active' : 'Draft') + '</span>'
+            + '<span class="sc-name">' + esc(x.name) + '</span>'
+            + '<span class="sc-meta">' + esc(wiRelTime(x.updatedAt)) + '</span>'
+            + '<span class="sc-actions">'
+              + (act ? '<button type="button" class="seed-btn" data-wirev="' + x.id + '">&#8617; Revert</button>'
+                     : '<button type="button" class="seed-btn" data-wiload="' + x.id + '">Open</button>'
+                       + '<button type="button" class="seed-btn" data-wirenamebtn="' + x.id + '">Rename</button>'
+                       + '<button type="button" class="bgb-x" data-widel="' + x.id + '" title="Delete this what-if">&#10005;</button>')
+            + '</span>'
+            + hint
+            + '</div>';
+        }).join('')
+      + '</div>';
+  }
+  async function wiPickerCommitRename(id) {
+    const popup = $('wi_picker_popup');
+    const inp = popup && popup.querySelector('[data-wirename-input="' + id + '"]');
+    const name = ((inp && inp.value) || '').trim();
+    if (!name) { if (inp) inp.focus(); return; }
+    try { await scSend('PUT', '/api/tracking/scenarios/' + id, { name: name }); wiPickerRenameId = null; await wiRefreshDraftsList(); }
+    catch (e) { showToast('Rename failed: ' + (e.message || '')); }
+  }
+
+  // "Load into mode" core, shared by the normal "Open" action and Resume-from-Parked (which
+  // additionally detaches the session from the reserved parked row — see WI_PARKED_NAME above).
+  async function wiLoadScenarioIntoMode(id, opts) {
+    opts = opts || {};
     let s;
-    try { s = await scGet('/api/tracking/scenarios/' + id); } catch (e) { showToast('Could not load the draft'); return; }
+    try { s = await scGet('/api/tracking/scenarios/' + id); } catch (e) { showToast('Could not load this what-if'); return; }
     const spec = (s.payload || {}).spec || {};
-    if (!WhatIf.active) wiEnter(s.name);
+    const displayName = opts.displayName || s.name;
+    if (!WhatIf.active) wiEnter(displayName);
     if (!WhatIf.active || !WhatIf.session) return;
-    WhatIf.session.meta.draftId = s.id;
-    WhatIf.session.meta.name = s.name;
+    WhatIf.session.meta.draftId = opts.detach ? null : s.id;
+    WhatIf.session.meta.name = displayName;
     if (spec.activationMonth) WhatIf.session.meta.activationMonth = spec.activationMonth;
-    const nm = $('wi_banner_name'); if (nm) nm.textContent = s.name;
+    const nm = $('wi_banner_name'); if (nm) nm.textContent = displayName;
     // payloadVersion 2 drafts stash the WHOLE session.live blob (F1) at Save-draft time — replay
     // it verbatim so every scoped surface (Tax, budget, tabs, maxout, FIRE, active tab) shows
     // exactly what was saved, not just the comp fields. This is the "graceful v1 degrade" path
@@ -7021,16 +7483,97 @@ document.addEventListener('DOMContentLoaded', async () => {
       WhatIf.suppress = true;
       wiRepopulateDom();
       try { await recompute(); } finally { WhatIf.suppress = false; }
-      showToast('Loaded “' + s.name + '” into What-If Mode');
+      showToast(opts.toastLoaded || ('Loaded “' + displayName + '” into What-If Mode'));
     } else {
       try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
       if (spec.comp) scApplyComp(spec, null);   // legacy draft (no sessionLive) — comp fields only
-      showToast('Loaded “' + s.name + '” into What-If Mode — legacy draft: comp applied; adjust the budget as needed');
+      showToast(opts.toastLegacy || ('Loaded “' + displayName + '” into What-If Mode — legacy draft: comp applied; adjust the budget as needed'));
     }
   }
+  async function wiLoadDraftIntoMode(id) { return wiLoadScenarioIntoMode(id, {}); }
+  async function wiPickerResumeParked(id) {
+    return wiLoadScenarioIntoMode(id, {
+      displayName: 'Resumed what-if', detach: true,
+      toastLoaded: 'Resumed your parked what-if',
+      toastLegacy: 'Resumed your parked what-if — legacy data: comp applied; adjust the budget as needed',
+    });
+  }
 
-  // Wire the banner + drafts panel (elements are static HTML, present before this IIFE runs).
-  { const b = $('wi_start_btn'); if (b) b.onclick = () => { const name = (prompt('Name this what-if (e.g. "Senior promo"):') || '').trim(); if (!name) return; wiEnter(name); }; }
+  // ---- Picker popover open/close (TODO-243 Feature 2) — follows the .backup-popup/.settings-popup
+  // convention (Escape / outside-click / focus-return / mutual exclusion with the other header
+  // popups via window.closeAllHeaderPopups, defined in the DOMContentLoaded handler above). ----
+  function wiPickerOpen() {
+    const popup = $('wi_picker_popup'), btn = $('wi_start_btn'); if (!popup || !btn) return;
+    if (window.closeAllHeaderPopups) window.closeAllHeaderPopups();
+    popup.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    wiPickerRenameId = null;
+    wiRefreshDraftsList();
+    const ni = $('wi_picker_name_input'); if (ni) { ni.value = ''; ni.focus(); }
+  }
+  function wiPickerClose() {
+    const popup = $('wi_picker_popup'), btn = $('wi_start_btn'); if (!popup || !btn) return;
+    popup.hidden = true; btn.setAttribute('aria-expanded', 'false');
+    wiPickerRenameId = null;
+  }
+  function wiPickerToggle() {
+    const popup = $('wi_picker_popup'); if (!popup) return;
+    if (popup.hidden) wiPickerOpen(); else wiPickerClose();
+  }
+
+  // Wire the banner + picker popover (elements are static HTML, present before this IIFE runs).
+  { const b = $('wi_start_btn'); if (b) b.onclick = e => { e.stopPropagation(); wiPickerToggle(); }; }
+  document.addEventListener('click', e => {
+    const popup = $('wi_picker_popup'), btn = $('wi_start_btn');
+    if (popup && !popup.hidden && !popup.contains(e.target) && !(btn && btn.contains(e.target))) wiPickerClose();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const popup = $('wi_picker_popup'); if (!popup || popup.hidden) return;
+    // Escape inside an open rename field cancels ONLY the rename, not the whole popover (§4.5) —
+    // must be checked here (not just the rename input's own keydown) since this is the listener
+    // that would otherwise close the popup out from under the still-focused input.
+    if (e.target && e.target.closest && e.target.closest('[data-wirename-input]')) {
+      e.preventDefault(); wiPickerRenameId = null; wiRefreshDraftsList(); return;
+    }
+    wiPickerClose();
+    const btn = $('wi_start_btn'); if (btn) btn.focus();
+  });
+  { const b = $('wi_picker_start_btn'); if (b) b.onclick = () => {
+      const ni = $('wi_picker_name_input'); const name = ((ni && ni.value) || '').trim();
+      if (!name) { if (ni) ni.focus(); return; }
+      wiPickerClose(); wiEnter(name);
+    }; }
+  { const ni = $('wi_picker_name_input'); if (ni) ni.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); const b = $('wi_picker_start_btn'); if (b) b.click(); }
+    }); }
+  { const popup = $('wi_picker_popup'); if (popup) popup.addEventListener('click', async e => {
+      const pr = e.target.closest('[data-wiparkresume]'); if (pr) { wiPickerClose(); await wiPickerResumeParked(+pr.dataset.wiparkresume); return; }
+      const ld = e.target.closest('[data-wiload]'); if (ld) { wiPickerClose(); wiLoadDraftIntoMode(+ld.dataset.wiload); return; }
+      const rv = e.target.closest('[data-wirev]'); if (rv) { wiPickerClose(); scRevert(+rv.dataset.wirev); return; }
+      const rb = e.target.closest('[data-wirenamebtn]');
+      if (rb) {
+        wiPickerRenameId = +rb.dataset.wirenamebtn;
+        await wiRefreshDraftsList();
+        const inp = popup.querySelector('[data-wirename-input="' + wiPickerRenameId + '"]');
+        if (inp) { inp.focus(); inp.select(); }
+        return;
+      }
+      const rs = e.target.closest('[data-wirename-save]'); if (rs) { await wiPickerCommitRename(+rs.dataset.wirenameSave); return; }
+      const rc = e.target.closest('[data-wirename-cancel]'); if (rc) { wiPickerRenameId = null; await wiRefreshDraftsList(); return; }
+      const dl = e.target.closest('[data-widel]');
+      if (dl) {
+        if (!confirm('Delete this what-if?')) return;
+        try { await scSend('DELETE', '/api/tracking/scenarios/' + dl.dataset.widel); await wiRefreshDraftsList(); }
+        catch (err) { showToast('Delete failed: ' + (err.message || '')); }
+      }
+    }); }
+  { const popup = $('wi_picker_popup'); if (popup) popup.addEventListener('keydown', async e => {
+      const inp = e.target.closest('[data-wirename-input]');
+      if (inp && e.key === 'Enter') { e.preventDefault(); await wiPickerCommitRename(+inp.dataset.wirenameInput); }
+      // Escape is handled by the document-level listener above (it must fire even though this
+      // popup-scoped listener also sees the event first via bubbling).
+    }); }
+
   { const b = $('wi_discard_btn'); if (b) b.onclick = wiExitDiscard; }
   { const b = $('wi_save_btn'); if (b) b.onclick = () => wiSaveDraft(false); }
   { const b = $('wi_saveas_btn'); if (b) b.onclick = wiSaveDraftAs; }
@@ -7044,17 +7587,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } }
   { const b = $('wi_activate_btn'); if (b) b.onclick = wiActivate; }
   { const b = $('wi_resume_btn'); if (b) b.onclick = wiResume; }
-  { const b = $('wi_drafts_toggle'); if (b) b.onclick = () => { const p = $('wi_drafts_panel'); if (!p) return; p.hidden = !p.hidden; if (!p.hidden) wiRefreshDraftsList(); }; }
-  { const p = $('wi_drafts_panel'); if (p) p.addEventListener('click', async e => {
-      const ld = e.target.closest('[data-wiload]'); if (ld) { wiLoadDraftIntoMode(+ld.dataset.wiload); return; }
-      const rv = e.target.closest('[data-wirev]'); if (rv) { scRevert(+rv.dataset.wirev); return; }
-      const dl = e.target.closest('[data-widel]');
-      if (dl) {
-        if (!confirm('Delete this draft?')) return;
-        try { await scSend('DELETE', '/api/tracking/scenarios/' + dl.dataset.widel); wiRefreshDraftsList(); }
-        catch (err) { showToast('Delete failed: ' + (err.message || '')); }
-      }
-    }); }
 
   // ---- Test/debug surface (IR-8) ----
   // These functions live inside this IIFE and are otherwise invisible outside it; expose the
@@ -7076,6 +7608,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.wiLoadDraftIntoMode = wiLoadDraftIntoMode;   // driver-facing: "load/resume a saved draft into mode"
   window.wiLoadDraft = wiLoadDraftIntoMode;           // shorter alias, in case the driver probes this name
   window.wiRepopulateDom = wiRepopulateDom;           // exposed for direct DOM-repopulation assertions
+  // TODO-243 Feature 2 (picker) test/debug surface — same IR-8 convention as above.
+  window.wiPickerOpen = wiPickerOpen;
+  window.wiPickerClose = wiPickerClose;
+  window.wiPickerResumeParked = wiPickerResumeParked;
+  window.wiRefreshDraftsList = wiRefreshDraftsList;
+  window.wiParkUpsert = wiParkUpsert;                 // driver-facing: exercise the parked-slot upsert directly
+  window.WI_PARKED_NAME = WI_PARKED_NAME;
 
   const bgStratEl = $('bgb_strategy');
   if (bgStratEl) { bgStratEl.value = bgb.strategy; bgStratEl.addEventListener('change', () => { bgb.strategy = bgStratEl.value; saveBgb(); bgbTotals(); }); }
@@ -7424,7 +7963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { showToast('Could not save split'); }
   }
   function acSplitRow(t) {
-    const legs = t.splits.map(s => '<span style="white-space:nowrap"><span style="color:' + ((KINDS[s.bucket] || {}).color || 'var(--muted)') + '">●</span> ' + esc(KINDS[s.bucket] ? KINDS[s.bucket].label : (s.bucket || '—')) + ' ' + acAmt(s.amount) + '</span>').join(' · ');
+    const legs = t.splits.map(s => '<span style="white-space:nowrap"><span style="color:' + categoryColor(s.bucket) + '">●</span> ' + esc(KINDS[s.bucket] ? KINDS[s.bucket].label : (s.bucket || '—')) + ' ' + acAmt(s.amount) + '</span>').join(' · ');
     const tagHtml = (t.tags && t.tags.length) ? ' ' + t.tags.map(tg => '<span class="ac-tag">' + esc(tg) + '</span>').join(' ') : '';
     const partnerBadge = t.partnerOwed > 0 ? ' <span class="muted" style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:4px;padding:0 4px">&#8617; ' + acAmt(t.partnerOwed) + '</span>' : '';
     return '<tr data-row-tx="' + t.id + '"><td>' + t.postedOn.slice(5) + '</td><td>out</td>'
@@ -7443,7 +7982,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ACT.templates = r.templates || [];
     const el = $('ac_tpl_chips'); if (!el) return;
     el.innerHTML = ACT.templates.length
-      ? ACT.templates.map(t => '<span class="chip" data-tpl="' + t.id + '" style="cursor:pointer;margin:2px">' + esc(t.name) + ' <a href="#" data-deltpl="' + t.id + '" style="text-decoration:none;color:var(--muted)">×</a></span>').join('')
+      ? ACT.templates.map(t => {
+          // Category chip (composer): a thin left accent tying each quick-template back to its
+          // bucket color, via the same resolver as the ledger/PVA/filter-chip consumers.
+          const c = t.bucket ? categoryColor(t.bucket) : 'var(--muted)';
+          return '<span class="chip" data-tpl="' + t.id + '" style="cursor:pointer;margin:2px;border-left:3px solid ' + c + '">' + esc(t.name) + ' <a href="#" data-deltpl="' + t.id + '" style="text-decoration:none;color:var(--muted)">×</a></span>';
+        }).join('')
       : '<span class="muted">none yet — fill the form and click ★ Save current</span>';
   }
   function acApplyTemplate(t) {
@@ -7796,7 +8340,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     getCategories().forEach(({ key: kind }) => {
       const lines = acBudgetLines(kind); if (!lines.length) return;
       any = true;
-      h += '<div class="subhead" style="margin-top:8px"><span style="color:' + (KINDS[kind] ? KINDS[kind].color : '') + '">●</span> ' + esc(KINDS[kind] ? KINDS[kind].label : kind) + '</div>';
+      h += '<div class="subhead" style="margin-top:8px"><span style="color:' + (KINDS[kind] ? categoryColor(kind) : '') + '">●</span> ' + esc(KINDS[kind] ? KINDS[kind].label : kind) + '</div>';
       lines.forEach(o => {
         const r = recByKey['out|' + kind + '|' + o.name.toLowerCase()], tracked = !!r;
         h += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-sm);flex-wrap:wrap">'
@@ -7848,7 +8392,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const order = _localKeys.concat(_serverOnlyKeys);
     order.forEach(k => {
       const b = c.buckets[k]; if (!b) return;
-      const kc = colorForBucket(k);
+      const kc = categoryColor(k);
       const klabel = esc(labelForBucket(k));
       const bucketPartner = partnerByBucket[k] || 0;
       const yourBucketActual = Math.max(0, b.actual - bucketPartner);
@@ -8013,7 +8557,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const net = byBucketOwed[b] || 0;
         const ear = earmarkedPaid[b] || 0;
         if (!(Math.abs(net) > EPS || ear > EPS)) return;
-        const color = colorForBucket(b);
+        const color = categoryColor(b);
         const label = KINDS[b] ? KINDS[b].label : b;
         h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
         h += '<span><span style="color:' + color + '">●</span> ' + esc(label) + '</span>';
@@ -8174,7 +8718,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const hasReserve = reserve > EPS;
       h += '<tr class="ac-card-row"><td class="ac-col-name">';
       h += '<button class="ac-card-toggle" data-fund-toggle="' + f.id + '" aria-expanded="false">' + esc(f.name) + '</button>';
-      h += '<span class="mini" style="color:var(--muted);display:block;margin-top:2px">' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + acAmt(f.monthlyContribution) + '/mo</span>';
+      h += '<span class="mini" style="color:var(--muted);display:block;margin-top:2px"><span style="color:' + categoryColor(f.bucket || 'need') + '">●</span> ' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + acAmt(f.monthlyContribution) + '/mo' + (f.recurrence === 'yearly' ? ' · renews yearly' : '') + '</span>';
       h += '</td>';
       h += '<td class="num ac-col-total"><span class="sf-chip ' + (hasReserve ? 'has-reserve' : 'is-empty') + '">' + (hasReserve ? acAmt(reserve) : 'no reserve yet') + '</span></td></tr>';
 
@@ -8183,6 +8727,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (f.target) {
         h += '<div class="mini" style="color:var(--muted);margin-bottom:8px">Target ' + acAmt(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') + '</div>';
+      }
+
+      // Yearly recurrence (§amendment 2026-07-26): effectiveTargetDate + cycle summary are
+      // additive fund-rollup fields — 'none' funds never carry them (server sends null), so this
+      // block is simply absent for a one-time fund, no branch needed on our side beyond the check.
+      if (f.recurrence === 'yearly') {
+        h += '<div class="mini" style="color:var(--muted);margin-bottom:8px">Renews yearly'
+          + (f.effectiveTargetDate ? ' · next renewal ' + esc(sfDateLabel(f.effectiveTargetDate)) : '') + '</div>';
+        if (f.cycle) {
+          const drawnBit = f.cycle.drawnThisCycle > 0.005 ? acAmt(f.cycle.drawnThisCycle) + ' drawn' : 'none drawn yet';
+          h += '<div class="mini" style="color:var(--muted);margin-bottom:8px">This cycle (' + esc(sfDateLabel(f.cycle.cycleStart)) + ' &rarr; ' + esc(sfDateLabel(f.cycle.cycleEnd)) + '): ' + acAmt(f.cycle.contributedThisCycle) + ' saved, ' + drawnBit + '</div>';
+        }
       }
 
       // Monthly trajectory (the whole-month envelope fold, §4.2) — funded/unfunded per month.
@@ -8264,7 +8820,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (ACT.catFilter) {
       const cf = ACT.catFilter, kindLabel = KINDS[cf.kind] ? KINDS[cf.kind].label : cf.kind;
       const v = cf.name || ('Unplanned (' + kindLabel + ')');
-      return { type: 'cat', value: v, label: cf.name ? 'Category: ' + v : v, clearAttr: 'data-catclear' };
+      return { type: 'cat', value: v, label: cf.name ? 'Category: ' + v : v, clearAttr: 'data-catclear', color: categoryColor(cf.kind) };
     }
     if (ACT.tagFilter) return { type: 'tag', value: ACT.tagFilter, label: 'Tag: ' + ACT.tagFilter, clearAttr: 'data-tagclear' };
     return null;
@@ -8280,7 +8836,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<button type="button" class="ac-filter-btn" id="ac_filter_btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="ac_filter_popup" data-filter-open="1">Filter <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
     }
     if (filterActive) {
-      h += '<a href="#" class="ac-tag is-active" ' + filterActive.clearAttr + '="1" aria-label="Clear filter: ' + esc(filterActive.value) + '">' + esc(filterActive.label) + ' ✕</a>';
+      const dot = filterActive.color ? '<span style="color:' + filterActive.color + '">●</span> ' : '';
+      h += '<a href="#" class="ac-tag is-active" ' + filterActive.clearAttr + '="1" aria-label="Clear filter: ' + esc(filterActive.value) + '">' + dot + esc(filterActive.label) + ' ✕</a>';
     }
     if (showControl) {
       const showSearch = allTags.length >= 12;
@@ -8368,7 +8925,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Readable bucket chip: tinted background + matching text/border, instead of a tiny dot.
   function acBucketPill(bucket) {
     if (!bucket) return '<span class="muted">—</span>';
-    const c = KINDS[bucket] ? KINDS[bucket].color : 'var(--muted)', lab = KINDS[bucket] ? KINDS[bucket].label : bucket;
+    const c = categoryColor(bucket), lab = KINDS[bucket] ? KINDS[bucket].label : bucket;
     return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:var(--fs-xs);color:' + c + ';background:color-mix(in srgb,' + c + ' 16%,transparent);border:1px solid color-mix(in srgb,' + c + ' 45%,transparent)">' + esc(lab) + '</span>';
   }
   function acLedgerRow(t) {

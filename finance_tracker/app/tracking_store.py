@@ -66,7 +66,11 @@ _BACKUP_TABLES: tuple = (
     # Sinking funds (TODO-238, DEC-034, docs/sinking-funds-design.md §7): ordinary user
     # data, no write-time invariants beyond the payload's own value (unlike user_profile
     # below) — a plain verbatim restore is correct. `fund` before `fund_txn` (parent→child).
-    ("fund",             ("id", "user_id", "name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "status", "created_at")),
+    # `recurrence` (TODO-238 amendment, yearly recurrence, v12->v13): also plain payload
+    # data — a pre-recurrence backup simply lacks the key, and the column's own
+    # `NOT NULL DEFAULT 'none'` backfills it for free (same free-backfill story as
+    # `user_id` above).
+    ("fund",             ("id", "user_id", "name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "recurrence", "status", "created_at")),
     ("fund_txn",         ("fund_id", "txn_id", "role")),
     # S1.2 (DEC-027/DEC-035, docs/s1_2-migration-design.md §1.3): the per-user server profile.
     # `prev_blob`/`prev_state_version` are DELIBERATELY excluded from this column tuple —
@@ -333,6 +337,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_one_owner
 -- are declared only in `_mig_add_fund_table` below (not here) for the same reason the
 -- OTHER user-scoped indexes live only in `_mig_add_user_scoping` — see that migration's
 -- index-block comment.
+-- `recurrence` (TODO-238 amendment, yearly-recurring funds like car insurance / annual
+-- card fees): 'none' (default, today's one-time-target behavior, bit-identical) or
+-- 'yearly' (the reserve math is UNCHANGED -- contributions/draws still fold the same
+-- way -- only the DISPLAY-layer effective target date rolls `target_date`'s month/day
+-- forward to its next occurrence; see tracking.fund_effective_target_date /
+-- fund_cycle_summary). The existing `target_date` column is the recurrence anchor; no
+-- other column was added.
 CREATE TABLE IF NOT EXISTS fund (
   id                         INTEGER PRIMARY KEY,
   user_id                    TEXT NOT NULL DEFAULT '__owner__',
@@ -340,7 +351,9 @@ CREATE TABLE IF NOT EXISTS fund (
   bucket                     TEXT,               -- the envelope's spend bucket (not 'investment')
   monthly_contribution_cents INTEGER NOT NULL DEFAULT 0,
   target_cents               INTEGER,            -- optional
-  target_date                TEXT,               -- optional eta
+  target_date                TEXT,               -- optional eta / recurrence anchor
+  recurrence                 TEXT NOT NULL DEFAULT 'none'
+                               CHECK (recurrence IN ('none','yearly')),
   status                     TEXT NOT NULL DEFAULT 'active'
                                CHECK (status IN ('active','archived')),
   created_at                 TEXT NOT NULL
@@ -773,7 +786,26 @@ def _mig_add_alias_tables(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_link_code_issuer ON link_code(issuer_user_id)")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables]
+def _mig_add_fund_recurrence(conn) -> None:
+    """Migration 12 (TODO-238 amendment, yearly-recurring sinking funds -- car insurance,
+    annual card fees -- docs/sinking-funds-design.md §amendment): additive
+    `fund.recurrence` column -- v12 -> v13. Idempotent via the standard PRAGMA
+    table_info guard (fresh DBs already have the column from SCHEMA above, mirroring
+    `_mig_add_user_display_name`'s ALTER-guard convention, not `_mig_add_fund_table`'s
+    CREATE-guard one, since this is a column addition to an EXISTING table, not a new
+    table). `NOT NULL DEFAULT 'none'` means every pre-existing fund row converges to
+    exactly the one-time-target behavior it already had -- recurrence is purely
+    opt-in, no existing fund's semantics change underneath it. The reserve math
+    (tracking.fund_rollup) never reads this column at all; only the new display-layer
+    `fund_effective_target_date` / `fund_cycle_summary` functions do."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(fund)").fetchall()]
+    if "recurrence" not in cols:
+        conn.execute(
+            "ALTER TABLE fund ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none' "
+            "CHECK (recurrence IN ('none','yearly'))")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence]
 
 
 def _now() -> str:
@@ -2422,8 +2454,19 @@ def _fund_dict(row) -> dict:
         "id": row["id"], "name": row["name"], "bucket": row["bucket"],
         "monthlyContribution": row["monthly_contribution_cents"] / 100.0,
         "target": None if row["target_cents"] is None else row["target_cents"] / 100.0,
-        "targetDate": row["target_date"], "status": row["status"], "createdAt": row["created_at"],
+        "targetDate": row["target_date"], "recurrence": row["recurrence"],
+        "status": row["status"], "createdAt": row["created_at"],
     }
+
+
+def _valid_fund_recurrence(recurrence) -> str:
+    """'none' (default, today's one-time-target behavior) or 'yearly' (TODO-238
+    amendment — the reserve math is unchanged; only the display-layer effective target
+    date rolls forward, see tracking.fund_effective_target_date)."""
+    r = str(recurrence if recurrence is not None else "none").strip().lower()
+    if r not in ("none", "yearly"):
+        raise ValueError(f"recurrence must be 'none' or 'yearly', got {recurrence!r}")
+    return r
 
 
 def _valid_fund_bucket(bucket) -> str | None:
@@ -2441,7 +2484,7 @@ def _valid_fund_bucket(bucket) -> str | None:
 
 
 def create_fund(conn, user_id, name, *, bucket=None, monthly_contribution_cents=0,
-                 target_cents=None, target_date=None) -> dict:
+                 target_cents=None, target_date=None, recurrence="none") -> dict:
     if not str(name or "").strip():
         raise ValueError("name must not be empty")
     bucket = _valid_fund_bucket(bucket)
@@ -2451,10 +2494,11 @@ def create_fund(conn, user_id, name, *, bucket=None, monthly_contribution_cents=
         raise ValueError(f"target_cents must be an int > 0, got {target_cents!r}")
     if target_date is not None:
         target_date = _valid_goal_date(target_date)
+    recurrence = _valid_fund_recurrence(recurrence)
     cur = conn.execute(
-        """INSERT INTO fund (user_id, name, bucket, monthly_contribution_cents, target_cents, target_date, status, created_at)
-           VALUES (?,?,?,?,?,?,'active',?)""",
-        (user_id, str(name).strip(), bucket, monthly_contribution_cents, target_cents, target_date, _now()))
+        """INSERT INTO fund (user_id, name, bucket, monthly_contribution_cents, target_cents, target_date, recurrence, status, created_at)
+           VALUES (?,?,?,?,?,?,?,'active',?)""",
+        (user_id, str(name).strip(), bucket, monthly_contribution_cents, target_cents, target_date, recurrence, _now()))
     conn.commit()
     return _fund_dict(conn.execute("SELECT * FROM fund WHERE id = ?", (cur.lastrowid,)).fetchone())
 
@@ -2469,7 +2513,7 @@ def update_fund(conn, user_id, fund_id, **fields) -> dict | None:
     """Patch a fund. `clear_target`/`clear_target_date` are handled by the caller
     (server.py) translating to explicit `target_cents=None`/`target_date=None` fields —
     mirrors goal's `clear_account` convention (None can't itself signal "unset")."""
-    allowed = {"name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "status"}
+    allowed = {"name", "bucket", "monthly_contribution_cents", "target_cents", "target_date", "recurrence", "status"}
     unknown = set(fields) - allowed
     if unknown:
         raise ValueError(f"unknown fund fields: {sorted(unknown)}")
@@ -2486,6 +2530,8 @@ def update_fund(conn, user_id, fund_id, **fields) -> dict | None:
         raise ValueError(f"target_cents must be an int > 0, got {fields['target_cents']!r}")
     if fields.get("target_date") is not None:
         fields["target_date"] = _valid_goal_date(fields["target_date"])
+    if "recurrence" in fields:
+        fields["recurrence"] = _valid_fund_recurrence(fields["recurrence"])
     if "status" in fields and fields["status"] not in ("active", "archived"):
         raise ValueError(f"status must be active/archived, got {fields['status']!r}")
     sets, vals = [], []

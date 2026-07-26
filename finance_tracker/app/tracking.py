@@ -804,6 +804,89 @@ def fund_rollup(monthly_flows: dict[str, dict], upto_month: str | None = None) -
     }
 
 
+# ---------- sinking funds: yearly recurrence (TODO-238 amendment) ----------
+#
+# `fund_rollup` above is UNCHANGED by recurrence -- it never even takes a `recurrence`
+# argument, so its output for a `recurrence='none'` fund (still the default, still
+# "exactly today's behavior") is bit-identical to before this amendment, by
+# construction, not by a special case. The two functions below are a NEW, separate
+# display/lens layer on top (the same DEC-009 #1 "new pure fn layered on top" pattern
+# `fund_rollup` itself follows relative to `aggregate_actuals`): they compute the
+# fund's rolled-forward effective target date and a per-cycle contribute/draw summary
+# for a 'yearly'-recurring fund, without touching the reserve fold at all. A fund's
+# `target_date` is the recurrence anchor (its month/day repeats every year); the year
+# stored in `target_date` itself is irrelevant to a 'yearly' fund once it recurs --
+# only the month/day matters.
+
+def _roll_anniversary(month: int, day: int, year: int) -> str:
+    """'YYYY-MM-DD' for (month, day) in `year`, mapping Feb 29 -> Feb 28 in non-leap
+    years so a Feb-29 anchor always resolves to a real calendar date."""
+    if month == 2 and day == 29 and not calendar.isleap(year):
+        day = 28
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def fund_effective_target_date(target_date: str | None, recurrence: str, as_of_month: str) -> str | None:
+    """The fund's EFFECTIVE target date for trajectory/display purposes as of
+    `as_of_month` ('YYYY-MM').
+
+    `recurrence='none'` (or `target_date is None`): returns `target_date` UNCHANGED --
+    exactly today's one-time-target behavior.
+
+    `recurrence='yearly'`: rolls `target_date`'s month/day forward to its NEXT
+    occurrence STRICTLY AFTER `as_of_month` -- i.e. if the anniversary's own month is
+    the as-of month or earlier, that occurrence has already "arrived" for the current
+    view and the effective date is the FOLLOWING year's occurrence instead. Handles
+    multi-year gaps (a long-stale `target_date`, e.g. set 6 years ago) in O(1)-ish
+    iterations because the search starts at `as_of_month`'s own year, not
+    `target_date`'s original year -- only `target_date`'s month/day is ever read.
+    Feb 29 anchors resolve to Feb 28 in whichever candidate year is not a leap year.
+    """
+    if recurrence != "yearly" or target_date is None:
+        return target_date
+    _, mo_s, day_s = target_date.split("-")
+    month, day = int(mo_s), int(day_s)
+    candidate_year = int(as_of_month.split("-")[0])
+    candidate = _roll_anniversary(month, day, candidate_year)
+    while candidate[:7] <= as_of_month:
+        candidate_year += 1
+        candidate = _roll_anniversary(month, day, candidate_year)
+    return candidate
+
+
+def fund_cycle_summary(target_date: str | None, recurrence: str, as_of_month: str,
+                        trajectory: list[dict]) -> dict | None:
+    """Per-cycle contribute/draw summary for a 'yearly'-recurring fund, or `None` for
+    `recurrence='none'` / no `target_date` (nothing to cycle).
+
+    ``cycleEnd`` is `fund_effective_target_date`'s rolled-forward next occurrence;
+    ``cycleStart`` is exactly one year earlier (same month/day, independently
+    Feb-29/Feb-28 adjusted for ITS OWN year, which need not share `cycleEnd`'s
+    leap-ness). ``contributedThisCycle`` / ``drawnThisCycle`` bucket `fund_rollup`'s own
+    per-month `trajectory` rows (already-computed contribution/draw dollars -- the
+    reserve fold itself is untouched) into the half-open `['cycleStart' month,
+    'cycleEnd' month)` window via a plain 'YYYY-MM' string-range test (ISO month
+    strings sort lexicographically, so this needs no date parsing).
+    """
+    if recurrence != "yearly" or target_date is None:
+        return None
+    _, mo_s, day_s = target_date.split("-")
+    month, day = int(mo_s), int(day_s)
+    cycle_end = fund_effective_target_date(target_date, recurrence, as_of_month)
+    cycle_start = _roll_anniversary(month, day, int(cycle_end[:4]) - 1)
+    contributed_c = drawn_c = 0
+    for row in trajectory:
+        if cycle_start[:7] <= row["month"] < cycle_end[:7]:
+            contributed_c += round(row["contribution"] * 100)
+            drawn_c += round(row["draw"] * 100)
+    return {
+        "cycleStart": cycle_start,
+        "cycleEnd": cycle_end,
+        "contributedThisCycle": _d(contributed_c),
+        "drawnThisCycle": _d(drawn_c),
+    }
+
+
 __all__ = [
     "BUCKETS",
     "month_end",
@@ -813,4 +896,6 @@ __all__ = [
     "card_rollup",
     "card_rollup_running",
     "fund_rollup",
+    "fund_effective_target_date",
+    "fund_cycle_summary",
 ]
