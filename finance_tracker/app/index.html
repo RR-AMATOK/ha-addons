@@ -1367,6 +1367,11 @@
         <div class="tile warn"><div class="k">Effective rate</div><div class="v mono" id="t_eff">—</div><div class="s">incl. bonus</div></div>
         <div class="tile"><div class="k">Marginal — next $</div><div class="v mono" id="t_marg">—</div><div class="s" id="t_marg_sub">incl. FICA</div></div>
       </div>
+      <div class="subhead">Your MAGI</div>
+      <div class="tiles">
+        <div class="tile"><div class="k">AGI</div><div class="v mono" id="t_agi">—</div><div class="s" id="t_agi_sub"></div></div>
+        <div class="tile" id="t_magi_tile"><div class="k">MAGI (Roth IRA)</div><div class="v mono" id="t_magi">—</div><div class="s" id="t_magi_sub"></div></div>
+      </div>
 
       <div style="margin-top:14px">
         <div class="bar" id="barBreakdown"></div>
@@ -1615,10 +1620,12 @@
 <div class="tab-panel" id="tab-invest"><div class="panel-inner">
   <section class="card">
     <h2>Invest — next-dollar plan</h2>
-    <p class="mini">Waterfall: match → high-interest debt → HSA → IRA → 401(k) → mega-backdoor → taxable.</p>
+    <p class="mini">Waterfall: match → high-interest debt → HSA → IRA → 401(k) → mega-backdoor → taxable. <button class="seed-btn" id="iv_seed" type="button" title="Gross income &amp; state ← the Tax tab · Monthly essential expenses ← your Budget's raw Need-kind budget-line total (before any counts-toward folding) · Amount to allocate ← your planned annual investing (Budget's Investments bucket + Tax-tab contributions) × 12 · Emergency fund balance ← your registered cash-savings accounts, if any · Match %s ← the Budget tab's employer-match fields, if set. Everything here stays editable after — this only fills, it never locks. Contribution rooms are set to the FULL annual limits (the plan decides what fills them — your Tax-tab contributions are part of the amount being planned); balances/eligibility stay untouched.">Pull from Tax + Budget</button></p>
+    <div class="row"><label class="mini">Waterfall strategy</label><select id="iv_strategy"><option value="default">Default</option><option value="henry-v2">HENRY Playbook v2 (community)</option></select></div>
+    <div class="row" id="iv_henry_age_row" style="display:none"><label class="mini">Retirement age <span class="hint">(HENRY glide + debt-vs-invest horizon)</span></label><span class="input-pair"><input id="iv_henry_age" type="number" value="65"/><span class="unit">yr</span></span></div>
     <div class="row"><label class="mini">Amount to allocate</label><span class="input-pair"><input id="iv_amt" type="text" inputmode="decimal" data-fmt="usd" value="60000"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Age</label><span class="input-pair"><input id="iv_age" type="number" value="32"/><span class="unit">yr</span></span></div>
-    <div class="row"><label class="mini">State</label><select id="iv_state"><option>TX</option><option value="none">none</option></select></div>
+    <div class="row"><label class="mini">State</label><select id="iv_state"><option>TX</option><option>WA</option><option value="none">none</option></select></div>
     <div class="row"><label class="mini">Gross income</label><span class="input-pair"><input id="iv_gross" type="text" inputmode="decimal" data-fmt="usd" value="200000"/><span class="unit">$/yr</span></span></div>
     <div class="row"><label class="mini">Monthly essential expenses</label><span class="input-pair"><input id="iv_exp" type="text" inputmode="decimal" data-fmt="usd" value="5000"/><span class="unit">$/mo</span></span></div>
     <div class="row"><label class="mini">Emergency fund balance</label><span class="input-pair"><input id="iv_ef" type="text" inputmode="decimal" data-fmt="usd" value="10000"/><span class="unit">$</span></span></div>
@@ -1702,6 +1709,13 @@
     <tr><td>HSA</td><td><input id="pj_c_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400" style="width:96px"></td><td><input id="pj_b_hsa" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
     <tr><td>Taxable</td><td><input id="pj_c_tax" type="text" inputmode="decimal" data-fmt="usd" value="12000" style="width:96px"></td><td><input id="pj_b_tax" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
   </tbody></table>
+  <p class="mini" id="pj_tax_seedwrap" style="margin-top:6px;display:none">Your Budget tab's after-tax investing (the Investments bucket) doesn't automatically flow into Taxable above — <button class="seed-btn" id="pj_tax_seed" type="button" title="Sets Taxable's annual contribution to your Budget plan's Investments bucket × 12 (after-tax investing). This row is one aggregate Taxable total, not per-account — Traditional 401(k), Roth, and HSA above already pull from the Tax tab (see &quot;Pull from Tax + Budget&quot;) and are not touched by this button.">Use Budget plan →</button> <span class="muted" id="pj_tax_hint"></span></p>
+  <!-- Rides the existing #tab-invest input snapshot (TABS_SEL/collectTabs/restoreTabs) so
+       pjTouched — "has the user edited a contribution field, so stop auto-filling it" — survives
+       a reload; without this, the boot-time synthetic tab-open re-click (window 'load' listener,
+       ~L4530) re-runs pjAutoFill() with a fresh in-memory pjTouched=false and silently clobbers
+       a just-restored/just-seeded value the moment Invest is the last-viewed tab. Never shown. -->
+  <input type="checkbox" id="pj_touched" style="display:none" aria-hidden="true" tabindex="-1">
   <div id="pj_out" class="mini" style="margin-top:10px">Set contributions and project.</div>
 </section>
 </div>
@@ -2823,6 +2837,42 @@ function render(r) {
   $('t_eff').textContent = fmtPct(r.rates.effRate);
   $('t_marg').textContent = fmtPct(r.rates.marginalAllIn != null ? r.rates.marginalAllIn : r.rates.marginal);
   { const sub = $('t_marg_sub'); if (sub) sub.textContent = 'fed ' + fmtPct(r.rates.marginal) + ' + FICA'; }
+
+  // AGI + MAGI (Roth IRA) pair. AGI = wages + investment income. The engine's Roth MAGI
+  // is fed Box-1 wages (a documented under-count) so it EXCLUDES investment income —
+  // hence AGI ≥ MAGI here, differing by exactly the investment income. Relationship on
+  // the AGI tile; color-cue only the MAGI cliff. Muted "= MAGI" in the common (no-invest) case.
+  (function(){
+    const tile = $('t_magi_tile'); if (!tile) return;
+    const magi = r.limits.rothIraMagi, inn = r.limits.rothIraPhaseIn, out = r.limits.rothIraPhaseOut;
+    const agi = (r.limits.agi != null) ? r.limits.agi : magi;   // defensive: fall back to magi
+    if ($('t_agi')) $('t_agi').textContent = fmt$(agi);
+    if ($('t_agi_sub')) {
+      const gap = agi - magi;   // == total investment income (>0 gain, <0 net loss)
+      let rel;
+      if (Math.abs(gap) <= 0.5) rel = '= MAGI (Roth)';
+      else if (gap > 0) rel = `MAGI + ${fmt$(gap)} investment`;
+      else rel = `MAGI − ${fmt$(-gap)} net loss`;
+      $('t_agi_sub').textContent = rel;
+    }
+    $('t_magi').textContent = fmt$(magi);
+    tile.classList.remove('warn','bad');
+    let sub;
+    if (magi >= out) {                       // fully phased out — ineligible
+      sub = `past the ${fmt$(out)} phase-out`;
+      tile.classList.add('bad');
+    } else if (magi >= inn) {                // inside the phase-out band
+      sub = `${fmt$(out - magi)} to full phase-out`;
+      tile.classList.add('warn');
+    } else if (inn - magi <= 5000) {         // near the edge — verify
+      sub = `${fmt$(inn - magi)} to phase-in · verify MAGI`;
+      tile.classList.add('warn');
+    } else {                                 // comfortably eligible
+      sub = `${fmt$(inn - magi)} below the ${fmt$(inn)} phase-in`;
+    }
+    $('t_magi_sub').textContent = sub;
+  })();
+
   $('t_pp').textContent = fmt$(perPP(r.cash.takeHome));
   $('t_pp_sub').textContent = `${fmt$(perMo(r.cash.takeHome))}/mo · ${pf}×/yr`;
   $('t_gross').textContent = fmt$(r.cash.totalGross);
@@ -4518,7 +4568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { persist('itc.activetab', t); } catch (e) {}   // remember the active tab across reloads
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
-      if (t === 'invest') { ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); }   // derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures
+      if (t === 'invest') { ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); }   // derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint (pjAutoFill() skips calcProject when pjTouched, so call this separately)
       if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds
       if (t === 'auto' && !window.__autoResult) calcAuto();   // first open computes the comparison
       if (t === 'actuals') acOnOpen();
@@ -5437,14 +5487,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   sxGasUnitSync();
   window.addEventListener('load', sxGasUnitSync);   // re-sync after restoreTabs fills the hidden input
 
+  // Waterfall strategy: "default" is the pinned pre-strategy-parameter path — the field is
+  // OMITTED from the request body entirely when selected, so a default run is byte-identical
+  // to before HENRY Playbook v2 (8ca1f15) existed. "henry-v2" adds strategy + retireAge; the
+  // other HENRY thresholds (henryEfMonthsTarget/henryDebtThreshold/henryDebtAggressiveThreshold)
+  // stay server defaults — not trivially exposable as a single obvious field each.
+  function ivStrategyToggle() {
+    const sel = $('iv_strategy'), row = $('iv_henry_age_row');
+    if (row) row.style.display = (sel && sel.value === 'henry-v2') ? '' : 'none';
+  }
   async function calcInvest() {
+    ivStrategyToggle();
     try {
+      const strategy = ($('iv_strategy') && $('iv_strategy').value === 'henry-v2') ? 'henry-v2' : 'default';
       const body = { amount: N('iv_amt'), age: N('iv_age'), state: $('iv_state').value, grossIncome: N('iv_gross'),
         monthlyEssentialExpenses: N('iv_exp'), efBalance: N('iv_ef'),
         employerMatch: { pctOfSalary: P('iv_mpct'), matchRate: P('iv_mrate') },
         k401Room: N('iv_k401'), hsaRoom: N('iv_hsar'), iraRoom: N('iv_irar'), aftertax401kRoom: N('iv_at401'),
         pretaxIraBalance: N('iv_irabal'), hsaEligible: CK('iv_hsae'), rothMagiOverLimit: CK('iv_rmo'), megaAvailable: CK('iv_mega'),
         retireIncome: N('iv_retinc') };
+      if (strategy === 'henry-v2') { body.strategy = 'henry-v2'; body.retireAge = N('iv_henry_age'); }
       const r = await post('/api/invest', body);
       let h = '';
       if (r.plan && r.plan.length) {
@@ -5452,9 +5514,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         h += '<div class="tiles"><div class="tile good"><div class="k">Next best dollar</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + first.bucket + ' · ' + f$(first.amount) + '</div><div class="s">' + (first.rationale || first.accountType || '') + '</div></div></div>';
         h += '<table class="res-table"><tr><th>Step</th><th>Amount</th><th>Account</th></tr>';
         r.plan.forEach((p, i) => { h += '<tr><td>' + (i + 1) + '. ' + p.bucket + '</td><td class="num">' + f$(p.amount) + '</td><td>' + p.accountType + ' (' + p.taxTreatment + ')</td></tr>'; });
-        h += '</table><div class="note-box">' + r.plan.map(p => '<b>' + p.bucket + ':</b> ' + p.rationale).join('<br>') + '</div>';
+        h += '</table><div class="note-box">' + r.plan.map(p => '<b>' + p.bucket + ':</b> ' + p.rationale + (p.note ? '<br><span class="mini muted">' + p.note + '</span>' : '')).join('<br>') + '</div>';
       } else { h += '<div class="note-box">No allocation — amount is 0 or no room left.</div>'; }
       const a = r.targetAllocation; h += '<div class="subhead">Target allocation</div><div class="tiles"><div class="tile"><div class="k">Stocks</div><div class="v">' + a.stocksPct + '%</div></div><div class="tile"><div class="k">Bonds</div><div class="v">' + a.bondsPct + '%</div></div></div>';
+      if (a.stocksRangeLow != null && a.stocksRangeHigh != null) {
+        h += '<div class="mini muted" style="margin-top:2px">' + a.stocksRangeLow + '–' + a.stocksRangeHigh + '% equities, target ' + a.stocksPct + '%</div>';
+      }
       const tr = r.tradVsRoth;
       if (tr && tr.recommend) {
         const basis = tr.retireRateBasis === 'effective' ? 'effective' : 'marginal';
@@ -5463,6 +5528,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       h += warns((r.warnings || []).map(w => w.rationale || JSON.stringify(w)));
       h += notes(r.notes);
+      if (r.henryNotes) {
+        const hn = r.henryNotes;
+        h += '<details class="note-box" style="margin-top:10px"><summary><b>HENRY notes</b> <span class="mini muted">(community-sourced — not advice)</span></summary>'
+          + '<div style="margin-top:8px"><b>RSU policy:</b> ' + hn.rsuPolicy + '</div>'
+          + '<div style="margin-top:6px"><b>Insurance checklist:</b> ' + hn.insuranceChecklist + '</div>'
+          + '<div class="mini muted" style="margin-top:8px">' + hn.attribution + '</div></details>';
+      }
       $('iv_out').innerHTML = h;
     } catch (e) { fail('iv_out', e); }
   }
@@ -5575,6 +5647,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Day-to-day Actuals accounts (checking, the savings buckets) stay out until included.
   const ivGroupOf = a => a.investGroup || null;
   const ivBal = a => { const s = ivAcct.latest[a.id]; return s ? s.balance : null; };
+
+  // ---- "Pull from Tax + Budget" seed for the next-dollar planner ----
+  // Fills what has an honest source and leaves the rest — never locks a field, just fills it;
+  // every seeded value stays editable afterward, same as pj_seed/bg_seed elsewhere. Rooms,
+  // balances, and eligibility checkboxes have their own wiring (Roth-MAGI auto-flag, account
+  // registry, etc.) and are deliberately left untouched here.
+  function ivSeedFromSources() {
+    const t = window.__taxResult, bp = window.__budgetPlan;
+    if (!t && !bp) { showToast('Open the Tax tab and/or build your Budget first, then come back and seed.'); return; }
+    if (t && t.cash) {
+      $('iv_gross').value = Math.round(t.cash.totalComp || 0);
+      const stateChip = document.querySelector('#stateChips .chip.active');
+      if (stateChip && stateChip.dataset.state) $('iv_state').value = stateChip.dataset.state;
+    }
+    if (bp && bp.kindMonthly) {
+      // Same formula as the FIRE annual-savings rollup (kindMonthly.investment + the Tax-tab
+      // contribution rollup, ×12) — see window.__budgetPlan's writer for why the two ride apart.
+      const annual = Math.round(((bp.kindMonthly.investment || 0) + (bp.taxInvestMonthly || 0)) * 12);
+      if (annual > 0) $('iv_amt').value = annual;
+      // Raw Need-kind budget-line total — NOT folded per countsAs — the closest honest reading
+      // of "essential" (a category counting-toward Need via countsAs is still its own line here).
+      if (bp.kindMonthly.need > 0) $('iv_exp').value = Math.round(bp.kindMonthly.need);
+    }
+    const mrate = N('bg_mrate'), mpct = N('bg_mpct');   // Budget tab's employer-match fields, if set
+    if (mrate > 0) $('iv_mrate').value = mrate;
+    if (mpct > 0) $('iv_mpct').value = mpct;
+    const cash = ivAcct.accounts.filter(a => a.investGroup === 'Cash savings' || (!a.investGroup && a.type === 'savings'))
+      .reduce((s, a) => s + (ivBal(a) || 0), 0);
+    if (cash > 0) $('iv_ef').value = Math.round(cash);
+    // Rooms are asserted to FULL annual limits (2026-07-26 fix): the seeded "Amount to
+    // allocate" is the user's TOTAL annual savings — the waterfall re-plans the whole year,
+    // so room = the full cap and the PLAN decides what fills it. Stale hand-edited values
+    // (e.g. a persisted 0 in 401k room) otherwise make the seeded form self-contradictory.
+    // Rooms stay editable after, like every other seeded field.
+    $('iv_k401').value = LIMIT_401K;
+    $('iv_hsar').value = currentHsaLimit();
+    $('iv_irar').value = LIMIT_ROTH_IRA;
+    formatUSDFields();
+    calcInvest();
+    if (typeof saveTabs === 'function') saveTabs();
+    showToast('Pulled gross income, state, expenses, planned savings & full contribution rooms from Tax + Budget');
+  }
+  wire('iv_seed', ivSeedFromSources);
+
   function ivGroupNames() {
     const seen = new Set(IV_GROUP_PRESETS);
     ivAcct.accounts.forEach(a => { if (a.investGroup) seen.add(a.investGroup); });
@@ -5989,6 +6105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll(sel).forEach(el => { el.addEventListener('input', trigger); el.addEventListener('change', trigger); });
   }
   liveBind('#tab-invest input, #tab-invest select', calcInvest);
+  { const sel = $('iv_strategy'); if (sel) sel.addEventListener('change', ivStrategyToggle); }   // instant show/hide, ahead of the debounced recalc
   liveBind('#tab-auto input, #tab-auto select', calcAuto);
   liveBind('#tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"]', calcBudget);
   wire('bg_seed', () => {
@@ -6637,7 +6754,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Expose the derived monthly plan baseline so the Actuals tab can lock it for plan-vs-actual.
       const planLines = {};
       Object.keys(linesByKind).forEach(k => { planLines[k] = Object.values(linesByKind[k]).map(o => ({ name: o.name, planned: Math.round(o.planned * 100) / 100 })); });
-      window.__budgetPlan = { kindMonthly: { ...kindT }, lines: planLines, aliases: bgb.catAliases || {}, incomeBase: incomeBase, savingsTarget: _invTgt, strategy: bgb.strategy,
+      // taxInvestMonthly rides SEPARATELY from kindMonthly: kindMonthly must stay raw budget-line
+      // totals (the Actuals PVA baseline reads it, and payroll contributions never appear as
+      // logged transactions), while FIRE's planned-savings needs budget lines + the tax-tab
+      // rollup. 2026-07-26 fix: FIRE was reading kindMonthly.investment alone and undercounting
+      // annual savings by the entire 401k/HSA/Roth rollup.
+      window.__budgetPlan = { kindMonthly: { ...kindT }, taxInvestMonthly: taxInvest, lines: planLines, aliases: bgb.catAliases || {}, incomeBase: incomeBase, savingsTarget: _invTgt, strategy: bgb.strategy,
         partnerSplits: { household: Math.round(household * 100) / 100, yourShare: Math.round(allocated * 100) / 100, partner: Math.round(Math.max(0, partner) * 100) / 100 } };
       bgbRenderAliasGroups(); bgbFillAliasTargets();
       let cs = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Investing ' + (_invPct * 100).toFixed(0) + '% of after-tax income — ' + (_invPct >= _invTgt ? 'at or above' : 'below') + ' the ' + (_invTgt * 100).toFixed(0) + '% target</div><div class="s">vs ' + esc(bgb.strategy) + '</div></div></div>';
@@ -7683,12 +7805,22 @@ document.addEventListener('DOMContentLoaded', async () => {
         [5, 10, 15, 20, 25, 30, 35, 40].filter(y => y <= yy.length).forEach(y => { const v = yy[y - 1].value, w = Math.max(1, Math.round(100 * v / maxv)); h += '<div style="display:flex;align-items:center;gap:8px;margin:2px 0;font-size:var(--fs-xs)"><span style="width:40px;color:var(--muted)">Yr ' + y + '</span><span style="display:inline-block;height:9px;background:var(--accent);border-radius:3px;width:' + w + '%"></span><span>' + f$(v) + '</span></div>'; }); }
       $('pj_out').innerHTML = h;
     } catch (e) { $('pj_out').innerHTML = '<div class="warn-box">Error: ' + (e.message || e) + '</div>'; }
+    pjTaxSeedRender();
   }
   wire('pj_go', calcProject);
   // Reflect ALL Tax-tab investment line items into the projection (esp. post-tax):
   //   trad 401k → Traditional · Roth 401k + Roth IRA + after-tax 401k (mega-backdoor) → Roth
   //   HSA + employer HSA → HSA · ESPP + employer stock + budget surplus → Taxable.
-  let pjTouched = false;
+  // pjTouched() reads the hidden #pj_touched checkbox LIVE (part of #tab-invest's TABS_SEL
+  // snapshot, see the HTML comment above it) rather than caching its value in a closure variable
+  // at boot: this whole "Feature tabs" IIFE runs synchronously at parse time, BEFORE the
+  // `DOMContentLoaded` handler above (which calls restoreTabs()) actually fires — so a
+  // cached-at-init boolean would always freeze in at its default (false), never seeing the
+  // restored value. Reading the checkbox fresh every call sidesteps that ordering trap entirely:
+  // by the time anything calls pjAutoFill() (a real click, or the window 'load' listener's
+  // synthetic tab re-open at ~L4530), restoreTabs() has long since run and set it correctly.
+  function pjTouched() { const cb = $('pj_touched'); return !!(cb && cb.checked); }
+  function pjSetTouched(v) { const cb = $('pj_touched'); if (cb) cb.checked = v; }
   function pjSeedFromSources() {
     const c = (window.__taxResult && window.__taxResult.cash) || {};
     $('pj_c_trad').value = Math.round(c.trad401k || 0);
@@ -7698,9 +7830,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('pj_c_tax').value = Math.round((c.eeStock || 0) + (c.erStock || 0) + Math.max(0, surplus) * 12);
     formatUSDFields();
   }
-  function pjAutoFill() { if (pjTouched) return; pjSeedFromSources(); calcProject(); }
-  ['pj_c_trad', 'pj_c_roth', 'pj_c_hsa', 'pj_c_tax'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => { pjTouched = true; }); });
-  wire('pj_seed', () => { pjTouched = false; pjSeedFromSources(); calcProject(); });
+  function pjAutoFill() { if (pjTouched()) return; pjSeedFromSources(); calcProject(); }
+  ['pj_c_trad', 'pj_c_roth', 'pj_c_hsa', 'pj_c_tax'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => { pjSetTouched(true); }); });
+  wire('pj_seed', () => { pjSetTouched(false); pjSeedFromSources(); calcProject(); saveTabs(); });
+
+  // ---- Taxable ← Budget-line investing (TODO-243-ish): explicit seed, never silent sync ----
+  // pjSeedFromSources() above already reflects the Tax tab's 401k/Roth/HSA rollup into their own
+  // rows (auto on tab visit + "Pull from Tax + Budget"); Taxable there is stock comp + leftover
+  // budget surplus, NOT the Budget tab's dedicated Investments bucket (after-tax investing the
+  // user explicitly planned for). That gap is exactly what a household reported: $2,500/mo
+  // planned in the Investments bucket, but Taxable showed the leftover-surplus number instead.
+  // This button targets ONLY the Taxable row — never re-seeds trad/roth/hsa, which already have
+  // their own sync path and would double-count if this touched them too.
+  function pjTaxSeedRender() {
+    const wrap = $('pj_tax_seedwrap'); if (!wrap) return;
+    const bp = window.__budgetPlan;
+    const budgetAnnual = (bp && bp.kindMonthly && bp.kindMonthly.investment > 0) ? Math.round(bp.kindMonthly.investment * 12) : 0;
+    wrap.style.display = budgetAnnual > 0 ? '' : 'none';
+    const hint = $('pj_tax_hint'); if (!hint) return;
+    if (budgetAnnual <= 0) { hint.textContent = ''; return; }
+    const current = N('pj_c_tax');
+    hint.textContent = (Math.abs(current - budgetAnnual) > budgetAnnual * 0.10)
+      ? ('Budget plans ' + fmt$(budgetAnnual) + '/yr after-tax — Use Budget plan →') : '';
+  }
+  function pjTaxSeed() {
+    const bp = window.__budgetPlan;
+    if (!bp || !(bp.kindMonthly && bp.kindMonthly.investment > 0)) { showToast('Build your Investments bucket on the Budget tab first, then come back and seed.'); return; }
+    const annual = Math.round(bp.kindMonthly.investment * 12);
+    $('pj_c_tax').value = annual;
+    formatUSDFields();
+    pjSetTouched(true);   // explicit user choice — don't let the next tab visit (or a reload) auto-fill over it
+    if (typeof saveTabs === 'function') saveTabs();
+    calcProject();
+    pjTaxSeedRender();
+    showToast('Taxable annual contribution set to ' + fmt$(annual) + ' from your Budget plan');
+  }
+  wire('pj_tax_seed', pjTaxSeed);
+  { const el = $('pj_c_tax'); if (el) el.addEventListener('input', pjTaxSeedRender); }
 
   // ===== Employer 401(k) match visibility (free money) =====
   function matchDollars() {
@@ -9378,8 +9544,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function firePlannedSavings() {
     const bp = window.__budgetPlan;
-    // kindMonthly.investment is monthly (Budget tab rolls up tax-tab contributions too).
-    if (bp && bp.kindMonthly && bp.kindMonthly.investment > 0) return bp.kindMonthly.investment * 12;
+    // Budget-line investments PLUS the tax-tab 401k/HSA/Roth rollup (exposed separately as
+    // taxInvestMonthly — kindMonthly stays raw for the PVA baseline; see __budgetPlan writer).
+    if (bp && bp.kindMonthly && (bp.kindMonthly.investment > 0 || (bp.taxInvestMonthly || 0) > 0)) {
+      return ((bp.kindMonthly.investment || 0) + (bp.taxInvestMonthly || 0)) * 12;
+    }
     // Fallback: sum the pre-tax / post-tax buckets from the last Tax computation.
     if (window.__taxResult && window.__taxResult.cash) {
       const c = window.__taxResult.cash;

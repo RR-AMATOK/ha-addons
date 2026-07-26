@@ -446,6 +446,11 @@ def calculate(i: Inputs) -> dict:
     total_investment_income = ordinary_additions + pref_income
     inv_eff = investment_tax / total_investment_income if total_investment_income > 0 else 0.0
 
+    # AGI: Box-1 wages + all 1040 investment income. Equals magi_niit for the modeled
+    # inputs (no foreign-income addbacks). NOT the Roth MAGI above, which is deliberately
+    # left as fed_wages (a documented under-count that omits investment income).
+    agi = fed_wages + total_investment_income
+
     # ----- §415(c) overall annual-additions limit (mega-backdoor headroom) -----
     # Counts elective deferrals + after-tax + employer plan contributions. Excludes HSA,
     # Roth IRA, age-50 catch-up, and er_stock (taxable stock comp, not a plan addition).
@@ -540,6 +545,7 @@ def calculate(i: Inputs) -> dict:
             "rothIraPhaseIn": i.roth_ira_phase_in,
             "rothIraPhaseOut": i.roth_ira_phase_out,
             "rothIraMagi": magi,
+            "agi": agi,
             # §415(c) overall annual-additions limit (mega-backdoor headroom).
             "sec415cLimit": i.sec415c_limit,
             "sec415cAdditions": sec415c_additions,

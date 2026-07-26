@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.5
+
+- **AGI and MAGI in the Tax summary.** A new "Your MAGI" row shows AGI and
+  MAGI (Roth IRA) side by side, with the distance to the Roth phase-out and
+  a color cue only when you're near the cliff. When they differ, the AGI
+  tile shows why ("MAGI + $X investment").
+- **FIRE now counts all your saving.** The FIRE tab's annual-savings figure
+  was missing your 401k/HSA/Roth payroll contributions — it now includes
+  them, so your savings rate and FI window reflect your real plan.
+- **The Invest tab pulls from your plan.** The Projection table's Taxable
+  contribution can seed from your Budget's investment lines ("Use Budget
+  plan"), and the Next-Dollar planner gains "Pull from Tax + Budget" —
+  income, state, essential expenses, and your full planned savings fill in
+  one tap (everything stays editable; contribution rooms are set to the
+  full annual limits so the plan decides what fills them).
+- **HENRY Playbook v2 strategy.** The Next-Dollar planner gains a waterfall
+  strategy selector: the default order, or the community HENRY playbook
+  (match → 6-month emergency fund → HSA → 401k/IRA incl. backdoor →
+  mega-backdoor → debts ≥5% → taxable), with its allocation guidance and
+  RSU/insurance notes — clearly attributed, not financial advice.
+
 ## 0.3.4
 
 - **What-if picker with cross-device parking.** The What-If button now opens

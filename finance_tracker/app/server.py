@@ -399,6 +399,11 @@ class InvestModel(BaseModel):
     # Annual dollars to allocate through the savings waterfall
     amount: float = Field(0.0, alias="amount")
 
+    # Waterfall strategy: "default" (Bogleheads/r-personalfinance/Money Guy FOO, unchanged
+    # behavior) or "henry-v2" (HENRY Playbook v2 — see docs/henry-playbook-strategy.md).
+    # Absent → "default", so existing clients are unaffected.
+    strategy: Literal["default", "henry-v2"] = Field("default", alias="strategy")
+
     # Profile identity / income
     age: int = Field(30, alias="age")
     state: Literal["TX", "CA", "WA", "none"] = Field("TX", alias="state")
@@ -435,6 +440,12 @@ class InvestModel(BaseModel):
     ef_starter_target: float = Field(1_000.0, alias="efStarterTarget")
     ef_months_target: int = Field(6, alias="efMonthsTarget")
     high_interest_threshold: float = Field(0.06, alias="highInterestThreshold")
+
+    # HENRY Playbook v2 parameters (only consulted when strategy == "henry-v2")
+    retire_age: int = Field(65, alias="retireAge")
+    henry_ef_months_target: int = Field(6, alias="henryEfMonthsTarget")
+    henry_debt_threshold: float = Field(0.05, alias="henryDebtThreshold")
+    henry_debt_aggressive_threshold: float = Field(0.10, alias="henryDebtAggressiveThreshold")
 
     model_config = {"populate_by_name": True}
 
@@ -600,6 +611,10 @@ def _to_investing_profile(m: InvestModel) -> investing.Profile:
         ef_starter_target=m.ef_starter_target,
         ef_months_target=m.ef_months_target,
         high_interest_threshold=m.high_interest_threshold,
+        retire_age=m.retire_age,
+        henry_ef_months_target=m.henry_ef_months_target,
+        henry_debt_threshold=m.henry_debt_threshold,
+        henry_debt_aggressive_threshold=m.henry_debt_aggressive_threshold,
     )
 
 
@@ -1128,7 +1143,7 @@ def budget_endpoint(inp: BudgetModel) -> dict:
 @app.post("/api/invest")
 def invest_endpoint(inp: InvestModel) -> dict:
     profile = _to_investing_profile(inp)
-    return investing.calculate(profile, inp.amount)
+    return investing.calculate(profile, inp.amount, strategy=inp.strategy)
 
 
 @app.post("/api/auto")

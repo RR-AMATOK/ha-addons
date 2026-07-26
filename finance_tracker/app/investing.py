@@ -73,6 +73,14 @@ class Profile:
     ef_months_target: int = 6
     high_interest_threshold: float = 0.06
 
+    # ---- HENRY Playbook v2 strategy parameters (see docs/henry-playbook-strategy.md) ----
+    # Kept independent of the default waterfall's equivalents above so the two strategies
+    # can diverge without coupling (e.g. henry_debt_threshold vs high_interest_threshold).
+    retire_age: int = 65                            # drives the henry-v2 allocation glide
+    henry_ef_months_target: int = 6                 # henry-v2 emergency-fund target (months)
+    henry_debt_threshold: float = 0.05               # henry-v2 "pay it down" APR cutoff (5%)
+    henry_debt_aggressive_threshold: float = 0.10    # henry-v2 "drain savings for it" cutoff (10%)
+
 
 # ---------- Private helpers ----------
 
@@ -203,7 +211,7 @@ def pro_rata_warning(profile: Profile) -> dict | None:
     }
 
 
-def target_allocation(age: int, aggressiveness: str = "moderate") -> dict:
+def target_allocation(age: int, aggressiveness: str = "moderate", retire_age: int | None = None) -> dict:
     """Glide-path stock/bond split using (base − age) % in stocks.
 
     Bases by aggressiveness level:
@@ -213,7 +221,28 @@ def target_allocation(age: int, aggressiveness: str = "moderate") -> dict:
 
     Result is clamped to [0, 100].
     Returns {"stocksPct": float, "bondsPct": float}.
+
+    aggressiveness == "henry-v2" switches to the HENRY Playbook v2 glide instead of the
+    base-age formula (see docs/henry-playbook-strategy.md):
+        age < 50                          → 80–100% equities (a range; 90% midpoint target)
+        age ≥ 50, > 10y from retire_age   → 70/30
+        age ≥ 50, ≤ 10y from retire_age   → 60/40
+    In this mode the range stage additionally returns "stocksRangeLow"/"stocksRangeHigh".
+    `retire_age` defaults to 65 if not supplied.
     """
+    if aggressiveness == "henry-v2":
+        r_age = retire_age if retire_age is not None else 65
+        if age < 50:
+            return {
+                "stocksPct": 90.0,
+                "bondsPct": 10.0,
+                "stocksRangeLow": 80.0,
+                "stocksRangeHigh": 100.0,
+            }
+        years_to_retire = r_age - age
+        stocks_pct = 70.0 if years_to_retire > 10 else 60.0
+        return {"stocksPct": stocks_pct, "bondsPct": 100.0 - stocks_pct}
+
     bases: dict[str, int] = {"moderate": 110, "aggressive": 120, "conservative": 100}
     base = bases.get(aggressiveness, 110)
     stocks_pct = float(max(0.0, min(100.0, base - age)))
@@ -272,10 +301,12 @@ def asset_location_guidance() -> dict:
     }
 
 
-def next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
+def next_dollar_plan(
+    profile: Profile, amount: float, strategy: Literal["default", "henry-v2"] = "default"
+) -> list[dict]:
     """Allocate `amount` dollars across the savings waterfall in optimal priority order.
 
-    Waterfall (Bogleheads / r/personalfinance / Money Guy FOO):
+    strategy == "default" (Bogleheads / r/personalfinance / Money Guy FOO):
         1.  Starter emergency fund   (~$1k; default ef_starter_target)
         2.  401(k) to full employer match  (never leave free money on the table)
         3.  High-interest debt — avalanche (highest APR first; above high_interest_threshold)
@@ -286,8 +317,33 @@ def next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
         8.  Mega-backdoor Roth  (if mega_available)
         9.  Taxable brokerage / 529 / low-interest-debt prepayment
 
-    Each step dict: {bucket, amount, accountType, taxTreatment, rationale, roomRemaining}.
-    Steps stop when `amount` is exhausted; a step only appears if it receives funds.
+    strategy == "henry-v2" (HENRY Playbook v2, community-sourced — see
+    docs/henry-playbook-strategy.md for the full mapping + attribution):
+        1.  401(k) to full employer match  (unchanged — never skip)
+        2.  Emergency fund to a 6-month target (henry_ef_months_target; independent of
+            the default waterfall's EF steps/target)
+        3.  HSA max  (triple-advantaged; ranked right after match+EF per the playbook)
+        4.  Retirement: 401(k) to the annual max, then IRA (direct/backdoor Roth per MAGI),
+            then mega-backdoor Roth if the plan supports it
+        5.  Debt with APR ≥ henry_debt_threshold (default 5%) — avalanche order
+        6.  Taxable brokerage
+
+    Each step dict: {bucket, amount, accountType, taxTreatment, rationale, roomRemaining}
+    (henry-v2 debt steps additionally carry a "note" key with the playbook's aggression-
+    threshold and mortgage-itemization caveats). Steps stop when `amount` is exhausted;
+    a step only appears if it receives funds.
+    """
+    if amount <= 0:
+        return []
+    if strategy == "henry-v2":
+        return _henry_v2_next_dollar_plan(profile, amount)
+    return _default_next_dollar_plan(profile, amount)
+
+
+def _default_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
+    """The default (Bogleheads / r/personalfinance / Money Guy FOO) waterfall.
+
+    Pinned byte-identical to pre-strategy-parameter behavior — see next_dollar_plan().
     """
     if amount <= 0:
         return []
@@ -482,8 +538,217 @@ def next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
     return steps
 
 
-def calculate(profile: Profile, amount: float) -> dict:
+def _henry_v2_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
+    """HENRY Playbook v2 waterfall (community-sourced; r/HENRYfinance, 2024-09-08).
+
+    Order: match → EF (henry_ef_months_target, default 6mo) → HSA max → retirement
+    (401k max → IRA incl. backdoor Roth if over MAGI → mega-backdoor) → debt at/above
+    henry_debt_threshold (avalanche) → taxable.
+
+    See docs/henry-playbook-strategy.md for the full mapping, attribution, and the
+    deliberate departures from the default waterfall (debt threshold, EF target).
+    """
+    remaining = float(amount)
+    steps: list[dict] = []
+
+    k401_room = float(profile.k401_room)
+    ira_room = float(profile.ira_room)
+    ef_total = float(profile.ef_balance)
+
+    now_marginal = _approx_fed_marginal(profile.gross_income)
+    retire_rate = (
+        _retire_effective_rate(profile.retire_income)
+        if profile.retire_income > 0 else profile.retire_marginal_rate
+    )
+    trad_roth = traditional_vs_roth(
+        now_marginal, retire_rate, profile.state, profile.retire_state_no_tax,
+    )
+
+    def _alloc(bucket: str, acct: str, tax: str, rationale: str, cap: float, note: str | None = None) -> float:
+        """Allocate up to `cap` from `remaining`; append step; return amount allocated."""
+        nonlocal remaining
+        if remaining <= 0 or cap <= 0:
+            return 0.0
+        alloc = min(remaining, cap)
+        remaining -= alloc
+        step = {
+            "bucket": bucket,
+            "amount": round(alloc, 2),
+            "accountType": acct,
+            "taxTreatment": tax,
+            "rationale": rationale,
+            "roomRemaining": round(cap - alloc, 2),
+        }
+        if note is not None:
+            step["note"] = note
+        steps.append(step)
+        return alloc
+
+    # ── 1. Employer match — unchanged, never skip ────────────────────────────
+    match_pct = profile.employer_match.get("pct_of_salary", 0.0)
+    match_rate = profile.employer_match.get("match_rate", 0.0)
+    match_employee_target = match_pct * profile.gross_income
+    match_cap = min(match_employee_target, k401_room)
+
+    if match_cap > 0 and match_pct > 0 and match_rate > 0:
+        employer_contribution = match_rate * match_employee_target
+        matched = _alloc(
+            "k401Match", "trad401k", "traditional",
+            (
+                f"HENRY Playbook v2, step 1: capture the full employer match "
+                f"(${match_employee_target:,.0f} contribution → ${employer_contribution:,.0f} "
+                "free money). Never skip the match, regardless of income level."
+            ),
+            match_cap,
+        )
+        k401_room -= matched
+
+    # ── 2. Emergency fund — 6-month target (playbook-specific) ───────────────
+    ef_target = profile.monthly_essential_expenses * profile.henry_ef_months_target
+    ef_gap = max(0.0, ef_target - ef_total)
+    ef_total += _alloc(
+        "fullEf", "savings", "none",
+        (
+            f"HENRY Playbook v2, step 2: build a {profile.henry_ef_months_target}-month "
+            f"emergency fund (target ${ef_target:,.0f} = "
+            f"${profile.monthly_essential_expenses:,.0f}/mo × {profile.henry_ef_months_target} "
+            "months). HENRYs (High Earner, Not Rich Yet) carry higher fixed obligations and "
+            "less job-search flexibility at their income level, so the playbook funds this "
+            "in full right after the match — ahead of HSA and retirement accounts."
+        ),
+        ef_gap,
+    )
+
+    # ── 3. HSA max ─────────────────────────────────────────────────────────
+    if profile.hsa_eligible and profile.hsa_room > 0:
+        _alloc(
+            "hsa", "hsa", "tripleAdvantaged",
+            (
+                "HENRY Playbook v2, step 3: max the HSA. Triple-tax-advantaged (deductible "
+                "in, grows tax-free, withdraws tax-free for qualified medical expenses) — the "
+                "playbook ranks it ahead of 401(k)/IRA maxing since no other account matches "
+                "that tax treatment."
+            ),
+            float(profile.hsa_room),
+        )
+
+    # ── 4. Retirement: 401(k) max → IRA (incl. backdoor) → mega-backdoor ─────
+    if k401_room > 0:
+        if trad_roth["recommend"] == "traditional":
+            k401_acct = "trad401k"
+            k401_tax = "traditional"
+        else:
+            k401_acct = "roth401k"
+            k401_tax = "roth"
+
+        k401_alloc = _alloc(
+            "k401Max", k401_acct, k401_tax,
+            (
+                "HENRY Playbook v2, step 4a: max the remaining 401(k) elective deferral. "
+                f"{trad_roth['rationale']}"
+            ),
+            k401_room,
+        )
+        k401_room -= k401_alloc
+
+    if ira_room > 0:
+        if profile.roth_magi_over_limit:
+            ira_acct = "backdoorRothIra"
+            ira_tax = "roth"
+            ira_rationale = (
+                "HENRY Playbook v2, step 4b: backdoor Roth IRA — contribute non-deductible "
+                "to a Traditional IRA, then immediately convert to Roth. Most HENRYs are over "
+                "the direct-Roth MAGI limit; file Form 8606 annually."
+            )
+            if profile.pretax_ira_balance > 0:
+                ira_rationale += " WARNING: pro-rata rule applies — see warnings."
+        elif trad_roth["recommend"] == "roth":
+            ira_acct = "rothIra"
+            ira_tax = "roth"
+            ira_rationale = (
+                f"HENRY Playbook v2, step 4b: direct Roth IRA contribution. {trad_roth['rationale']}"
+            )
+        else:
+            ira_acct = "traditionalIra"
+            ira_tax = "traditional"
+            ira_rationale = (
+                f"HENRY Playbook v2, step 4b: deductible Traditional IRA. {trad_roth['rationale']}"
+            )
+
+        ira_alloc = _alloc("ira", ira_acct, ira_tax, ira_rationale, ira_room)
+        ira_room -= ira_alloc
+
+    if profile.mega_available and profile.aftertax_401k_room > 0:
+        _alloc(
+            "megaBackdoor", "afterTax401k", "roth",
+            (
+                "HENRY Playbook v2, step 4c: mega-backdoor Roth via after-tax 401(k) "
+                f"contributions (§415(c) room = ${profile.aftertax_401k_room:,.0f}) with "
+                "immediate in-plan Roth conversion. The playbook flags this as the highest-"
+                "value remaining lever once 401(k)/IRA are maxed, for plans that support both "
+                "after-tax contributions and in-plan Roth rollover."
+            ),
+            float(profile.aftertax_401k_room),
+        )
+
+    # ── 5. Debt at/above henry_debt_threshold — avalanche order ──────────────
+    high_debts = sorted(
+        [
+            d for d in profile.debts
+            if d.get("apr", 0.0) >= profile.henry_debt_threshold
+            and d.get("balance", 0.0) > 0
+        ],
+        key=lambda d: d["apr"],
+        reverse=True,
+    )
+    for debt in high_debts:
+        if remaining <= 0:
+            break
+        _alloc(
+            "highInterestDebt", "debtPayoff", "none",
+            (
+                f"HENRY Playbook v2, step 5: pay down {debt['apr'] * 100:.2f}% APR debt "
+                f"(playbook cutoff: {profile.henry_debt_threshold * 100:.0f}%+, avalanche — "
+                "highest rate first)."
+            ),
+            float(debt["balance"]),
+            note=(
+                "The playbook only recommends draining savings/investing pace to attack debt "
+                f"at {profile.henry_debt_aggressive_threshold * 100:.0f}%+ APR — between "
+                f"{profile.henry_debt_threshold * 100:.0f}% and "
+                f"{profile.henry_debt_aggressive_threshold * 100:.0f}% it's a closer call and "
+                "investing often edges it out long-run. If this is a mortgage under $750k "
+                "principal and you itemize, the mortgage-interest deduction lowers its "
+                "effective after-tax rate — don't rush to prepay it purely because the stated "
+                "rate clears the cutoff."
+            ),
+        )
+
+    # ── 6. Taxable brokerage ──────────────────────────────────────────────────
+    if remaining > 0:
+        _alloc(
+            "taxable", "brokerage", "taxable",
+            (
+                "HENRY Playbook v2, step 6: taxable brokerage. No contribution limits; use "
+                "tax-efficient broad index funds. RSU vesting proceeds and any remaining "
+                "surplus land here once the tax-advantaged waterfall is filled."
+            ),
+            remaining,
+        )
+
+    return steps
+
+
+def calculate(
+    profile: Profile, amount: float, strategy: Literal["default", "henry-v2"] = "default"
+) -> dict:
     """Entry point: run the full investing analysis for `amount` dollars.
+
+    strategy: "default" (Bogleheads/r-personalfinance/Money Guy FOO, byte-identical to
+    pre-strategy-parameter behavior) or "henry-v2" (HENRY Playbook v2 — see
+    docs/henry-playbook-strategy.md). Response additions for "henry-v2" are additive: the
+    output gains a "henryNotes" key and targetAllocation uses the henry-v2 glide; every
+    other key/shape is unchanged.
 
     Returns a nested dict:
         inputs          — echo of key profile fields (camelCase)
@@ -492,9 +757,13 @@ def calculate(profile: Profile, amount: float) -> dict:
         assetLocation   — structured guidance by account type
         warnings        — list of warning dicts (proRata, secure2CatchUp, …)
         notes           — list of disclaimer / caveat strings
+        henryNotes      — (henry-v2 only) RSU and insurance guidance, display-only strings
     """
-    plan = next_dollar_plan(profile, amount)
-    allocation = target_allocation(profile.age)
+    plan = next_dollar_plan(profile, amount, strategy=strategy)
+    if strategy == "henry-v2":
+        allocation = target_allocation(profile.age, "henry-v2", retire_age=profile.retire_age)
+    else:
+        allocation = target_allocation(profile.age)
     asset_loc = asset_location_guidance()
     # Traditional vs Roth (TODO-105): compare current marginal to the retirement EFFECTIVE
     # rate when a retirement income is given (withdrawals fill brackets from the bottom);
@@ -532,7 +801,7 @@ def calculate(profile: Profile, amount: float) -> dict:
         "Not financial, tax, or legal advice. Consult a CFP/CPA before making decisions.",
     ]
 
-    return {
+    result = {
         "inputs": {
             "age": profile.age,
             "state": profile.state,
@@ -561,6 +830,37 @@ def calculate(profile: Profile, amount: float) -> dict:
                        "retireRateBasis": "effective" if profile.retire_income > 0 else "marginal"},
         "warnings": warnings,
         "notes": notes,
+    }
+
+    if strategy == "henry-v2":
+        result["henryNotes"] = _henry_v2_notes()
+
+    return result
+
+
+def _henry_v2_notes() -> dict:
+    """Display-only HENRY Playbook v2 guidance not tied to a specific waterfall step.
+
+    Community-sourced from the "HENRY Playbook v2" (r/HENRYfinance, 2024-09-08) — not
+    financial advice. See docs/henry-playbook-strategy.md for the full attribution.
+    """
+    return {
+        "rsuPolicy": (
+            "Sell RSUs at vest; don't treat unsold company stock as a deliberate bet. Cap "
+            "total company-stock exposure (RSUs + ESPP + options, unsold) at no more than "
+            "1/3 of total investable assets — your paycheck and career are already "
+            "concentrated in this employer; the portfolio doesn't need to be too."
+        ),
+        "insuranceChecklist": (
+            "Term life insurance at 4-8x annual income, disability insurance with an "
+            "own-occupation definition, and a $1M+ umbrella liability policy — inexpensive "
+            "protection against the tail risks that would derail the waterfall above."
+        ),
+        "attribution": (
+            "Community-sourced from the \"HENRY Playbook v2\" (r/HENRYfinance, 2024-09-08). "
+            "Not financial, tax, or legal advice — a crowd-sourced rule of thumb, not a "
+            "substitute for a CFP/CPA."
+        ),
     }
 
 
