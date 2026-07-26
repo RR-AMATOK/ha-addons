@@ -74,6 +74,7 @@
     --field-shadow: inset 0 1px 2px rgba(0,0,0,0.28);
     --field-focus-ring: 0 0 0 2px rgba(122,167,255,0.32);                              /* fallback first */
     --field-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent); /* themed; keep BOTH lines */
+    --field-locked: var(--chip);   /* read-only "locked" fill: the raised-chip tone — auto-themes and reads clearly (dark: a step ABOVE the card, where --unit-bg nearly matched --panel and looked like no fill; shiro: warm linen). Never white paper. Drives .input-pair.is-locked; see docs/ui-redesign.md §G. */
     /* Type scale (TODO-230 typography audit): size / weight / family / letter-spacing / line-height tokens.
        Folds vs the pre-audit sizes are intentional: 15->16 (verdict tiles + .ac-add), 19->18 (composer $ unit),
        22->24 (composer amount input). */
@@ -187,6 +188,16 @@
     background: transparent; border: none; box-shadow: none; color: var(--text); outline: none;
     padding: 6px 8px; flex: 1 1 auto; width: auto; min-width: 0; font: inherit; text-align: right;
   }
+  /* G) sourced-and-locked fields (docs/ui-redesign.md §G): "locked" reads as a self-evidently
+     read-only control — the WRAPPER swaps to a muted --field-locked fill (a raised-chip tone,
+     auto-themed, never white paper), DROPS the editable "well" inset shadow, and its internal
+     segment dividers go transparent so the whole pill is one flat muted chip. The value stays
+     --text (high-contrast). No accent inset strip + no stacked shadows = the old left-edge sliver
+     is gone. Unlocked returns to the normal --field well (rule above). */
+  .input-pair.is-locked { background: var(--field-locked); box-shadow: none; border-color: var(--field-border); }
+  .input-pair.is-locked:focus-within { border-color: var(--field-border); box-shadow: none; }
+  .input-pair.is-locked input[readonly] { cursor: default; color: var(--text); }
+  .input-pair.is-locked .unit, .input-pair.is-locked .gl-lock { background: var(--field-locked); border-left-color: transparent; }
   .input-pair .unit {
     display: inline-flex; align-items: center; justify-content: center; min-width: 2.6em; padding: 0 8px;
     color: var(--muted); font-size: var(--fs-sm); border-left: 1px solid var(--line);
@@ -237,7 +248,7 @@
     transition: border-color .12s ease, box-shadow .12s ease;
   }
   td input.ac-ed:focus, td select.ac-ed:focus {
-    border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,167,255,.30);
+    border-color: var(--accent); box-shadow: var(--field-focus-ring);
   }
   td input.ac-ed::placeholder { color: var(--muted); opacity: 1; }
   /* Actuals ledger — row action icons (edit ✎ / delete ✕ / save ✓ / cancel) were faint UA links. */
@@ -259,6 +270,17 @@
   .gl-act-del { color: var(--muted); }
   .gl-act-del:hover { color: var(--bad); background: var(--chip); }
   .gl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* G) lock toggle — now an in-pair SEGMENT (mirrors .unit): the pill is ONE bordered group
+     [value | $ | lock], not a floating square button beside it. Interactive (hover/focus) where
+     .unit is static; overflow:hidden on the wrapper clips it into the pill radius, so border-radius:0
+     (override the button base's --radius-sm, else a rounded inner corner notches the seam) + an
+     INSET focus outline (an outward one would be clipped away). No `font:` shorthand — it clobbers
+     font-size (shipped a bug before). Same never-a-bare-glyph discipline as .gl-act/.seed-btn. */
+  .gl-lock { display: inline-flex; align-items: center; justify-content: center;
+    background: var(--unit-bg); color: var(--muted); border: none; border-left: 1px solid var(--line);
+    border-radius: 0; padding: 0 8px; font-size: var(--fs-sm); line-height: 1; cursor: pointer; }
+  .gl-lock:hover { background: var(--unit-hover-bg); color: var(--accent); }
+  .gl-lock:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   /* Tag chips (per-row + filter bar): explicit readable text + hairline (the --chip fill alone is ~1.2:1). */
   .ac-tag {
     color: var(--muted); background: var(--chip); border: 1px solid var(--line);
@@ -551,6 +573,8 @@
   #ov_out .legend { margin:0 0 4px; }
   .nw-field { display:flex; flex-direction:column; gap:3px; font-size:var(--fs-xs); color:var(--muted); }
   .nw-field input { width:128px; }
+  /* G) provenance line under a sourced-and-locked field ("from Invest tab" / "from Budget + Tax") */
+  .nw-src { display:block; margin-top:2px; font-size:var(--fs-2xs); color:var(--muted); }
   /* DEC-024 HA theme adapter (shiro-full only): the net-worth cone's fill-opacity/stroke-opacity
      are tuned for a dark background and read as near-invisible on light. html.theme-shiro-full
      is set by applyHaTheme() only in full (light) presentation — accent-only stays dark and never
@@ -947,14 +971,44 @@
   <div style="padding:6px 24px 24px;max-width:1100px;margin:0 auto">
     <div class="subhead">Net worth forecast</div>
     <section class="card" style="margin-top:6px">
-      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
-        <label class="nw-field">Current net worth<span class="input-pair"><input id="nw_current" type="text" inputmode="decimal" data-fmt="usd" value="150000"/><span class="unit">$</span></span></label>
-        <label class="nw-field">Annual invested<span class="input-pair"><input id="nw_annual" type="text" inputmode="decimal" data-fmt="usd" value="36000"/><span class="unit">$</span></span></label>
+      <!-- G) About-you row (docs/ui-redesign.md §G): the ONE canonical age pair, co-located with
+           the horizon it produces. Rides #tab-overview's existing TABS_SEL snapshot — zero new
+           storage keys, same What-If twinning + backups as any other forecast input. -->
+      <div class="mini" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted)">
+        <span>I&rsquo;m</span>
+        <span class="input-pair"><input id="nw_cur_age" type="number" min="18" max="80" value="35"/><span class="unit">yr</span></span>
+        <span>&middot; plan to retire at</span>
+        <span class="input-pair"><input id="nw_ret_age" type="number" min="40" max="100" value="65"/><span class="unit">yr</span></span>
+        <span id="nw_horizon_note"></span>
+      </div>
+      <!-- G) sourced-and-locked row: Current net worth ← Invest registry, Annual invested ←
+           firePlannedSavings() (Budget Investments + Tax contributions). Locked by default;
+           the hidden _locked checkboxes ride TABS_SEL like #pj_touched (~L1718) so lock state
+           survives a reload. Retires the old #nw_useplan button (wrong Tax-cash-only figure). -->
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;margin-top:10px">
+        <label class="nw-field">Current net worth
+          <span class="input-pair has-lock"><input id="nw_current" type="text" inputmode="decimal" data-fmt="usd" value="150000" readonly/><span class="unit">$</span><button type="button" class="gl-lock" id="nw_current_lock" aria-pressed="true" title="Sourced automatically — click to override">&#128274;</button></span>
+          <span class="nw-src" id="nw_current_src">from Invest tab</span>
+        </label>
+        <input type="checkbox" id="nw_current_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
+        <label class="nw-field">Annual invested
+          <span class="input-pair has-lock"><input id="nw_annual" type="text" inputmode="decimal" data-fmt="usd" value="36000" readonly/><span class="unit">$</span><button type="button" class="gl-lock" id="nw_annual_lock" aria-pressed="true" title="Sourced automatically — click to override">&#128274;</button></span>
+          <span class="nw-src" id="nw_annual_src">from Budget + Tax</span>
+        </label>
+        <input type="checkbox" id="nw_annual_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
+      </div>
+      <!-- G) assumptions row: Years is sourced-and-locked too (retire − current) but carries no
+           per-field note — its provenance is the About-you horizon readout above — so this row
+           stays single-height/aligned with Expected return and ± range. -->
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:10px">
         <label class="nw-field">Expected return<span class="input-pair"><input id="nw_return" type="number" step="0.5" value="7"/><span class="unit">%</span></span></label>
         <label class="nw-field">± range<span class="input-pair"><input id="nw_band" type="number" step="0.5" value="2"/><span class="unit">%</span></span></label>
-        <label class="nw-field">Years<span class="input-pair"><input id="nw_years" type="number" value="30"/><span class="unit">yr</span></span></label>
-        <button class="seed-btn" id="nw_useplan" type="button" title="set Annual invested to your planned contributions from the Tax tab">use planned →</button>
+        <label class="nw-field">Years
+          <span class="input-pair has-lock"><input id="nw_years" type="number" value="30" readonly/><span class="unit">yr</span><button type="button" class="gl-lock" id="nw_years_lock" aria-pressed="true" title="Sourced automatically — click to override">&#128274;</button></span>
+        </label>
+        <input type="checkbox" id="nw_years_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
       </div>
+      <div class="mini muted" id="nw_src_hint" style="margin-top:4px"></div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:10px">
         <label class="nw-field" style="flex:1;min-width:240px">Milestone targets <span class="mini" style="text-transform:none;letter-spacing:0">(comma-separated · k/m ok · blank = auto)</span><input id="nw_targets" type="text" value="500k, 1m, 2m, 3m, 5m" style="width:100%"></label>
       </div>
@@ -1017,9 +1071,13 @@
             <span class="input-pair"><input id="fire-age" type="number" value="30" min="18" max="80"/><span class="unit">yr</span></span>
           </div>
           <div class="row">
-            <label>Target FI age</label>
+            <label>Target FI age <span class="mini muted">(when work becomes optional)</span></label>
             <span class="input-pair"><input id="fire-target-age" type="number" value="55" min="20" max="80"/><span class="unit">yr</span></span>
           </div>
+          <!-- G) currentAge is fully unified (fire-age mirrors #nw_cur_age); retirementAge stays
+               a distinct, FIRE-local goal (targetFiAge ≠ "when I plan to stop") — tied together
+               with a one-line note pulling the global retirement age live. -->
+          <div class="mini muted" id="fire-target-age-note" style="margin:-4px 0 8px"></div>
           <div class="row">
             <label>SWR</label>
             <span class="input-pair"><input id="fire-swr" type="number" step="0.1" value="3.5" min="2" max="6"/><span class="unit">%</span></span>
@@ -1699,9 +1757,17 @@
   <p class="mini">Project your savings forward at a standard annual return (compounded, contributions yearly). <button class="seed-btn" id="pj_seed" type="button">Pull from Tax + Budget</button></p>
   <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
     <div class="row" style="margin:0"><label class="mini">Return</label><span class="input-pair"><input id="pj_ret" type="number" step="0.1" value="7"/><span class="unit">%</span></span></div>
-    <div class="row" style="margin:0"><label class="mini">Years</label><span class="input-pair"><input id="pj_yrs" type="number" value="30"/><span class="unit">yr</span></span></div>
+    <div class="row" style="margin:0"><label class="mini">Years</label>
+      <span style="display:flex;gap:6px;align-items:stretch">
+        <span class="input-pair"><input id="pj_yrs" type="number" value="30" readonly/><span class="unit">yr</span></span>
+        <button type="button" class="gl-lock" id="pj_yrs_lock" aria-pressed="true" title="Sourced automatically — click to override">&#128274;</button>
+      </span>
+    </div>
     <button class="calc-btn" id="pj_go" type="button" style="margin:0">Project</button>
   </div>
+  <!-- G) pj_yrs is sourced-and-locked (source = retire − current, same as Overview's #nw_years) —
+       rides #tab-invest's TABS_SEL like #pj_touched below, no new storage key. -->
+  <input type="checkbox" id="pj_yrs_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
   <div id="pj_accts" class="mini" style="margin-top:10px"></div>
   <table class="res-table" style="margin-top:10px;max-width:520px"><thead><tr><th>Account</th><th>Annual contribution</th><th>Current balance</th></tr></thead><tbody>
     <tr><td>Traditional 401(k)</td><td><input id="pj_c_trad" type="text" inputmode="decimal" data-fmt="usd" value="24500" style="width:96px"></td><td><input id="pj_b_trad" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
@@ -4568,7 +4634,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { persist('itc.activetab', t); } catch (e) {}   // remember the active tab across reloads
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
-      if (t === 'invest') { ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); }   // derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint (pjAutoFill() skips calcProject when pjTouched, so call this separately)
+      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint (pjAutoFill() skips calcProject when pjTouched, so call this separately)
       if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds
       if (t === 'auto' && !window.__autoResult) calcAuto();   // first open computes the comparison
       if (t === 'actuals') acOnOpen();
@@ -4758,7 +4824,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       ticks += '<line x1="' + padL + '" y1="' + yy + '" x2="' + (W - padR) + '" y2="' + yy + '" stroke="var(--line)" stroke-width="1"/>'
         + '<text x="' + (padL - 6) + '" y="' + (yy + 3) + '" text-anchor="end" font-size="9" fill="var(--muted)">' + kfmt(v) + '</text>'; });
     let xlab = '';
-    [minT, Math.round((years + minT) / 2), years].forEach(yr => { xlab += '<text x="' + x(yr) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="9" fill="var(--muted)">' + (yr === 0 ? 'now' : (yr > 0 ? '+' + Math.round(yr) + 'y' : Math.round(yr) + 'y')) + '</text>'; });
+    // opts.endAge: optional age label for the RIGHT-hand endpoint ("age 65" instead of "+30y"),
+    // set from getGlobalAges().ret by callers that have a canonical retirement age (Overview
+    // forecast, Invest actual-vs-forecast overlay). Omitted (byte-identical) everywhere else.
+    [minT, Math.round((years + minT) / 2), years].forEach(yr => {
+      const isEnd = yr === years && opts.endAge != null;
+      const label = isEnd ? ('age ' + Math.round(opts.endAge)) : (yr === 0 ? 'now' : (yr > 0 ? '+' + Math.round(yr) + 'y' : Math.round(yr) + 'y'));
+      xlab += '<text x="' + x(yr) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="9" fill="var(--muted)">' + label + '</text>';
+    });
     let realSvg = '';
     if (real.length) {
       realSvg = '<polyline points="' + real.map(p => x(p.t) + ',' + Y(p.value)).join(' ') + '" fill="none" stroke="var(--good)" stroke-width="2"/>'
@@ -4791,8 +4864,157 @@ document.addEventListener('DOMContentLoaded', async () => {
       + xlab + '</svg>';
   }
 
+  // ===== G) Cross-tab planning consistency (docs/ui-redesign.md §G) =====
+  // ONE canonical age pair, read from the About-you row on the Overview forecast card
+  // (#nw_cur_age/#nw_ret_age — plain #tab-overview inputs, zero new storage keys).
+  function getGlobalAges() { return { cur: N('nw_cur_age') || 35, ret: N('nw_ret_age') || 65 }; }
+
+  // Consolidated drift-hint registry: bindSourcedField() instances that share a hintEl push a
+  // check function here; _renderSrcHint joins whichever checks currently have something to say
+  // into that one element (e.g. #nw_src_hint), instead of every field fighting over its own line.
+  const _srcHintRegistry = {};
+  function _registerSrcHint(hintElId, checkFn) { (_srcHintRegistry[hintElId] = _srcHintRegistry[hintElId] || []).push(checkFn); }
+  function _renderSrcHint(hintElId) {
+    const el = $(hintElId); if (!el) return;
+    el.textContent = (_srcHintRegistry[hintElId] || []).map(fn => fn()).filter(Boolean).join(' · ');
+  }
+
+  // Pattern 1 — the reusable "sourced-and-locked field": auto-pulled from a canonical source,
+  // locked by default, with a lock toggle + provenance note + >10% drift hint (the pj_tax_hint
+  // precedent threshold, ~L7850ish). See docs/ui-redesign.md §G for the full behavior spec.
+  function bindSourcedField(cfg) {
+    const { inputId, lockId, resolve, noteEl, noteText, noSourceText, hintEl, label, fmt } = cfg;
+    const format = fmt || f$;
+    const lockedCkId = inputId + '_locked';   // convention: <inputId>_locked, e.g. nw_current_locked
+    function isLocked() { const cb = $(lockedCkId); return !!(cb && cb.checked); }
+    function setLocked(v) { const cb = $(lockedCkId); if (cb) cb.checked = v; }
+    function wrapOf(input) { let n = input; for (let i = 0; i < 4 && n; i++) { if (n.classList && n.classList.contains('input-pair')) return n; n = n.parentElement; } return null; }
+    function hintCheck() {
+      if (isLocked()) return '';
+      const input = $(inputId); if (!input) return '';
+      const src = resolve();
+      if (src == null || src === 0) return '';
+      const cur = rn(input.value);
+      if (Math.abs(cur - src) <= src * 0.10) return '';
+      return (label || inputId) + ' shows ' + format(src) + ' — re-lock to sync';
+    }
+    if (hintEl) _registerSrcHint(hintEl, hintCheck);
+
+    function sync() {
+      const input = $(inputId); if (!input) return;
+      const wrap = wrapOf(input), note = noteEl ? $(noteEl) : null;
+      const src = resolve();
+      const hasSource = src != null && src !== 0;
+      if (!hasSource && isLocked()) setLocked(false);   // never trap the user with a locked-empty field
+      const locked = isLocked();
+      if (locked) {
+        if (document.activeElement !== input) input.value = Math.round(src);
+        input.readOnly = true;
+        if (wrap) wrap.classList.add('is-locked');
+        if (note) note.textContent = noteText || '';
+      } else {
+        input.readOnly = false;
+        if (wrap) wrap.classList.remove('is-locked');
+        if (note) note.textContent = hasSource ? (noteText || '') : (noSourceText || 'No source yet — enter manually');
+      }
+      const btn = $(lockId);
+      if (btn) {
+        btn.textContent = locked ? '\u{1F512}' : '\u{1F513}';
+        btn.setAttribute('aria-pressed', locked ? 'true' : 'false');
+        btn.title = locked ? 'Sourced automatically — click to override' : 'Editing manually — click to re-lock and sync';
+        btn.setAttribute('aria-label', locked ? 'Locked — sourced automatically, click to override' : 'Unlocked — editing manually, click to re-lock and sync');
+      }
+      if (hintEl) _renderSrcHint(hintEl);
+    }
+
+    const btn = $(lockId);
+    if (btn) btn.addEventListener('click', () => {
+      const goingLocked = !isLocked();
+      const input = $(inputId);
+      // Re-locking is an explicit "discard my manual value, go back to source" action, so it must
+      // ALWAYS re-sync. sync()'s locked branch skips the overwrite while the field is focused (to
+      // avoid clobbering mid-type) — the field is still focused from the prior unlock, so blur it
+      // first or the re-sync is silently skipped and the stale manual value sticks.
+      if (goingLocked && input) input.blur();
+      setLocked(goingLocked);
+      sync();
+      formatUSDFields();
+      if (typeof saveTabs === 'function') saveTabs();
+      if (cfg.onToggle) cfg.onToggle();
+      if (!goingLocked && input) input.focus();
+    });
+
+    return { sync, isLocked, setLocked };
+  }
+
+  // ---- The three canonical sources (single source of truth per number) ----
+  function nwResolveCurrent() {
+    const total = (ivAcct.accounts || []).reduce((s, a) => s + (ivBal(a) || 0), 0);
+    return total > 0 ? total : null;
+  }
+  function nwResolveAnnual() {
+    const v = firePlannedSavings();
+    return v > 0 ? v : null;
+  }
+  function nwResolveYears() {
+    const ages = getGlobalAges();
+    return Math.max(1, ages.ret - ages.cur);
+  }
+
+  const nwCurrentField = bindSourcedField({
+    inputId: 'nw_current', lockId: 'nw_current_lock', resolve: nwResolveCurrent,
+    noteEl: 'nw_current_src', noteText: 'from Invest tab',
+    noSourceText: 'Add accounts on the Invest tab to source this',
+    hintEl: 'nw_src_hint', label: 'Invest', onToggle: () => renderNetWorth()
+  });
+  const nwAnnualField = bindSourcedField({
+    inputId: 'nw_annual', lockId: 'nw_annual_lock', resolve: nwResolveAnnual,
+    noteEl: 'nw_annual_src', noteText: 'from Budget + Tax',
+    noSourceText: 'Build your Budget plan (or Tax tab) to source this',
+    hintEl: 'nw_src_hint', label: 'Plan', onToggle: () => renderNetWorth()
+  });
+  const nwYearsField = bindSourcedField({
+    inputId: 'nw_years', lockId: 'nw_years_lock', resolve: nwResolveYears,
+    hintEl: 'nw_src_hint', label: 'Horizon', fmt: v => Math.round(v) + ' yr',
+    onToggle: () => renderNetWorth()
+  });
+
+  function nwUpdateHorizonNote() {
+    const el = $('nw_horizon_note'); if (!el) return;
+    const ages = getGlobalAges(), yrs = Math.max(1, ages.ret - ages.cur);
+    el.textContent = '→ ' + yrs + '-yr horizon, to age ' + ages.ret;
+  }
+
+  // Pattern 2 consumers (FIRE fire-age, Invest iv_age/iv_henry_age) call this on edit: write the
+  // new value back to the canonical field, then re-derive everything downstream in one place.
+  function nwOnAgesChange() {
+    nwUpdateHorizonNote();
+    if (typeof saveTabs === 'function') saveTabs();
+    renderNetWorth();
+    if (typeof calcProject === 'function') calcProject();
+    if (typeof renderOverview === 'function') renderOverview();
+  }
+  function wireAgeMirror(fieldId, canonicalId, extra) {
+    const el = $(fieldId); if (!el) return;
+    el.addEventListener('input', () => {
+      const canon = $(canonicalId); if (canon) canon.value = el.value;
+      nwOnAgesChange();
+      if (extra) extra();
+    });
+  }
+  ['nw_cur_age', 'nw_ret_age'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', nwOnAgesChange); });
+
+  let _nwAcctLoadTried = false;
   async function renderNetWorth() {
     const out = $('nw_chart'); if (!out) return;
+    // G) sync each LOCKED sourced field from its canonical source before reading it — the read/
+    // POST/render path below is otherwise unchanged. Registry may still be empty on first paint
+    // (boot fires this before the Invest tab has ever loaded it) — load it once, then proceed
+    // even if it comes back empty (nwResolveCurrent returns null → the field auto-unlocks).
+    if (!ivAcct.accounts.length && !_nwAcctLoadTried) { _nwAcctLoadTried = true; try { await ivAcctLoad(); } catch (e) {} }
+    nwCurrentField.sync(); nwAnnualField.sync(); nwYearsField.sync();
+    formatUSDFields();
+    nwUpdateHorizonNote();
     const cur = N('nw_current'), ann = N('nw_annual'), ret = P('nw_return'), band = P('nw_band'), yrs = Math.max(1, Math.round(N('nw_years')));
     const targets = ((($('nw_targets') || {}).value) || '').split(',').map(s => {
       s = s.trim().toLowerCase(); if (!s) return null;
@@ -4814,11 +5036,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         r.final = { low: r.final.low / d, mid: r.final.mid / d, high: r.final.high / d };
         r.totalGrowthMid = r.final.mid - cur - r.totalContributed;   // approximate in real terms
       }
-      const f = r.final;
-      let h = nwChart(r);
+      const f = r.final, retAge = getGlobalAges().ret;
+      let h = nwChart(r, { endAge: retAge });
       h += '<div class="legend" style="margin:8px 0 2px"><span><span class="sw" style="background:var(--good)"></span>Today ' + f$(cur) + '</span><span><span class="sw" style="background:var(--accent)"></span>Forecast (dotted)</span><span>Shaded band = ' + (ret * 100 - band * 100).toFixed(1) + '%–' + (ret * 100 + band * 100).toFixed(1) + '% returns</span></div>';
       h += '<div class="tiles" style="margin-top:8px">'
-        + '<div class="tile good"><div class="k">In ' + yrs + ' yr</div><div class="v">' + f$(f.mid) + '</div><div class="s">expected</div></div>'
+        + '<div class="tile good"><div class="k">In ' + yrs + ' yr</div><div class="v">' + f$(f.mid) + '</div><div class="s">expected · at age ' + retAge + '</div></div>'
         + '<div class="tile"><div class="k">Range</div><div class="v" style="font-size:var(--fs-md);font-variant-numeric:tabular-nums">' + f$(f.low) + ' – ' + f$(f.high) + '</div></div>'
         + '<div class="tile"><div class="k">You put in</div><div class="v">' + f$(cur + r.totalContributed) + '</div><div class="s">' + f$(ann) + '/yr from ' + f$(cur) + '</div></div>'
         + '<div class="tile good"><div class="k">Growth</div><div class="v">' + f$(r.totalGrowthMid) + '</div></div>'
@@ -4844,7 +5066,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   { let nwTimer; const nwDebounced = () => { clearTimeout(nwTimer); nwTimer = setTimeout(renderNetWorth, 250); };
     ['nw_current', 'nw_annual', 'nw_return', 'nw_band', 'nw_years', 'nw_targets', 'nw_infl'].forEach(id => { const e = $(id); if (e) e.addEventListener('input', nwDebounced); });
     { const re = $('nw_real'); if (re) re.addEventListener('change', renderNetWorth); }
-    const up = $('nw_useplan'); if (up) up.onclick = () => { const t = window.__taxResult; if (t && t.cash) { const c = t.cash; const inv = (c.trad401k || 0) + (c.roth401k || 0) + (c.rothIra || 0) + (c.hsa || 0) + (c.employerHsa || 0) + (c.eeStock || 0) + (c.erStock || 0) + (c.afterTax401k || 0); const el = $('nw_annual'); if (el) el.value = Math.round(inv); formatUSDFields(); if (typeof saveTabs === 'function') saveTabs(); renderNetWorth(); } else { alert('Open the Tax tab and let it calculate first.'); } }; }
+    // #nw_useplan ("use planned →") is retired (G) — the locked Annual-invested field above IS
+    // the plan link now, and (unlike the old button) it pulls the correct firePlannedSavings()
+    // figure (Budget Investments + Tax contributions), not just the Tax-tab cash rollup.
+  }
 
   // ---- Budget ----
   async function calcBudget() {
@@ -5497,6 +5722,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (row) row.style.display = (sel && sel.value === 'henry-v2') ? '' : 'none';
   }
   async function calcInvest() {
+    ivApplyCanonicalAges();   // G) iv_age/iv_henry_age mirror the global ages on every plan build
     ivStrategyToggle();
     try {
       const strategy = ($('iv_strategy') && $('iv_strategy').value === 'henry-v2') ? 'henry-v2' : 'default';
@@ -5690,6 +5916,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Pulled gross income, state, expenses, planned savings & full contribution rooms from Tax + Budget');
   }
   wire('iv_seed', ivSeedFromSources);
+
+  // G) iv_age/iv_henry_age are Pattern-2 consumers of the global ages (not sourced-and-locked —
+  // no lock UI, per docs/ui-redesign.md §G): always overwritten from canonical when the Invest
+  // tab renders/plan builds (calcInvest() above, tab-open handler); editing either writes back
+  // to its canonical field (#nw_cur_age / #nw_ret_age) and re-derives everywhere via nwOnAgesChange.
+  function ivApplyCanonicalAges() {
+    const ages = getGlobalAges();
+    const ageEl = $('iv_age'); if (ageEl && document.activeElement !== ageEl) ageEl.value = ages.cur;
+    const henryEl = $('iv_henry_age'); if (henryEl && document.activeElement !== henryEl) henryEl.value = ages.ret;
+  }
+  wireAgeMirror('iv_age', 'nw_cur_age');
+  wireAgeMirror('iv_henry_age', 'nw_ret_age');
 
   function ivGroupNames() {
     const seen = new Set(IV_GROUP_PRESETS);
@@ -7785,7 +8023,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Added ' + f$(r.finance.monthlyPayment) + '/mo car payment to Needs › Transportation');
   });
   // ===== Projection =====
+  // G) pj_yrs is sourced-and-locked (source = retire − current, same nwResolveYears() as the
+  // Overview's #nw_years) — defined here, right before its one reader, so calcProject() can
+  // sync it from source before reading N('pj_yrs') below.
+  const pjYrsField = bindSourcedField({
+    inputId: 'pj_yrs', lockId: 'pj_yrs_lock', resolve: nwResolveYears,
+    onToggle: () => calcProject()
+  });
   async function calcProject() {
+    pjYrsField.sync();
     try {
       const contributions = { trad401k: N('pj_c_trad'), roth: N('pj_c_roth'), hsa: N('pj_c_hsa'), taxable: N('pj_c_tax') };
       const balances = { trad401k: N('pj_b_trad'), roth: N('pj_b_roth'), hsa: N('pj_b_hsa'), taxable: N('pj_b_tax') };
@@ -7793,7 +8039,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const r = await post('/api/project', { contributions, balances, annualReturn: P('pj_ret'), years: yrs });
       window.__projResult = { totals: r.totals, years: yrs };   // for the Overview
       const T = r.totals;
-      let h = '<div class="tiles"><div class="tile good"><div class="k">Future value</div><div class="v">' + f$(T.futureValue) + '</div><div class="s">in ' + yrs + ' yr</div></div>'
+      let h = '<div class="tiles"><div class="tile good"><div class="k">Future value</div><div class="v">' + f$(T.futureValue) + '</div><div class="s">in ' + yrs + ' yr · at age ' + getGlobalAges().ret + '</div></div>'
         + '<div class="tile"><div class="k">Put in</div><div class="v">' + f$(T.totalContributed + T.startBalance) + '</div></div>'
         + '<div class="tile"><div class="k">Growth</div><div class="v">' + f$(T.growth) + '</div></div></div>';
       h += '<div class="subhead">By account</div><table class="res-table"><tr><th>Account</th><th>Future value</th><th>Growth</th></tr>';
@@ -8596,7 +8842,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!real.length) { el.innerHTML = '<div class="mini muted">Update a balance in <b>Your investment accounts</b> above to plot your real net worth on the forecast cone.</div>'; return; }
     const now = new Date();
     const series = real.map(s => ({ t: (new Date(s.date + 'T00:00:00') - now) / (365.25 * 864e5), value: s.value }));
-    let h = nwChart(nf, { real: series });
+    let h = nwChart(nf, { real: series, endAge: getGlobalAges().ret });
     h += '<div class="legend" style="margin-top:8px"><span><span class="sw" style="background:var(--good)"></span>Actual (logged)</span><span><span class="sw" style="background:var(--accent)"></span>Forecast (dotted)</span></div>';
     const nw = data.comparison && data.comparison.netWorth;
     if (nw && nw.deltaVsMid != null) {
@@ -9456,7 +9702,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         spendBasis: ($('fire-spend-basis') || {}).value || 'planned',
         customSpend: rn(($('fire-custom-spend') || {}).value),
         currentNW: rn(($('fire-nw') || {}).value),
-        age: +($('fire-age') || {}).value || 30,
+        // G) currentAge is fully unified — fire-age mirrors the canonical #nw_cur_age and is
+        // no longer persisted here (this used to be the source of the pre-existing 30-vs-32
+        // divergence between FIRE and the Invest planner). targetFiAge stays FIRE-local.
         targetAge: +($('fire-target-age') || {}).value || 55,
         swr: +($('fire-swr') || {}).value || 3.5,
         nomReturn: +($('fire-nom-return') || {}).value || 7,
@@ -9473,6 +9721,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function fireSetField(id, val) { const el = $(id); if (el && val != null) el.value = val; }
 
+  // G) fire-target-age (Target FI age) stays FIRE-local and independent of the global retirement
+  // age — this note is the honest tie between them, pulling the live value from getGlobalAges().
+  function fireUpdateTargetAgeNote() {
+    const el = $('fire-target-age-note'); if (!el) return;
+    el.textContent = 'Retirement age ' + getGlobalAges().ret + ' from About you — set an earlier Target FI age to test work-optional sooner.';
+  }
+
   // Extracted from fireOnOpen() so What-If Mode's wiRepopulateDom() can sync the FIRE fields
   // from storage even when the FIRE tab isn't the one currently open (discard/resume must not
   // leave stale in-mode values sitting in a hidden tab's fields). Synchronous — the async
@@ -9484,7 +9739,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const csr = $('fire-custom-spend-row');
     if (csr) csr.style.display = (prefs.spendBasis === 'custom') ? '' : 'none';
     if (prefs.customSpend) fireSetField('fire-custom-spend', prefs.customSpend);
-    if (prefs.age       != null) fireSetField('fire-age',        prefs.age);
+    // G) fire-age MIRRORS the canonical current age (Pattern 2 consumer) — always overwritten
+    // from getGlobalAges(), never from a stored FIRE pref (fireSavePrefs no longer saves it).
+    { const fa = $('fire-age'); if (fa && document.activeElement !== fa) fa.value = getGlobalAges().cur; }
+    fireUpdateTargetAgeNote();
     if (prefs.targetAge != null) fireSetField('fire-target-age', prefs.targetAge);
     if (prefs.swr       != null) fireSetField('fire-swr',        prefs.swr);
     if (prefs.nomReturn != null) fireSetField('fire-nom-return', prefs.nomReturn);
@@ -9560,6 +9818,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function fireCalc() {
     const chartEl = $('fire-chart'); if (!chartEl) return;
+
+    // G) fire-age mirrors the canonical current age on every FIRE render, not just tab-open —
+    // fireCalc can also run from the debounced-input path (editing swr/nomReturn/etc.) without
+    // fireApplyPrefsToDom in between, so this stays a belt-and-suspenders overwrite (a no-op
+    // when fire-age itself was just what triggered this, per its own listener below).
+    { const fa = $('fire-age'); if (fa && document.activeElement !== fa) fa.value = getGlobalAges().cur; }
+    fireUpdateTargetAgeNote();
 
     // ---- Read assumption fields ----
     const spendBasis = ($('fire-spend-basis') || {}).value || 'planned';
@@ -9776,12 +10041,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const debounce = () => { clearTimeout(_fireInputTimer); _fireInputTimer = setTimeout(fireCalc, 450); };
 
-    ['fire-nw', 'fire-age', 'fire-target-age', 'fire-swr', 'fire-nom-return',
+    ['fire-nw', 'fire-target-age', 'fire-swr', 'fire-nom-return',
      'fire-inflation', 'fire-lean-mult', 'fire-fat-mult', 'fire-custom-spend'].forEach(id => {
       const el = $(id); if (!el) return;
       el.addEventListener('input',  () => { fireSavePrefs(); debounce(); });
       el.addEventListener('change', () => { fireSavePrefs(); debounce(); });
     });
+
+    // G) fire-age is a Pattern-2 consumer, not a plain FIRE pref: editing it writes back to the
+    // canonical #nw_cur_age and re-derives everywhere (nwOnAgesChange), same as iv_age/iv_henry_age.
+    wireAgeMirror('fire-age', 'nw_cur_age', () => { fireSavePrefs(); debounce(); });
 
     const spendSel = $('fire-spend-basis');
     if (spendSel) {

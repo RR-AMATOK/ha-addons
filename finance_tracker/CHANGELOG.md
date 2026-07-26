@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.6
+
+- **Tell the app who you are, once.** The Overview forecast now carries an
+  "About you" pair — your age and target retirement age (default 65) — and
+  that one setting drives every horizon in the app: the Overview forecast,
+  the Invest projections, and the retirement inputs. Charts now read
+  "age 65" instead of "+30y", and the horizon adjusts itself.
+- **The forecast uses your real numbers.** Current net worth is sourced
+  from your Invest accounts and Annual invested from your full plan
+  (Budget + Tax contributions) — locked by default with a clear muted
+  style, unlockable for manual overrides, with a drift hint if your manual
+  value wanders from the source.
+- FIRE keeps its own "Target FI age" on purpose — when work becomes
+  optional is a different question from when you plan to stop; a note ties
+  the two together.
+- Formatting audit: fixed a shadow artifact on locked fields, a focus ring
+  that stayed blue under the gold theme, and a column misalignment.
+
 ## 0.3.5
 
 - **AGI and MAGI in the Tax summary.** A new "Your MAGI" row shows AGI and
