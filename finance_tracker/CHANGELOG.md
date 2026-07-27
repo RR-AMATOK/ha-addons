@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.7
+
+- **One MAGI, the correct one.** The Tax and Invest tabs now share a single
+  MAGI figure computed once by the engine — no more two tabs showing
+  different numbers for the same state. The figure now correctly excludes
+  §125 insurance premiums and **includes your recurring investment income**
+  (interest, dividends, capital gains), so a Roth-IRA "eligible" readout can
+  no longer be fooled by wages alone. The ESPP/RSU sale *explorer* is
+  deliberately excluded — exploring "what if I sell" moves your AGI estimate
+  but never flips your real eligibility.
+- **Over the Roth limit? The app warns — it never touches your number.**
+  Previously, crossing the MAGI limit silently overwrote your entered Roth
+  IRA contribution. Now the field keeps exactly what you typed and shows a
+  clear warning ("cap $0 — reduce it or use the backdoor") instead.
+- **The Next-Dollar plan follows your actual paycheck.** The waterfall's
+  401(k) dollars now split between Traditional and Roth exactly per your
+  Tax-tab election (e.g. 80/20) instead of routing everything to the
+  strategy's own pick, and the IRA step honors your Roth-IRA/backdoor
+  election. The Traditional-vs-Roth recommendation remains — as advice,
+  shown next to your current election, never silently overriding it.
+- **Your payroll election is visible on the Invest tab** — a line under the
+  plan shows exactly what your Tax tab elects, so you can always compare
+  the plan against reality.
+- **No more silently-frozen projections.** If you ever hand-edited a
+  projection row, auto-sync from the Tax tab stopped without telling you.
+  Now a hint appears when the Tax tab has moved on, with a one-tap
+  "Re-sync from Tax" to catch up.
+- Fixed: the What-If banner's "Income base" delta could be wildly inflated
+  by a stale cached figure — both banner deltas now derive from the same
+  snapshot, so equal contributions mean equal deltas. Also fixed: planner
+  contribution rooms stuck at 0 from an old session now self-heal to the
+  annual limits when all four are zero.
+
 ## 0.3.6
 
 - **Tell the app who you are, once.** The Overview forecast now carries an

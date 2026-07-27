@@ -395,6 +395,33 @@ class EmployerMatchModel(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ElectedModel(BaseModel):
+    """The user's REAL payroll election (Tax tab), mirrored by the Next-Dollar waterfall
+    (investing.py, 2026-07-26) instead of being overridden by the trad/Roth recommender.
+    All optional/default 0 — an absent or all-zero payload reproduces the pre-election plan
+    byte-for-byte (see investing.Profile.elected_trad401k docstring for the full incident).
+
+    ge=0 on every field (code review, 2026-07-26): the real client never sends negatives,
+    but a negative trad401k paired with a positive roth401k would push
+    investing._k401_roth_ratio()'s ratio past 1.0, driving the same trad_split-goes-negative
+    overshoot that _K401SplitState.apply() otherwise guards against for fractional/edge
+    ratios — defense-in-depth at the API boundary rather than relying solely on the
+    downstream clamp.
+    """
+
+    trad401k: float = Field(0.0, ge=0, alias="trad401k")
+    roth401k: float = Field(0.0, ge=0, alias="roth401k")
+    roth_ira: float = Field(0.0, ge=0, alias="rothIra")
+    aftertax_401k: float = Field(0.0, ge=0, alias="afterTax401k")
+
+    model_config = {"populate_by_name": True}
+
+    # aftertax_401k is reserved/not-yet-consumed (code review, 2026-07-26): the mega-backdoor
+    # waterfall step routes off Profile.aftertax_401k_room, not this election field — it's
+    # accepted here for payload symmetry with the Tax tab's cash fields only. Don't assume
+    # the mega-backdoor leg is election-aware; it isn't.
+
+
 class InvestModel(BaseModel):
     # Annual dollars to allocate through the savings waterfall
     amount: float = Field(0.0, alias="amount")
@@ -446,6 +473,9 @@ class InvestModel(BaseModel):
     henry_ef_months_target: int = Field(6, alias="henryEfMonthsTarget")
     henry_debt_threshold: float = Field(0.05, alias="henryDebtThreshold")
     henry_debt_aggressive_threshold: float = Field(0.10, alias="henryDebtAggressiveThreshold")
+
+    # Real payroll election (Tax tab) — optional; absent/all-zero → byte-identical plan.
+    elected: ElectedModel = Field(default_factory=ElectedModel, alias="elected")
 
     model_config = {"populate_by_name": True}
 
@@ -615,6 +645,10 @@ def _to_investing_profile(m: InvestModel) -> investing.Profile:
         henry_ef_months_target=m.henry_ef_months_target,
         henry_debt_threshold=m.henry_debt_threshold,
         henry_debt_aggressive_threshold=m.henry_debt_aggressive_threshold,
+        elected_trad401k=m.elected.trad401k,
+        elected_roth401k=m.elected.roth401k,
+        elected_roth_ira=m.elected.roth_ira,
+        elected_aftertax_401k=m.elected.aftertax_401k,
     )
 
 

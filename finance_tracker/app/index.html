@@ -1701,7 +1701,7 @@
     <div class="row"><label class="mini">Expected retirement income <span class="hint">(annual; for Trad-vs-Roth)</span></label><span class="input-pair"><input id="iv_retinc" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
     <button class="calc-btn" id="iv_go" type="button">Build plan</button>
   </section>
-  <section class="card"><h2>Plan</h2><div id="iv_out" class="mini">Enter your numbers and build the plan.</div></section>
+  <section class="card"><h2>Plan</h2><div id="iv_out" class="mini">Enter your numbers and build the plan.</div><p class="mini muted" id="iv_election" style="display:none;margin-top:8px"></p></section>
 </div>
 <section class="card" style="margin-top:16px">
   <h2>Your investment accounts</h2>
@@ -1755,6 +1755,11 @@
 <section class="card" style="margin-top:16px">
   <h2>Projection — standard growth</h2>
   <p class="mini">Project your savings forward at a standard annual return (compounded, contributions yearly). <button class="seed-btn" id="pj_seed" type="button">Pull from Tax + Budget</button></p>
+  <!-- pjTouched (#pj_touched, ~L1784) freezes auto-sync silently forever after one hand-edit — the
+       gate protects a deliberate override, but the freeze itself was invisible. This surfaces it:
+       shown only when touched AND the Tax tab has since drifted >$1 from what pjSeedFromSources()
+       would set, per the pj_tax_hint/pj_tax_seedwrap pattern just below in the table. -->
+  <p class="mini" id="pj_resync_wrap" style="margin:4px 0 0;display:none">Tax tab now shows <span id="pj_resync_hint"></span> — <button class="seed-btn" id="pj_resync_btn" type="button">Re-sync from Tax →</button></p>
   <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
     <div class="row" style="margin:0"><label class="mini">Return</label><span class="input-pair"><input id="pj_ret" type="number" step="0.1" value="7"/><span class="unit">%</span></span></div>
     <div class="row" style="margin:0"><label class="mini">Years</label>
@@ -2398,18 +2403,37 @@ let   FILING_DEFAULTS = null;
 let   NIIT_THRESHOLD = 200_000;
 let   LTCG_0PCT_UPPER = 49_450;
 let   LTCG_15PCT_UPPER = 545_500;
-// MAGI proxy for a W-2 employee = Federal Box 1 wages.
-function currentMagi() {
-  return Math.max(0, annualSalary()
-    + resolveAnnual('erStock') + resolveAnnual('gtli')
-    - resolveAnnual('trad401k') - resolveAnnual('hsa'));
+// Roth IRA MAGI + phase-out canonicalization (docs/magi-canonicalization-plan.md, TODO-244,
+// 2026-07-26): the client no longer computes MAGI or the phase-out curve — that shadow formula
+// (the old currentMagi()/currentRothIraMax() pair) forgot §125 premiums and investment income
+// and could disagree with the server near the boundary (D2, user-observed 2026-07-26 — Tax tab
+// said MAGI $81,300, Invest tab said $79,848 for the same state). The server computes Roth MAGI
+// once (limits.rothIraMagi) and the phase-out once (limits.rothIraMax, already honoring the
+// backdoor flag — calculator.py:472-473); the client only ever READS those two fields.
+//
+// rothIraCapFromResult() is the pure reader (no DOM/window — testable in isolation from
+// tests/test_client_math.js's server-fixture parity test). backdoorChecked fast-paths to the
+// flat rothIraLimit for INSTANT checkbox feedback: that limit never moves with MAGI, so it's
+// correct the instant the box is checked, without waiting for the next fetchCalc() round-trip
+// to reflect the toggle (the server already applies the same flag, just one cycle later).
+// taxResult == null (no result yet, e.g. offline) => null = UNKNOWN, never a guessed cap —
+// the deliberate offline tradeoff from plan §2 Attack 4.
+function rothIraCapFromResult(taxResult, backdoorChecked) {
+  if (!taxResult) return null;
+  return backdoorChecked ? taxResult.limits.rothIraLimit : taxResult.limits.rothIraMax;
 }
 function currentRothIraMax() {
-  const bd = $('backdoorRoth'); if (bd && bd.checked) return LIMIT_ROTH_IRA;   // backdoor bypasses the MAGI phase-out
-  const magi = currentMagi();
-  if (magi <= ROTH_IRA_PHASE_IN) return LIMIT_ROTH_IRA;
-  if (magi >= ROTH_IRA_PHASE_OUT) return 0;
-  return LIMIT_ROTH_IRA * (ROTH_IRA_PHASE_OUT - magi) / (ROTH_IRA_PHASE_OUT - ROTH_IRA_PHASE_IN);
+  const bd = $('backdoorRoth');
+  return rothIraCapFromResult(window.__taxResult, !!(bd && bd.checked));
+}
+// Delta rule for the max-out planner's hypothetical (plan §1/§6.1): maxing out Traditional
+// 401(k)/HSA reduces those deductions, which is exactly what raises Roth MAGI — and nothing
+// else in the formula (premiums, interest/dividends/cap-gains) moves when contributions change.
+// So the hypothetical MAGI is EXACT as base + Δtrad + Δhsa, no interpolation needed. `base` is
+// always limits.rothIraMagi off a fresh __taxResult; the two deltas are (planned − maxed),
+// i.e. positive when maxing out REDUCES the current contribution (raising MAGI back up).
+function rothIraMagiDelta(baseMagi, dTrad401k, dHsa) {
+  return baseMagi + dTrad401k + dHsa;
 }
 
 // Switch filing status: always refresh the JS-held thresholds (NIIT / LTCG / Roth band)
@@ -2492,7 +2516,7 @@ function foldCategoriesByCountsAs(categories, rawTotals) {
 }
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
-window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, currentMagi, currentRothIraMax, pctMode, fieldCadence,
+window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs };
 
@@ -2607,19 +2631,17 @@ function enforceLimits(editedId) {
       flashed = true;
     }
   }
-  if (editedId === 'rothIra') {
-    const cap = currentRothIraMax();
-    if (resolveAnnual('rothIra') > cap + 0.005) {
-      setAnnualOnField('rothIra', cap);
-      const reason = cap === 0
-        ? `MAGI over ${fmt$(ROTH_IRA_PHASE_OUT)} — direct Roth IRA not allowed.`
-        : cap < LIMIT_ROTH_IRA
-          ? `MAGI in phase-out — max ${fmt$(cap)}/yr.`
-          : `Roth IRA cap is ${fmt$(cap)}/yr — clamped.`;
-      flashLimitHint('rothIra', reason);
-      flashed = true;
-    }
-  }
+  // Roth IRA: WARN, NEVER OVERWRITE (plan §2, TODO-244, 2026-07-26 — devils-advocate Attack 1,
+  // SERIOUS). This used to setAnnualOnField('rothIra', cap) here, and save() would then persist
+  // the clamp into itc.v3 — but canonical MAGI depends on the recurring-investment inputs, which
+  // are session-only (not in collectState()), so a transient $30k-dividends entry could
+  // PERMANENTLY destroy a stored $7,500 with no undo (same silent-data-loss class as the S1.2
+  // hydrate lesson). The field is never written from here; the persistent warning state lives in
+  // updateLimitHints()'s rothIra block instead, rendered from the FRESH __taxResult (see render(),
+  // ~:2895) rather than this pre-fetch pass — that also dissolves the one-cycle-lag the architect
+  // flagged (checkAllLimits() runs BEFORE fetchCalc(), so a value computed here would always be
+  // one cycle stale; a read-only warning has no such lag). updateLimitHints() below still runs
+  // unconditionally and refreshes the rothIra row every time this function is called.
   // HSA: employee + employer share one legal cap driven by coverage.
   if (editedId === 'hsa') {
     const cap = currentHsaLimit();
@@ -2665,22 +2687,44 @@ function updateLimitHints() {
     k401.classList.toggle('full', rem <= 0.005);
     k401.textContent = `401(k) Trad + Roth cap ${fmt$(LIMIT_401K)}/yr · used ${fmt$(combined)} · ${fmt$(rem)} left`;
   }
+  // Roth IRA — warn-only (plan §2, TODO-244): renders a PERSISTENT over-limit warning off the
+  // fresh __taxResult (this fn is called again from render(), ~:2895, right after __taxResult is
+  // set — no one-cycle lag) instead of the destructive clamp this used to drive. No MAGI claim,
+  // no 'full' state, until a result exists (offline tradeoff, plan §2 Attack 4).
   const kIra = document.querySelector('[data-limit="rothIra"]');
   if (kIra && !kIra.classList.contains('flash')) {
     const used = resolveAnnual('rothIra');
-    const cap = currentRothIraMax();
-    const magi = currentMagi();
-    const rem = Math.max(0, cap - used);
-    kIra.classList.toggle('full', rem <= 0.005);
-    let suffix;
-    if (cap === 0) {
-      suffix = `MAGI ${fmt$(magi)} ≥ ${fmt$(ROTH_IRA_PHASE_OUT)} — ineligible (consider backdoor Roth)`;
-    } else if (cap < LIMIT_ROTH_IRA) {
-      suffix = `MAGI ${fmt$(magi)} in phase-out — reduced cap ${fmt$(cap)} · used ${fmt$(used)} · ${fmt$(rem)} left`;
+    const t = window.__taxResult;
+    kIra.classList.remove('full');
+    if (!t) {
+      kIra.textContent = `Roth IRA · cap ${fmt$(LIMIT_ROTH_IRA)}/yr (MAGI unknown until calculated) · used ${fmt$(used)}`;
     } else {
-      suffix = `cap ${fmt$(cap)}/yr · used ${fmt$(used)} · ${fmt$(rem)} left (MAGI ${fmt$(magi)} below phase-in)`;
+      const bd = $('backdoorRoth'), bdChecked = !!(bd && bd.checked);
+      const cap = currentRothIraMax();   // == rothIraCapFromResult(t, bdChecked); t is fresh here
+      const magi = t.limits.rothIraMagi;
+      const rem = Math.max(0, cap - used);
+      const over = used > cap + 0.005;
+      kIra.classList.toggle('full', over);
+      // Near-edge hedge (devils-advocate near-boundary concern, plan §1): a nonzero explored
+      // ESPP/RSU disposition is EXCLUDED from this MAGI by design, so callers near the cliff
+      // should know the figure doesn't reflect an explored sale.
+      const disp = t.dispositions || {};
+      const dispHeld = Math.abs((disp.addedOrdinaryIncome || 0) + (disp.addedShortTermGain || 0) + (disp.addedLongTermGain || 0)) > 0.5;
+      const hedge = dispHeld ? ' (excludes the sale explorer)' : '';
+      let suffix;
+      if (over) {
+        suffix = bdChecked
+          ? `cap ${fmt$(cap)}/yr — you have ${fmt$(used)} entered: reduce it`
+          : `MAGI ${fmt$(magi)}${hedge} — cap ${fmt$(cap)}, you have ${fmt$(used)} entered: reduce it or use the backdoor`;
+      } else if (cap === 0) {
+        suffix = `MAGI ${fmt$(magi)}${hedge} ≥ ${fmt$(ROTH_IRA_PHASE_OUT)} — ineligible (consider backdoor Roth)`;
+      } else if (cap < LIMIT_ROTH_IRA) {
+        suffix = `MAGI ${fmt$(magi)}${hedge} in phase-out — reduced cap ${fmt$(cap)} · used ${fmt$(used)} · ${fmt$(rem)} left`;
+      } else {
+        suffix = `cap ${fmt$(cap)}/yr · used ${fmt$(used)} · ${fmt$(rem)} left (MAGI ${fmt$(magi)}${hedge} below phase-in)`;
+      }
+      kIra.textContent = `Roth IRA · ${suffix}`;
     }
-    kIra.textContent = `Roth IRA · ${suffix}`;
   }
   const kHsa = document.querySelector('[data-limit="hsa"]');
   if (kHsa && !kHsa.classList.contains('flash')) {
@@ -2888,6 +2932,10 @@ function setStatus(msg, isErr = false) {
 // ---------- Render ----------
 function render(r) {
   window.__taxResult = r;   // stash for the Budget tab's "Use Tax take-home" seed + the Overview
+  // Refresh the Roth IRA limit-hint from THIS fresh result (plan §2, TODO-244) — must happen
+  // here, not only from checkAllLimits()'s pre-fetch pass, or the warning would always be one
+  // recompute cycle stale relative to whatever just changed MAGI.
+  updateLimitHints();
   if (window.bgbBaseAutoFill) window.bgbBaseAutoFill();   // budget base tracks take-home — contributions reduce it live
   if (window.renderOverview) window.renderOverview();   // keep the Overview live as the paycheck changes
   const pf = payFreq();
@@ -2904,21 +2952,24 @@ function render(r) {
   $('t_marg').textContent = fmtPct(r.rates.marginalAllIn != null ? r.rates.marginalAllIn : r.rates.marginal);
   { const sub = $('t_marg_sub'); if (sub) sub.textContent = 'fed ' + fmtPct(r.rates.marginal) + ' + FICA'; }
 
-  // AGI + MAGI (Roth IRA) pair. AGI = wages + investment income. The engine's Roth MAGI
-  // is fed Box-1 wages (a documented under-count) so it EXCLUDES investment income —
-  // hence AGI ≥ MAGI here, differing by exactly the investment income. Relationship on
-  // the AGI tile; color-cue only the MAGI cliff. Muted "= MAGI" in the common (no-invest) case.
+  // AGI + MAGI (Roth IRA) pair (docs/magi-canonicalization-plan.md §1, TODO-244, 2026-07-26).
+  // Both now include recurring investment income (wages + interest/dividends/cap-gains) — the
+  // ONLY remaining difference is the ESPP/RSU disposition explorer, which AGI keeps and the
+  // canonical Roth MAGI deliberately excludes (a "what-if-I-sell" scratchpad must never flip a
+  // real eligibility determination). So AGI == MAGI whenever the explorer is empty (the common
+  // case — no gap line shown), and AGI − MAGI == exactly the explored sale's added income
+  // otherwise. Relationship shown on the AGI tile; color-cue only the MAGI cliff.
   (function(){
     const tile = $('t_magi_tile'); if (!tile) return;
     const magi = r.limits.rothIraMagi, inn = r.limits.rothIraPhaseIn, out = r.limits.rothIraPhaseOut;
     const agi = (r.limits.agi != null) ? r.limits.agi : magi;   // defensive: fall back to magi
     if ($('t_agi')) $('t_agi').textContent = fmt$(agi);
     if ($('t_agi_sub')) {
-      const gap = agi - magi;   // == total investment income (>0 gain, <0 net loss)
+      const gap = agi - magi;   // now == the explored disposition's added income only (>0 gain, <0 loss)
       let rel;
-      if (Math.abs(gap) <= 0.5) rel = '= MAGI (Roth)';
-      else if (gap > 0) rel = `MAGI + ${fmt$(gap)} investment`;
-      else rel = `MAGI − ${fmt$(-gap)} net loss`;
+      if (Math.abs(gap) <= 0.5) rel = '';   // explorer empty — AGI == MAGI, nothing to explain
+      else if (gap > 0) rel = `MAGI excludes your explored sale (+${fmt$(gap)} in AGI)`;
+      else rel = `MAGI excludes your explored loss (${fmt$(-gap)} less in AGI)`;
       $('t_agi_sub').textContent = rel;
     }
     $('t_magi').textContent = fmt$(magi);
@@ -4634,7 +4685,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { persist('itc.activetab', t); } catch (e) {}   // remember the active tab across reloads
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
-      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint (pjAutoFill() skips calcProject when pjTouched, so call this separately)
+      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); pjResyncHintRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
       if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds
       if (t === 'auto' && !window.__autoResult) calcAuto();   // first open computes the comparison
       if (t === 'actuals') acOnOpen();
@@ -5733,6 +5784,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         pretaxIraBalance: N('iv_irabal'), hsaEligible: CK('iv_hsae'), rothMagiOverLimit: CK('iv_rmo'), megaAvailable: CK('iv_mega'),
         retireIncome: N('iv_retinc') };
       if (strategy === 'henry-v2') { body.strategy = 'henry-v2'; body.retireAge = N('iv_henry_age'); }
+      // Real payroll election (Tax tab), 2026-07-26: the waterfall's k401Match/k401Max/ira
+      // steps now mirror this instead of substituting their own trad/Roth pick (repeat user
+      // complaint — see ivElectionRender()'s comment above/below for the display-only fix
+      // that preceded this one). Null-safe: no __taxResult yet (Tax tab never run this
+      // session) → all-zero elected, server treats that identically to an absent payload.
+      const taxCash = (window.__taxResult && window.__taxResult.cash) || {};
+      body.elected = {
+        trad401k: taxCash.trad401k || 0,
+        roth401k: taxCash.roth401k || 0,
+        rothIra: taxCash.rothIra || 0,
+        afterTax401k: taxCash.afterTax401k || 0,
+      };
       const r = await post('/api/invest', body);
       let h = '';
       if (r.plan && r.plan.length) {
@@ -5750,7 +5813,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (tr && tr.recommend) {
         const basis = tr.retireRateBasis === 'effective' ? 'effective' : 'marginal';
         h += '<div class="subhead">Traditional vs Roth</div><div class="tile ' + (tr.recommend === 'roth' ? 'good' : '') + '" style="margin:4px 0"><div class="k">Recommended</div><div class="v" style="font-size:var(--fs-lg);text-transform:capitalize;font-variant-numeric:tabular-nums">' + tr.recommend + '</div><div class="s">now ' + (tr.nowMarginal * 100).toFixed(0) + '% marginal vs retirement ' + (tr.retireRate * 100).toFixed(0) + '% ' + basis + '</div></div>'
-          + '<div class="note-box">' + tr.rationale + '</div>';
+          + '<div class="note-box">' + tr.rationale + '</div>'
+          // electionNote (2026-07-26): only present when the user's real 401(k) election
+          // (now mirrored by the plan above) diverges from this recommendation — advisory,
+          // not a correction of the election.
+          + (tr.electionNote ? '<div class="note-box">' + tr.electionNote + '</div>' : '');
       }
       h += warns((r.warnings || []).map(w => w.rationale || JSON.stringify(w)));
       h += notes(r.notes);
@@ -5762,7 +5829,31 @@ document.addEventListener('DOMContentLoaded', async () => {
           + '<div class="mini muted" style="margin-top:8px">' + hn.attribution + '</div></details>';
       }
       $('iv_out').innerHTML = h;
+      ivElectionRender();
     } catch (e) { fail('iv_out', e); }
+  }
+
+  // Read-only reflection of the Tax tab's REAL payroll election (repeat user complaint: the
+  // Next-Dollar planner's rooms above are asserted to FULL annual limits by design — ivSeedFromSources
+  // (2026-07-26 fix, see its comment) and the "Pull from Tax + Budget" tooltip both say so — and the
+  // waterfall picks its OWN trad/Roth split, so the user's actual $-split from the Tax tab appears
+  // nowhere on this tab and reads as "not syncing". This line is pure display — it changes nothing
+  // about the plan — and is sourced live from window.__taxResult.cash so it refreshes on every
+  // calcInvest() call (the global input->recompute listener already triggers those).
+  function ivElectionRender() {
+    const el = $('iv_election'); if (!el) return;
+    const c = window.__taxResult && window.__taxResult.cash;
+    if (!c) { el.style.display = 'none'; return; }
+    const parts = [];
+    if (c.trad401k > 0) parts.push(fmt$(c.trad401k) + ' Traditional 401(k)');
+    if (c.roth401k > 0) parts.push(fmt$(c.roth401k) + ' Roth 401(k)');
+    if (c.rothIra > 0) parts.push(fmt$(c.rothIra) + ' Roth IRA');
+    if (c.afterTax401k > 0) parts.push(fmt$(c.afterTax401k) + ' after-tax 401(k)');
+    if (c.hsa > 0) parts.push(fmt$(c.hsa) + ' HSA' + (c.employerHsa > 0 ? ' (+' + fmt$(c.employerHsa) + ' employer)' : ''));
+    if (c.eeStock > 0) parts.push(fmt$(c.eeStock) + ' employer-stock');
+    if (!parts.length) { el.style.display = 'none'; return; }
+    el.textContent = 'Your current payroll election (Tax tab): ' + parts.join(' · ') + ' — already included in the amount being planned above.';
+    el.style.display = '';
   }
 
   // ---- Car ----  (POST once, cache, then render at the selected horizon)
@@ -5916,6 +6007,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Pulled gross income, state, expenses, planned savings & full contribution rooms from Tax + Budget');
   }
   wire('iv_seed', ivSeedFromSources);
+
+  // All-four-rooms-zero is the stale signature of a tabs snapshot saved BEFORE the room-assert
+  // fix above (What-If sessions and parked scenarios carry their own itc.tabs.v1 copy, so they
+  // keep pre-fix zeros forever and the waterfall silently routes everything to taxable). It is
+  // never a deliberate plan — anyone with earned income has IRA room — so heal it on tab open.
+  // A single 0 room (e.g. "my employer has no 401(k)") is respected: heal fires only when ALL
+  // four are zero. Runs from the tab-open branch only — never from peek/repopulate paths, whose
+  // DOM writes mid-suppression could be captured back into a What-If session on exit.
+  function ivRoomsHeal() {
+    if (N('iv_k401') === 0 && N('iv_hsar') === 0 && N('iv_irar') === 0 && N('iv_at401') === 0) {
+      $('iv_k401').value = LIMIT_401K;
+      $('iv_hsar').value = currentHsaLimit();
+      $('iv_irar').value = LIMIT_ROTH_IRA;
+      formatUSDFields();
+      if (typeof saveTabs === 'function') saveTabs();
+    }
+  }
 
   // G) iv_age/iv_henry_age are Pattern-2 consumers of the global ages (not sourced-and-locked —
   // no lock UI, per docs/ui-redesign.md §G): always overwritten from canonical when the Invest
@@ -6258,11 +6366,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<div class="note-box" style="margin-top:8px"><b>Catch-up (this year only):</b> you\'ve put in <b>' + fmt$(totalYtd) + '</b> of <b>' + fmt$(totalAnnual) + '</b>. To still hit the cap by year-end, contribute <b>' + fmt$(finishPP) + '/paycheck</b> across your <b>' + nLeft + '</b> remaining paychecks — heavier than the level ' + fmt$(levelPP) + '/paycheck. Your take-home dips during this stretch, then returns to the steady ' + fmt$(maxPP) + '/paycheck above. A temporary sprint — it doesn\'t change the steady budget.</div>';
       if (finishPP > atiPP) h += '<div class="warn-box">That\'s more than you net per paycheck (~' + fmt$(atiPP) + '/paycheck before retirement) — you can\'t fully catch up from payroll alone this year. Consider a lump sum, or fewer accounts.</div>';
     }
-    if (t.rothIra && typeof currentMagi === 'function') {
+    // Delta rule off the server's canonical rothIraMagi (plan §1/§6.1, TODO-244) — no client
+    // MAGI/interpolation. Null-guarded: skip entirely with no __taxResult yet (replaces the old
+    // `typeof currentMagi === 'function'` guard, which died with that function).
+    if (t.rothIra && window.__taxResult) {
       const tradMax = t.trad401k != null ? t.trad401k : resolveAnnual('trad401k');
       const hsaMax = t.hsa != null ? t.hsa : resolveAnnual('hsa');
-      const magiMaxed = currentMagi() + (resolveAnnual('trad401k') - tradMax) + (resolveAnnual('hsa') - hsaMax);
-      if (magiMaxed > ROTH_IRA_PHASE_OUT) h += '<div class="warn-box">Even after maxing pre-tax, your income is over the direct Roth IRA limit — use the <b>backdoor</b> route (toggle it in the Roth IRA section).</div>';
+      const magiMaxed = rothIraMagiDelta(window.__taxResult.limits.rothIraMagi,
+        resolveAnnual('trad401k') - tradMax, resolveAnnual('hsa') - hsaMax);
+      if (magiMaxed > window.__taxResult.limits.rothIraPhaseOut) h += '<div class="warn-box">Even after maxing pre-tax, your income is over the direct Roth IRA limit — use the <b>backdoor</b> route (toggle it in the Roth IRA section).</div>';
     }
     out.innerHTML = h;
     $('mo_apply').style.display = '';
@@ -7358,6 +7470,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { fireApplyPrefsToDom(fireLoadPrefs()); } catch (e) {}
     const fireTab = document.getElementById('tab-fire');
     if (fireTab && fireTab.classList.contains('active')) { try { fireOnOpen(); } catch (e) {} }
+    // Invest tab: recompute()'s render() only refreshes __taxResult — nothing re-runs the
+    // planner/projection renderers on a mode transition, so an ACTIVE invest tab would keep
+    // stale plan output (and a stale #iv_election / #pj_resync_wrap) until the next visit.
+    // Same rationale as the FIRE branch above; hidden-tab staleness self-heals on tab open.
+    const ivTab = document.getElementById('tab-invest');
+    if (ivTab && ivTab.classList.contains('active')) { try { calcInvest(); calcProject(); } catch (e) {} }
   }
 
   // ---- Banner hero deltas (P1): live "vs the reality you left" readout ----
@@ -7369,8 +7487,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const parts = [];
     const cT = window.__taxResult && window.__taxResult.cash, fT = WhatIf.frozen.taxResult && WhatIf.frozen.taxResult.cash;
     if (cT && fT) { const d = (cT.takeHome - fT.takeHome) / 12; if (Math.abs(d) >= 1) parts.push('Take-home ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo'); }
-    const cB = window.__budgetPlan, fB = WhatIf.frozen.budgetPlan;
-    if (cB && fB && cB.incomeBase != null && fB.incomeBase != null) { const d = cB.incomeBase - fB.incomeBase; if (Math.abs(d) >= 1) parts.push('Income base ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo'); }
+    // Income base MUST be derived from the same snapshot pair as take-home above (never from
+    // window.__budgetPlan / frozen.budgetPlan) — that cache is scheduled on its own timer and its
+    // contribution fold (taxInvest, mirrored below — see the live version at ~6971, the two must
+    // stay in lockstep) can sit behind bgbBaseTouched (~7163) and go stale. A live budgetPlan
+    // compared against a frozen one then diffs a fresh rollup against a stale one and inflates the
+    // delta to the FULL contribution amount instead of the true income-base change. Diagnosed
+    // 2026-07-26. Same-snapshot-per-side is the rule: cT vs fT, nothing else, both lines.
+    const incomeBaseMo = c => c.takeHome / 12 + ((c.trad401k || 0) + (c.roth401k || 0) + (c.rothIra || 0) + (c.hsa || 0) + (c.eeStock || 0) + (c.afterTax401k || 0)) / 12;
+    if (cT && fT) { const d = incomeBaseMo(cT) - incomeBaseMo(fT); if (Math.abs(d) >= 1) parts.push('Income base ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo'); }
     const cF = window.__fireResult, fF = WhatIf.frozen.fireResult;
     if (cF && fF && cF.coastReadyAge != null && fF.coastReadyAge != null) { const d = cF.coastReadyAge - fF.coastReadyAge; if (Math.abs(d) >= 0.5) parts.push('Coast FI ' + (d <= 0 ? '▼' : '▲') + Math.abs(d).toFixed(1) + ' yr'); }
     el.textContent = parts.length ? '· ' + parts.join(' · ') : '· matches your live numbers so far';
@@ -8052,6 +8177,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       $('pj_out').innerHTML = h;
     } catch (e) { $('pj_out').innerHTML = '<div class="warn-box">Error: ' + (e.message || e) + '</div>'; }
     pjTaxSeedRender();
+    pjResyncHintRender();   // declared below (function-hoisted, same scope) alongside the rest of the resync-hint pattern
   }
   wire('pj_go', calcProject);
   // Reflect ALL Tax-tab investment line items into the projection (esp. post-tax):
@@ -8077,8 +8203,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     formatUSDFields();
   }
   function pjAutoFill() { if (pjTouched()) return; pjSeedFromSources(); calcProject(); }
-  ['pj_c_trad', 'pj_c_roth', 'pj_c_hsa', 'pj_c_tax'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => { pjSetTouched(true); }); });
-  wire('pj_seed', () => { pjSetTouched(false); pjSeedFromSources(); calcProject(); saveTabs(); });
+  // Named so the resync hint's button (below) can delegate to the exact same flow as "Pull from
+  // Tax + Budget" instead of duplicating it — one re-sync path, two entry points.
+  function pjSeedNow() { pjSetTouched(false); pjSeedFromSources(); calcProject(); saveTabs(); }
+  ['pj_c_trad', 'pj_c_roth', 'pj_c_hsa', 'pj_c_tax'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => { pjSetTouched(true); pjResyncHintRender(); }); });
+  wire('pj_seed', pjSeedNow);
+  // Visible, one-tap-recoverable counterpart to the silent pjTouched freeze: once the user hand-
+  // edits any contribution cell, auto-sync stops forever (by design — it protects a deliberate
+  // override) but nothing on screen used to say so. Compares what pjSeedFromSources() WOULD set
+  // right now against the current cell values and only surfaces when they've actually drifted —
+  // an untouched-but-matching row (the common case right after a real seed) stays silent.
+  function pjResyncHintRender() {
+    const wrap = $('pj_resync_wrap'); if (!wrap) return;
+    if (!pjTouched()) { wrap.style.display = 'none'; return; }
+    const c = window.__taxResult && window.__taxResult.cash;
+    if (!c) { wrap.style.display = 'none'; return; }
+    const seed = {
+      trad: Math.round(c.trad401k || 0),
+      roth: Math.round((c.roth401k || 0) + (c.rothIra || 0) + (c.afterTax401k || 0)),
+      hsa: Math.round((c.hsa || 0) + (c.employerHsa || 0)),
+    };
+    const cur = { trad: N('pj_c_trad'), roth: N('pj_c_roth'), hsa: N('pj_c_hsa') };
+    const drifted = Math.abs(seed.trad - cur.trad) > 1 || Math.abs(seed.roth - cur.roth) > 1 || Math.abs(seed.hsa - cur.hsa) > 1;
+    if (!drifted) { wrap.style.display = 'none'; return; }
+    const hint = $('pj_resync_hint');
+    if (hint) hint.textContent = fmt$(seed.trad) + ' Trad / ' + fmt$(seed.roth) + ' Roth / ' + fmt$(seed.hsa) + ' HSA';
+    wrap.style.display = '';
+  }
+  wire('pj_resync_btn', pjSeedNow);
 
   // ---- Taxable ← Budget-line investing (TODO-243-ish): explicit seed, never silent sync ----
   // pjSeedFromSources() above already reflects the Tax tab's 401k/Roth/HSA rollup into their own

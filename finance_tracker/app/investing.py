@@ -81,6 +81,24 @@ class Profile:
     henry_debt_threshold: float = 0.05               # henry-v2 "pay it down" APR cutoff (5%)
     henry_debt_aggressive_threshold: float = 0.10    # henry-v2 "drain savings for it" cutoff (10%)
 
+    # ---- Real payroll election (mirrors the Tax tab; 2026-07-26) ----
+    # User-reported 3x: the waterfall's k401Match/k401Max/ira steps substituted their OWN
+    # trad/Roth choice (traditional_vs_roth()'s recommendation) instead of the split the user
+    # actually elected on their paycheck (Tax tab). A user contributing the full $24,500 cap
+    # split 75/25 trad/Roth saw the plan route 100% of it to trad401k — a plan that contradicts
+    # their real paycheck configuration is not a "next dollar" plan, it's noise. Product
+    # decision: the plan mirrors the user's ELECTION; the recommender's trad-vs-Roth verdict
+    # stays advisory (surfaced via calculate()'s tradVsRoth.electionNote instead). All optional,
+    # default 0.0 → next_dollar_plan() is byte-identical to pre-election behavior (regression
+    # contract; see _default_next_dollar_plan / _henry_v2_next_dollar_plan).
+    elected_trad401k: float = 0.0     # annual $ elected to Traditional 401(k) this year
+    elected_roth401k: float = 0.0     # annual $ elected to Roth 401(k) this year
+    elected_roth_ira: float = 0.0     # annual $ elected to Roth IRA this year (incl. backdoor)
+    elected_aftertax_401k: float = 0.0  # RESERVED, not yet consumed — the megaBackdoor step
+    # routes off aftertax_401k_room, not this field (mega contributions are inherently
+    # after-tax, nothing to split); accepted only for payload symmetry with the Tax tab's
+    # cash fields (code review, 2026-07-26). Don't assume that step is election-aware.
+
 
 # ---------- Private helpers ----------
 
@@ -107,6 +125,140 @@ def _retire_effective_rate(retire_income: float) -> float:
         return 0.0
     std_ded = _calc.Inputs().fed_std_deduction
     return _calc.apply_brackets(max(0.0, retire_income - std_ded), _calc.DEFAULT_FED_BRACKETS) / retire_income
+
+
+# ---------- 401(k) trad/Roth election split (2026-07-26) ----------
+#
+# The match-capture and max-out steps both feed the same combined 401(k) room, so the
+# split has to be tracked CUMULATIVELY across both steps rather than rounded independently
+# per step. Independent per-step rounding (round(step * ratio) in each step) can drift off
+# the elected total by a dollar or two when two roundings compound — and the whole point of
+# this feature is that the plan's trad/Roth totals equal the user's real election EXACTLY
+# when the room is filled. This is the standard "largest remainder" / streaming-apportionment
+# trick: track how much SHOULD have gone to Roth by now (round(cumulative * ratio)), and this
+# step's Roth share is just the delta from what's already been allocated. The remainder from
+# rounding always lands on Traditional (roth is rounded, trad = total - roth), matching the
+# "whole-dollar rounding, remainder to trad" contract.
+
+def _k401_roth_ratio(elected_trad: float, elected_roth: float) -> float:
+    """Roth share (0..1) of the elected 401(k) split; 0.0 when no election is configured."""
+    total = elected_trad + elected_roth
+    if total <= 0:
+        return 0.0
+    return elected_roth / total
+
+
+@dataclass
+class _K401SplitState:
+    """Mutable cumulative-split tracker shared across the match step and the max-out step."""
+
+    elected_total: float   # elected_trad401k + elected_roth401k; 0 → election not configured
+    roth_ratio: float       # _k401_roth_ratio(...) — fixed for the life of one plan run
+    cum_total: float = 0.0  # dollars routed through the split so far (elected portion only)
+    cum_roth: float = 0.0   # of which, dollars assigned to Roth so far
+
+    def apply(self, alloc_amount: float) -> tuple[float, float, float]:
+        """Split `alloc_amount` (this step's total 401(k) allocation) into
+        (trad_split, roth_split, excess) dollars, where trad_split + roth_split + excess
+        == alloc_amount exactly.
+
+        Only the portion up to the remaining elected room follows the trad/Roth split;
+        anything beyond the election (partial-election case, or no election at all) is
+        returned as `excess` for the caller to route via the existing recommender.
+        """
+        if self.elected_total <= 0 or alloc_amount <= 0:
+            return 0.0, 0.0, alloc_amount
+        elected_remaining = max(0.0, self.elected_total - self.cum_total)
+        split_amt = min(alloc_amount, elected_remaining)
+        excess = alloc_amount - split_amt
+        self.cum_total += split_amt
+        target_cum_roth = round(self.cum_total * self.roth_ratio)
+        # Clamp to [0, split_amt] and track what was ACTUALLY assigned (not the unclamped
+        # target) in self.cum_roth. With a fractional election and a ratio near 0 or 1,
+        # target_cum_roth - self.cum_roth can overshoot split_amt by a cent or two (e.g.
+        # roth_ratio≈0.99999 rounds cum_total up a dollar the target didn't earn yet), which
+        # would otherwise drive trad_split negative — silently dropped by _emit_k401_step's
+        # `> 0` filter, understating this step's total and overshooting the Roth grand total
+        # past the election. Clamping keeps trad_split + roth_split == split_amt exactly and
+        # keeps cum_roth honest for the next step's delta.
+        roth_split = min(max(0.0, target_cum_roth - self.cum_roth), split_amt)
+        trad_split = split_amt - roth_split
+        self.cum_roth += roth_split
+        return trad_split, roth_split, excess
+
+
+def _emit_k401_step(
+    steps: list[dict],
+    bucket: str,
+    alloc_total: float,
+    cap: float,
+    base_rationale: str,
+    default_acct: str,
+    split_state: _K401SplitState,
+    pct_trad: int,
+    pct_roth: int,
+    excess_mechanic: str | None = None,
+) -> None:
+    """Append one row per funded account for a 401(k) waterfall step (match or max-out).
+
+    When no election is configured (split_state.elected_total <= 0, the regression
+    default) this always emits exactly one row identical in shape to the pre-election
+    code — `default_acct` gets the full `alloc_total`, no "note" key. That is the byte-
+    identical contract for absent/all-zero elected payloads.
+
+    When an election IS configured, `alloc_total` is split trad/roth per the user's real
+    election (see _K401SplitState); any amount beyond what's still unelected falls back to
+    `default_acct` with a note explaining why. `excess_mechanic`, if given, names the reason
+    `default_acct` was picked (e.g. the match step's hardcoded trad401k default) instead of
+    the generic "playbook leans X" phrasing — the match step's default is NOT the trad/Roth
+    recommender's verdict, so wording it as if it were would contradict calculate()'s
+    electionNote whenever the recommender actually favors the other account (code review,
+    2026-07-26).
+    """
+    if alloc_total <= 0:
+        return
+    trad_split, roth_split, excess = split_state.apply(alloc_total)
+    room_remaining = round(cap - alloc_total, 2)
+    election_configured = split_state.elected_total > 0
+    leans = "traditional" if default_acct == "trad401k" else "roth"
+
+    amounts: dict[str, float] = {}
+    notes: dict[str, str] = {}
+    if trad_split > 0:
+        amounts["trad401k"] = amounts.get("trad401k", 0.0) + trad_split
+        notes["trad401k"] = (
+            f"Split per your current payroll election ({pct_trad}% Traditional / "
+            f"{pct_roth}% Roth)."
+        )
+    if roth_split > 0:
+        amounts["roth401k"] = amounts.get("roth401k", 0.0) + roth_split
+        notes["roth401k"] = (
+            f"Split per your current payroll election ({pct_trad}% Traditional / "
+            f"{pct_roth}% Roth)."
+        )
+    if excess > 0:
+        amounts[default_acct] = amounts.get(default_acct, 0.0) + excess
+        if election_configured:
+            reason = excess_mechanic if excess_mechanic is not None else f"playbook leans {leans}"
+            excess_note = f"${excess:,.0f} beyond your current election — {reason}."
+            notes[default_acct] = (
+                f"{notes[default_acct]} {excess_note}" if default_acct in notes else excess_note
+            )
+
+    for acct, amt in amounts.items():
+        if amt <= 0:
+            continue
+        row = {
+            "bucket": bucket,
+            "amount": round(amt, 2),
+            "accountType": acct,
+            "taxTreatment": "traditional" if acct == "trad401k" else "roth",
+            "rationale": base_rationale,
+            "roomRemaining": room_remaining,
+        }
+        if acct in notes:
+            row["note"] = notes[acct]
+        steps.append(row)
 
 
 # ---------- Public functions ----------
@@ -332,6 +484,15 @@ def next_dollar_plan(
     (henry-v2 debt steps additionally carry a "note" key with the playbook's aggression-
     threshold and mortgage-itemization caveats). Steps stop when `amount` is exhausted;
     a step only appears if it receives funds.
+
+    Election-aware 401(k)/IRA routing (2026-07-26; both strategies): steps 2/7 (default) and
+    1/4a (henry-v2) split the 401(k) room trad/Roth per profile.elected_trad401k /
+    elected_roth401k instead of the trad/Roth recommender when an election is configured —
+    emitting one row per funded account, with any amount beyond the election falling back to
+    the recommender (noted as such). The IRA step routes to rothIra (never traditionalIra;
+    noted "via backdoor Roth" if over MAGI) when profile.elected_roth_ira > 0. Absent or
+    all-zero elected_* fields reproduce the pre-election plan byte-for-byte — see Profile's
+    elected_trad401k docstring for the full incident/rationale.
     """
     if amount <= 0:
         return []
@@ -370,6 +531,16 @@ def _default_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
         profile.retire_state_no_tax,
     )
 
+    # Election-aware 401(k) split (2026-07-26, see Profile.elected_trad401k docstring). Shared
+    # across the match step (below) and the max-out step (step 7) so the cumulative-remainder
+    # apportionment lands exactly on the elected totals when the combined room is filled.
+    k401_split = _K401SplitState(
+        elected_total=profile.elected_trad401k + profile.elected_roth401k,
+        roth_ratio=_k401_roth_ratio(profile.elected_trad401k, profile.elected_roth401k),
+    )
+    pct_trad = round(profile.elected_trad401k / k401_split.elected_total * 100) if k401_split.elected_total > 0 else 0
+    pct_roth = 100 - pct_trad
+
     def _alloc(bucket: str, acct: str, tax: str, rationale: str, cap: float) -> float:
         """Allocate up to `cap` from `remaining`; append step; return amount allocated."""
         nonlocal remaining
@@ -405,17 +576,22 @@ def _default_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
     match_employee_target = match_pct * profile.gross_income
     match_cap = min(match_employee_target, k401_room)
 
-    if match_cap > 0 and match_pct > 0 and match_rate > 0:
+    if match_cap > 0 and match_pct > 0 and match_rate > 0 and remaining > 0:
         employer_contribution = match_rate * match_employee_target
-        matched = _alloc(
-            "k401Match", "trad401k", "traditional",
+        matched = min(remaining, match_cap)
+        remaining -= matched
+        # Match is always captured in trad401k when there's no election to mirror (matches
+        # pre-election behavior exactly); an election splits it trad/roth like everything else.
+        _emit_k401_step(
+            steps, "k401Match", matched, match_cap,
             (
                 f"Contribute ${match_employee_target:,.0f} to 401(k) to capture full employer "
                 f"match ({match_rate:.0%} on {match_pct:.0%} of salary = "
                 f"${employer_contribution:,.0f} free money). "
                 "Instant guaranteed return — never skip the match."
             ),
-            match_cap,
+            "trad401k", k401_split, pct_trad, pct_roth,
+            excess_mechanic="match capture defaults to Traditional",
         )
         k401_room -= matched
 
@@ -472,7 +648,26 @@ def _default_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
 
     # ── 6. IRA ────────────────────────────────────────────────────────────────
     if ira_room > 0:
-        if profile.roth_magi_over_limit:
+        ira_note = None
+        if profile.elected_roth_ira > 0:
+            # Election-aware (2026-07-26): the user is actually contributing to a Roth IRA on
+            # their paycheck/tax election — never override that with the recommender's
+            # traditionalIra pick. If they're also over the MAGI limit, this IS the backdoor
+            # Roth mechanics (non-deductible Traditional IRA contribution, immediately
+            # converted); the accountType stays rothIra, the note says so.
+            ira_acct = "rothIra"
+            ira_tax = "roth"
+            ira_rationale = "Roth IRA contribution — matches your current payroll election."
+            if profile.roth_magi_over_limit:
+                ira_note = "via backdoor Roth"
+                ira_rationale += (
+                    " Over the direct-Roth MAGI limit, so this is executed as a backdoor Roth "
+                    "(non-deductible Traditional IRA contribution, immediately converted); "
+                    "file Form 8606 annually."
+                )
+                if profile.pretax_ira_balance > 0:
+                    ira_rationale += " WARNING: pro-rata rule applies — see warnings."
+        elif profile.roth_magi_over_limit:
             ira_acct = "backdoorRothIra"
             ira_tax = "roth"
             ira_rationale = (
@@ -491,21 +686,23 @@ def _default_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
             ira_rationale = f"Deductible Traditional IRA. {trad_roth['rationale']}"
 
         ira_alloc = _alloc("ira", ira_acct, ira_tax, ira_rationale, ira_room)
+        if ira_note is not None and steps and steps[-1]["bucket"] == "ira":
+            steps[-1]["note"] = ira_note
         ira_room -= ira_alloc
 
     # ── 7. Max 401(k) remaining elective deferral ────────────────────────────
-    if k401_room > 0:
+    if k401_room > 0 and remaining > 0:
         if trad_roth["recommend"] == "traditional":
             k401_acct = "trad401k"
-            k401_tax = "traditional"
         else:
             k401_acct = "roth401k"
-            k401_tax = "roth"
 
-        k401_alloc = _alloc(
-            "k401Max", k401_acct, k401_tax,
+        k401_alloc = min(remaining, k401_room)
+        remaining -= k401_alloc
+        _emit_k401_step(
+            steps, "k401Max", k401_alloc, k401_room,
             f"Max remaining 401(k) elective deferral. {trad_roth['rationale']}",
-            k401_room,
+            k401_acct, k401_split, pct_trad, pct_roth,
         )
         k401_room -= k401_alloc
 
@@ -564,6 +761,16 @@ def _henry_v2_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
         now_marginal, retire_rate, profile.state, profile.retire_state_no_tax,
     )
 
+    # Election-aware 401(k) split (2026-07-26) — see Profile.elected_trad401k docstring and
+    # the identical setup in _default_next_dollar_plan(). Shared across step 1 (match) and
+    # step 4a (max-out) below.
+    k401_split = _K401SplitState(
+        elected_total=profile.elected_trad401k + profile.elected_roth401k,
+        roth_ratio=_k401_roth_ratio(profile.elected_trad401k, profile.elected_roth401k),
+    )
+    pct_trad = round(profile.elected_trad401k / k401_split.elected_total * 100) if k401_split.elected_total > 0 else 0
+    pct_roth = 100 - pct_trad
+
     def _alloc(bucket: str, acct: str, tax: str, rationale: str, cap: float, note: str | None = None) -> float:
         """Allocate up to `cap` from `remaining`; append step; return amount allocated."""
         nonlocal remaining
@@ -590,16 +797,19 @@ def _henry_v2_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
     match_employee_target = match_pct * profile.gross_income
     match_cap = min(match_employee_target, k401_room)
 
-    if match_cap > 0 and match_pct > 0 and match_rate > 0:
+    if match_cap > 0 and match_pct > 0 and match_rate > 0 and remaining > 0:
         employer_contribution = match_rate * match_employee_target
-        matched = _alloc(
-            "k401Match", "trad401k", "traditional",
+        matched = min(remaining, match_cap)
+        remaining -= matched
+        _emit_k401_step(
+            steps, "k401Match", matched, match_cap,
             (
                 f"HENRY Playbook v2, step 1: capture the full employer match "
                 f"(${match_employee_target:,.0f} contribution → ${employer_contribution:,.0f} "
                 "free money). Never skip the match, regardless of income level."
             ),
-            match_cap,
+            "trad401k", k401_split, pct_trad, pct_roth,
+            excess_mechanic="match capture defaults to Traditional",
         )
         k401_room -= matched
 
@@ -633,26 +843,45 @@ def _henry_v2_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
         )
 
     # ── 4. Retirement: 401(k) max → IRA (incl. backdoor) → mega-backdoor ─────
-    if k401_room > 0:
+    if k401_room > 0 and remaining > 0:
         if trad_roth["recommend"] == "traditional":
             k401_acct = "trad401k"
-            k401_tax = "traditional"
         else:
             k401_acct = "roth401k"
-            k401_tax = "roth"
 
-        k401_alloc = _alloc(
-            "k401Max", k401_acct, k401_tax,
+        k401_alloc = min(remaining, k401_room)
+        remaining -= k401_alloc
+        _emit_k401_step(
+            steps, "k401Max", k401_alloc, k401_room,
             (
                 "HENRY Playbook v2, step 4a: max the remaining 401(k) elective deferral. "
                 f"{trad_roth['rationale']}"
             ),
-            k401_room,
+            k401_acct, k401_split, pct_trad, pct_roth,
         )
         k401_room -= k401_alloc
 
     if ira_room > 0:
-        if profile.roth_magi_over_limit:
+        ira_note = None
+        if profile.elected_roth_ira > 0:
+            # Election-aware (2026-07-26) — see the identical branch in
+            # _default_next_dollar_plan() for the full incident rationale.
+            ira_acct = "rothIra"
+            ira_tax = "roth"
+            ira_rationale = (
+                "HENRY Playbook v2, step 4b: Roth IRA contribution — matches your current "
+                "payroll election."
+            )
+            if profile.roth_magi_over_limit:
+                ira_note = "via backdoor Roth"
+                ira_rationale += (
+                    " Over the direct-Roth MAGI limit, so this is executed as a backdoor Roth "
+                    "(non-deductible Traditional IRA contribution, immediately converted); "
+                    "file Form 8606 annually."
+                )
+                if profile.pretax_ira_balance > 0:
+                    ira_rationale += " WARNING: pro-rata rule applies — see warnings."
+        elif profile.roth_magi_over_limit:
             ira_acct = "backdoorRothIra"
             ira_tax = "roth"
             ira_rationale = (
@@ -676,6 +905,8 @@ def _henry_v2_next_dollar_plan(profile: Profile, amount: float) -> list[dict]:
             )
 
         ira_alloc = _alloc("ira", ira_acct, ira_tax, ira_rationale, ira_room)
+        if ira_note is not None and steps and steps[-1]["bucket"] == "ira":
+            steps[-1]["note"] = ira_note
         ira_room -= ira_alloc
 
     if profile.mega_available and profile.aftertax_401k_room > 0:
@@ -758,6 +989,13 @@ def calculate(
         warnings        — list of warning dicts (proRata, secure2CatchUp, …)
         notes           — list of disclaimer / caveat strings
         henryNotes      — (henry-v2 only) RSU and insurance guidance, display-only strings
+
+    tradVsRoth stays advisory even when the plan mirrors a real election (2026-07-26): the
+    waterfall's 401(k)/IRA steps now follow profile.elected_trad401k/elected_roth401k/
+    elected_roth_ira when set (see Profile docstring), so this recommendation is no longer
+    always what the plan actually does. When the election meaningfully diverges from the
+    recommendation, tradVsRoth gains an additive "electionNote" key surfacing that gap as a
+    forward-looking consideration — never as a correction of the user's real paycheck setup.
     """
     plan = next_dollar_plan(profile, amount, strategy=strategy)
     if strategy == "henry-v2":
@@ -801,6 +1039,37 @@ def calculate(
         "Not financial, tax, or legal advice. Consult a CFP/CPA before making decisions.",
     ]
 
+    # electionNote (2026-07-26): the plan itself now mirrors profile.elected_trad401k/
+    # elected_roth401k (see Profile docstring) instead of trad_roth["recommend"], so this
+    # recommendation can legitimately diverge from what the plan actually does. Surface that
+    # gap here as forward-looking advice — "the playbook leans X" — never as a claim that the
+    # user's real election is wrong. Only fires when the election has a meaningful dollar
+    # amount on the side the recommender does NOT favor (e.g. any Roth $ while recommend ==
+    # "traditional"); a pure-traditional or pure-Roth election that already matches the
+    # recommendation has nothing to flag.
+    elected_trad = profile.elected_trad401k
+    elected_roth = profile.elected_roth401k
+    elected_401k_total = elected_trad + elected_roth
+    election_note = None
+    if elected_401k_total > 0:
+        non_recommended = elected_roth if trad_roth["recommend"] == "traditional" else elected_trad
+        if non_recommended > 0:
+            election_pct_trad = round(elected_trad / elected_401k_total * 100)
+            election_pct_roth = 100 - election_pct_trad
+            election_note = (
+                f"Your current election: {election_pct_trad}% Traditional / "
+                f"{election_pct_roth}% Roth (${elected_trad:,.0f} / ${elected_roth:,.0f}). "
+                f"The playbook leans {trad_roth['recommend'].title()} for you — a "
+                "consideration for future contributions, not a directive."
+            )
+
+    trad_vs_roth_out = {
+        **trad_roth, "nowMarginal": now_marginal, "retireRate": retire_rate,
+        "retireRateBasis": "effective" if profile.retire_income > 0 else "marginal",
+    }
+    if election_note is not None:
+        trad_vs_roth_out["electionNote"] = election_note
+
     result = {
         "inputs": {
             "age": profile.age,
@@ -826,8 +1095,7 @@ def calculate(
         "plan": plan,
         "targetAllocation": allocation,
         "assetLocation": asset_loc,
-        "tradVsRoth": {**trad_roth, "nowMarginal": now_marginal, "retireRate": retire_rate,
-                       "retireRateBasis": "effective" if profile.retire_income > 0 else "marginal"},
+        "tradVsRoth": trad_vs_roth_out,
         "warnings": warnings,
         "notes": notes,
     }

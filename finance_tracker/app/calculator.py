@@ -329,21 +329,6 @@ def calculate(i: Inputs) -> dict:
     hsa_legal = i.hsa_limit_family if i.hsa_coverage == "family" else i.hsa_limit_self
     hsa_employee_cap = max(0.0, hsa_legal - i.employer_hsa)
 
-    # Roth IRA MAGI phase-out (Single). MAGI ≈ Federal Box 1 wages for a simple
-    # W-2 employee with no above-the-line add-backs — good enough for this tool.
-    magi = fed_wages
-    if magi <= i.roth_ira_phase_in:
-        roth_ira_max = i.roth_ira_limit
-    elif magi >= i.roth_ira_phase_out:
-        roth_ira_max = 0.0
-    else:
-        frac = (i.roth_ira_phase_out - magi) / (i.roth_ira_phase_out - i.roth_ira_phase_in)
-        roth_ira_max = i.roth_ira_limit * frac
-
-    # Backdoor Roth IRA bypass: treat the phase-out as if it does not exist.
-    if i.backdoor_roth:
-        roth_ira_max = i.roth_ira_limit
-
     # ----- Bonus: incremental (marginal) taxes stacked on top of regular wages -----
     # The bonus is NOT reduced by any pre-tax deduction and does NOT change any
     # wage base, take-home, total_comp, or the regular tax section above.
@@ -408,9 +393,9 @@ def calculate(i: Inputs) -> dict:
 
     # ----- Investment income: capital gains, qualified dividends, interest, NIIT -----
     # ISOLATED like the bonus — investment tax settles at FILING (it is not withheld),
-    # so NOTHING here touches take_home / total_tax / total_comp / any wage base. The
-    # Roth-IRA MAGI above is deliberately left as fed_wages (a documented under-count);
-    # NIIT uses its OWN MAGI so the two are never conflated.
+    # so NOTHING here touches take_home / total_tax / total_comp / any wage base. NIIT
+    # uses its OWN MAGI (magi_niit, below) — deliberately distinct from the canonical
+    # Roth-IRA MAGI computed after AGI, further down — so the two are never conflated.
     qual_div = min(i.qualified_dividends, i.ordinary_dividends)   # qualified ⊆ ordinary
     non_qual_div = max(0.0, i.ordinary_dividends - qual_div)
     ltcg = max(0.0, i.long_term_gains)
@@ -446,10 +431,46 @@ def calculate(i: Inputs) -> dict:
     total_investment_income = ordinary_additions + pref_income
     inv_eff = investment_tax / total_investment_income if total_investment_income > 0 else 0.0
 
-    # AGI: Box-1 wages + all 1040 investment income. Equals magi_niit for the modeled
-    # inputs (no foreign-income addbacks). NOT the Roth MAGI above, which is deliberately
-    # left as fed_wages (a documented under-count that omits investment income).
+    # AGI: Box-1 wages + all 1040 investment income (incl. the disposition explorer —
+    # see disp_ordinary/disp_st_gain/disp_lt_gain, above). Equals magi_niit for the
+    # modeled inputs (no foreign-income addbacks). AGI DIFFERS from the canonical Roth
+    # MAGI below exactly when the explorer holds a sale — see that block's rationale.
     agi = fed_wages + total_investment_income
+
+    # ----- Roth IRA MAGI + phase-out (Single) -----
+    # Canonical definition (docs/magi-canonicalization-plan.md §1, 2026-07-26, TODO-244):
+    # Box-1-style federal wages + RECURRING investment income — interest, ordinary +
+    # qualified dividends (i.ordinary_dividends already totals both — qual_div is a
+    # subset per its own definition above), and net short/long-term capital gains from
+    # the RECURRING investment inputs (ltcg, stcg) — EXCLUDING every ESPP/RSU
+    # disposition-explorer component (disp_ordinary, disp_st_gain, disp_lt_gain / disp_nii).
+    #
+    # Why the exclusion: the disposition section is a "what-if-I-sell" scratchpad,
+    # isolated by design (see :388-392 above — nothing there touches take-home). Folding
+    # an explored, hypothetical sale into eligibility MAGI would let a scratchpad entry
+    # flip a REAL Roth-eligibility determination — unacceptable given the 6%/yr IRS
+    # excise on an excess/ineligible contribution. AGI (above) is the filing-year
+    # estimate and DOES keep disposition income; that asymmetry is the design, not a
+    # bug — it's why roth_magi == agi when the explorer is empty, and
+    # roth_magi == agi − (disp_ordinary + disp_st_gain + disp_lt_gain) when it isn't.
+    #
+    # This block was formerly ABOVE the investment-income section (pre-2026-07-26) and
+    # used `magi = fed_wages` only (D1 defect, TODO-244) — moved here because the
+    # recurring-income terms (interest, ltcg, stcg) aren't computed until above.
+    # roth_ira_max is first consumed in the return dict, well below — safe to move.
+    roth_magi = fed_wages + interest + i.ordinary_dividends + ltcg + stcg
+    if roth_magi <= i.roth_ira_phase_in:
+        roth_ira_max = i.roth_ira_limit
+    elif roth_magi >= i.roth_ira_phase_out:
+        roth_ira_max = 0.0
+    else:
+        frac = (i.roth_ira_phase_out - roth_magi) / (i.roth_ira_phase_out - i.roth_ira_phase_in)
+        roth_ira_max = i.roth_ira_limit * frac
+
+    # Backdoor Roth IRA bypass: treat the phase-out as if it does not exist. Ordered
+    # after roth_magi/roth_ira_max so the bypass still wins regardless of MAGI.
+    if i.backdoor_roth:
+        roth_ira_max = i.roth_ira_limit
 
     # ----- §415(c) overall annual-additions limit (mega-backdoor headroom) -----
     # Counts elective deferrals + after-tax + employer plan contributions. Excludes HSA,
@@ -544,7 +565,7 @@ def calculate(i: Inputs) -> dict:
             "rothIraMax": roth_ira_max,
             "rothIraPhaseIn": i.roth_ira_phase_in,
             "rothIraPhaseOut": i.roth_ira_phase_out,
-            "rothIraMagi": magi,
+            "rothIraMagi": roth_magi,
             "agi": agi,
             # §415(c) overall annual-additions limit (mega-backdoor headroom).
             "sec415cLimit": i.sec415c_limit,
