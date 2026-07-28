@@ -43,6 +43,16 @@
        white in every theme per the user's explicit directive. See docs/selected-state-unification.md. */
     --selected-bg: var(--accent-strong);
     --selected-ink: #fff;
+    /* What-If Mode violet (H6, docs/ui-redesign.md — optional/low-priority per the disposition,
+       done here only because TODO-221 P1b's delta-chip/details-drawer work already touches this
+       banner's CSS). Every existing `var(--wi-accent, #7c5cff)` / rgba(124,92,255,…) usage below
+       already carried this exact fallback literal, so DEFINING the token here is a pure no-op
+       visually (same #7c5cff resolves either way) — it only activates the token indirection for
+       a future shiro-full override, which is NOT added here (deferred to the H6 rider; needs
+       @designer AA vetting on a light surface, out of scope for this batch). */
+    --wi-accent: #7c5cff;
+    --wi-tint: rgba(124,92,255,0.12);                                  /* fallback line first */
+    --wi-tint: color-mix(in srgb, var(--wi-accent) 12%, transparent); /* themeable override; keep BOTH lines in this order */
     --accent-tint: rgba(122,167,255,0.12);                              /* fallback line first */
     --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent); /* themeable override; keep BOTH lines in this order */
     --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px;
@@ -50,6 +60,11 @@
     --warn-surface: #2a210f; --warn-border: #6b531a; --warn-text: #e7c66b; --warn-text-strong: #ffd87a;
     --danger-tint: rgba(255,122,122,0.12);                                   /* fallback line first */
     --danger-tint: color-mix(in srgb, var(--bad) 12%, transparent);         /* themeable override; keep BOTH lines in this order */
+    /* H4 (docs/ui-redesign.md §H formatting audit): mirrors --accent-tint/--danger-tint above —
+       replaces #bgb_cu_row's hardcoded rgba(255,180,80,.07) amber tint, which bypassed tokens and
+       stayed cool-amber on warm linen in shiro. */
+    --warn-tint: rgba(240,185,87,0.12);                                   /* fallback line first */
+    --warn-tint: color-mix(in srgb, var(--warn) 12%, transparent);       /* themeable override; keep BOTH lines in this order */
     /* DEC-024 HA theme adapter: .warn-box tokens (dark defaults below match today's hardcoded
        values byte-for-byte; the light/shiro-full preset overrides these three in applyHaTheme). */
     --warnbox-surface: #2a1414; --warnbox-border: #6b2a2a; --warnbox-text: #f3b0b0;
@@ -75,6 +90,11 @@
     --field-focus-ring: 0 0 0 2px rgba(122,167,255,0.32);                              /* fallback first */
     --field-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent); /* themed; keep BOTH lines */
     --field-locked: var(--chip);   /* read-only "locked" fill: the raised-chip tone — auto-themes and reads clearly (dark: a step ABOVE the card, where --unit-bg nearly matched --panel and looked like no fill; shiro: warm linen). Never white paper. Drives .input-pair.is-locked; see docs/ui-redesign.md §G. */
+    /* H7 (docs/ui-redesign.md §H): floating-surface drop shadow (.backup-popup, .toast). Same
+       --field-shadow pattern (dark default here, applyHaTheme() overrides with a softer/warmer
+       value for shiro-full) rather than --accent-tint's color-mix pair — this is a full box-shadow
+       literal (offset+blur+color), not a single color, so it doesn't fit the dual-line trick. */
+    --shadow-pop: 0 8px 28px rgba(0,0,0,0.45);
     /* Type scale (TODO-230 typography audit): size / weight / family / letter-spacing / line-height tokens.
        Folds vs the pre-audit sizes are intentional: 15->16 (verdict tiles + .ac-add), 19->18 (composer $ unit),
        22->24 (composer amount input). */
@@ -121,7 +141,7 @@
   .backup-popup {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 250; width: 260px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    padding: 12px; box-shadow: var(--shadow-pop);
   }
   .backup-popup-radio { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm);
     color: var(--text); padding: 3px 0; cursor: pointer; }
@@ -381,6 +401,13 @@
   .sc-row .sc-name { font-weight:var(--fw-semibold); }
   .sc-row .sc-meta { color:var(--muted); }
   .sc-row .sc-actions { margin-left:auto; display:flex; gap:6px; }
+  /* TODO-243 Phase 2 (draft goals/funds): the Von-Restorff violet marker on draft-entity rows
+     inside #gl_card/#sf_card while in What-If Mode — mirrors .ac-pay-earmark's left-rule
+     convention but keyed to --wi-accent so it visually matches the rest of the mode's chrome
+     (the banner border, the delta chips) rather than the earmark's --accent. */
+  .wi-draft-entity { border-left:3px solid var(--wi-accent, #7c5cff); background:var(--wi-tint, rgba(124,92,255,0.08)); }
+  .sc-badge.wi-planned { color:var(--wi-accent, #7c5cff); border-color:var(--wi-accent, #7c5cff); }
+  .wi-locked-tag { color:var(--muted); font-size:var(--fs-xs); white-space:nowrap; }
   /* What-If picker popover (TODO-243 Feature 2): wraps the header "What-If Mode" button; reuses
      .backup-popup for surface/position/shadow (same convention as .settings-popup/.filter-popup). */
   .wi-picker-split { position: relative; display: inline-flex; }
@@ -534,7 +561,7 @@
   /* Toast for cross-tab actions */
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(8px);
     background: var(--panel-2); border: 1px solid var(--accent-strong); color: var(--text);
-    padding: 10px 16px; border-radius: 8px; font-size: var(--fs-md); box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+    padding: 10px 16px; border-radius: 8px; font-size: var(--fs-md); box-shadow: var(--shadow-pop);
     opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; z-index: 200; max-width: 90vw; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   /* What-If Mode — minimal banner (TODO-221 P0; full violet chrome is P1) */
@@ -546,7 +573,17 @@
   body.whatif-active::after { content:''; position:fixed; inset:0; pointer-events:none; z-index:9998;
     box-shadow: inset 0 0 0 3px var(--wi-accent, #7c5cff); }
   body.whatif-active.wi-peek::after { box-shadow: inset 0 0 0 3px var(--good, #37d67a); }
-  .wi-banner-deltas { color: var(--muted); }
+  /* Delta chips (TODO-221 P1b, second priority behind the details drawer below): the hero
+     "vs live" readout is now tappable buttons, not plain text — each jumps to the tab that
+     owns the number it summarizes (Take-home -> Tax, Income base -> Budget, Coast FI -> FIRE).
+     Same three quantities wiUpdateBannerDeltas already computed pre-chips; only the rendering
+     changed (see the function for the same-snapshot-pair derivation rule, unchanged). */
+  .wi-banner-deltas { color: var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .wi-delta-chip { padding:2px 8px; border-radius:999px; background:var(--wi-tint, rgba(124,92,255,0.14));
+    border:1px solid var(--wi-accent, #7c5cff); color:var(--text); font-size:var(--fs-xs);
+    font-family:inherit; cursor:pointer; line-height:1.6; }
+  .wi-delta-chip:hover { background: var(--wi-accent, #7c5cff); color:#fff; }
+  .wi-delta-chip:focus-visible { outline:2px solid var(--wi-accent, #7c5cff); outline-offset:2px; }
   body.wi-peek .wi-banner { border-bottom-color: var(--good, #37d67a); }
   #wi_peek_btn { touch-action: none; }   /* press-and-hold on tablets without scroll hijack */   /* the [hidden] attribute alone loses to display:flex above */
   .wi-banner-icon { color: var(--wi-accent, #7c5cff); }
@@ -555,6 +592,17 @@
   .wi-banner-actions button { font-size:var(--fs-xs); padding:5px 10px; }
   #wi_banner { background: rgba(124,92,255,0.12); }
   #wi_resume_banner, #wi_broken_banner { background: rgba(124,92,255,0.06); }
+  /* Scenario-details drawer (TODO-221 P1b, the priority sub-item): a full-width strip under the
+     banner (not a popover — the picker/.backup-popup idiom is for a header-anchored menu; this
+     is scenario CONTENT the user reads/edits inline, closer kin to .wi-banner itself). */
+  .wi-details-drawer { padding:10px 24px 16px; background: var(--wi-tint, rgba(124,92,255,0.06));
+    border-bottom:1px solid var(--wi-accent, #7c5cff); }
+  .wi-details-drawer[hidden] { display:none !important; }
+  .wi-details-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+  .wi-details-row label { min-width:110px; color:var(--muted); font-size:var(--fs-sm); }
+  .wi-details-row input[type=text] { flex:1 1 200px; min-width:0; }
+  .wi-catchup-table { width:auto; min-width:100%; margin-top:4px; }
+  .wi-catchup-table th, .wi-catchup-table td { padding:5px 8px; font-size:var(--fs-sm); white-space:nowrap; }
   /* TODO-241 displacement banner — reuses the --warn-* tokens already used by .disclaimer,
      not the What-If violet accent (this isn't a What-If affordance). */
   .profile-displacement-banner { background: var(--warn-surface); border-bottom-color: var(--warn-border); color: var(--warn-text); }
@@ -919,6 +967,7 @@
   <span class="wi-banner-label">What-If: <b id="wi_banner_name"></b></span>
   <span id="wi_banner_deltas" class="mini wi-banner-deltas" aria-live="polite"></span>
   <span class="wi-banner-actions">
+    <button type="button" id="wi_details_btn" aria-expanded="false" aria-controls="wi_details_drawer" title="Scenario details — rename, activation month, catch-up pace">Details</button>
     <button type="button" id="wi_peek_btn" title="Press and hold to see your real numbers; release to come back">&#128065; hold: real</button>
     <button type="button" id="wi_save_btn">Save draft</button>
     <button type="button" id="wi_saveas_btn" title="Save this what-if as a separate new scenario">Save as&hellip;</button>
@@ -926,6 +975,25 @@
     <button type="button" id="wi_activate_btn">Activate</button>
     <button type="button" id="wi_discard_btn">Discard</button>
   </span>
+</div>
+<!-- TODO-221 P1b: the in-mode scenario-details drawer (spec §4.4 — the picker owns
+     entry/selection; this owns in-mode editing: rename, activation month, catch-up pace).
+     A block-level strip under the banner, toggled by #wi_details_btn; never a popover, since
+     its content (a table) reads better inline than in a floating menu. -->
+<div id="wi_details_drawer" class="wi-details-drawer" hidden role="region" aria-labelledby="wi_details_h">
+  <div class="subhead" id="wi_details_h" style="margin-top:0">Scenario details</div>
+  <div class="wi-details-row">
+    <label for="wi_details_name_input">Name</label>
+    <input type="text" id="wi_details_name_input" autocomplete="off">
+    <button type="button" class="seed-btn" id="wi_details_rename_btn">Rename</button>
+  </div>
+  <div class="wi-details-row">
+    <label for="wi_details_month_input">Activate from</label>
+    <input type="month" id="wi_details_month_input">
+    <span class="mini muted">Defaults to next month — the plan baseline is written from here onward when you Activate.</span>
+  </div>
+  <div class="subhead" style="margin:10px 0 6px">Catch-up pace (rest of year, from the activation month)</div>
+  <div id="wi_details_catchup" class="mini"></div>
 </div>
 <!-- TODO-243 Feature 2: the old buried #wi_drafts_panel (reached only via an in-banner
      "Drafts…" toggle) is retired — its wiRefreshDraftsList()/wiLoadDraftIntoMode() machinery is
@@ -941,6 +1009,19 @@
   <span class="wi-banner-label">Your plan replaced a newer server version from another device/restore — the previous version is kept one level back.</span>
   <span class="wi-banner-actions">
     <button type="button" id="profile_displacement_dismiss_btn">Dismiss</button>
+  </span>
+</div>
+
+<!-- TODO-243 Phase 2 §3.6: activation partial-failure banner — non-transient (a toast would
+     vanish before the user notices a planned goal/fund failed to create). Retry re-runs
+     materialization over the SAME draftEntities set (idempotent by name, §3.5), so it never
+     double-creates the ones that already succeeded. -->
+<div id="wi_materialize_banner" class="wi-banner profile-displacement-banner" hidden role="status" aria-live="polite">
+  <span class="wi-banner-icon" aria-hidden="true">&#9888;</span>
+  <span class="wi-banner-label" id="wi_materialize_banner_label"></span>
+  <span class="wi-banner-actions">
+    <button type="button" id="wi_materialize_retry_btn">Retry</button>
+    <button type="button" id="wi_materialize_dismiss_btn">Dismiss</button>
   </span>
 </div>
 
@@ -1605,7 +1686,7 @@
     <div class="row" style="margin:0"><label class="mini">Local sales tax</label><span class="input-pair"><input id="bgb_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span></div>
     <div id="bgb_summary" class="mini" style="margin-left:auto;align-self:center"></div>
   </div>
-  <div id="bgb_cu_row" class="mini" style="display:none;margin:10px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(255,180,80,.07)">
+  <div id="bgb_cu_row" class="mini" style="display:none;margin:10px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--warn-tint)">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
       <input id="bgb_cu_toggle" type="checkbox"/>
       <span>Budget on <b>take-home during catch-up</b> (rest of year) instead of steady take-home <span class="muted" id="bgb_cu_lbl"></span></span>
@@ -2176,6 +2257,7 @@ function applyHaTheme(theme, presentation) {
       root.setProperty('--warn-text', '#6e4f0e');
       root.setProperty('--warn-text-strong', '#5a4008');
       root.setProperty('--danger-tint', 'color-mix(in srgb, #b3261e 16%, transparent)');
+      root.setProperty('--warn-tint', 'color-mix(in srgb, #845c0a 12%, transparent)');   // H4
 
       // .warn-box trio (TODO-220-style pocket cleanup): dark defaults live on :root, this is
       // the only place they're overridden.
@@ -2211,6 +2293,10 @@ function applyHaTheme(theme, presentation) {
       // focus ring auto-themes to gold via --accent through color-mix, so no override here.
       root.setProperty('--field-border', 'var(--md-sys-color-outline, #9a9080)');
       root.setProperty('--field-shadow', 'inset 0 1px 2px rgba(60,50,40,0.07)');
+      // H7: same warm-brown base as --field-shadow above instead of pure black — a 45%-alpha
+      // black slab read as a hard grey rectangle on warm linen; softer + lower-alpha reads as a
+      // lift off the page instead.
+      root.setProperty('--shadow-pop', '0 8px 24px rgba(60,50,40,0.18)');
     }
   } catch (e) {
     // A malformed/unexpected theme object must never break boot — fall through silently,
@@ -2310,8 +2396,26 @@ const STORAGE_KEY = 'itc.v3';
 const WI_SESSION_KEY = 'itc.whatif.session';
 const WI_LOCK_KEY = 'itc.whatif.lock';
 const WI_OWNER_SS_KEY = 'itc.whatif.owner';
+// TODO-243 Phase 2 code-review SHOULD-FIX (2026-07-28): plain LIVE-side bookkeeping — NOT
+// itc.whatif.* (never in-mode data) and NOT a WI_SCOPED_KEY (never twinned/suppressed) — that
+// records "activation succeeded, materializing draft goals/funds is still in progress" from the
+// moment the /activate POST returns until every create+record call has succeeded, so a reload in
+// that narrow window (which previously silently dropped the planned items) instead resumes and
+// finishes the job on next boot (wiCheckPendingMaterializeOnBoot). Deliberately excluded from
+// BACKUP_CLIENT_KEYS (verified below, at that const's definition) — it's ephemeral per-device
+// progress tracking, not data worth syncing/backing up.
+const WI_PENDING_MATERIALIZE_KEY = 'itc.wi.pendingMaterialize.v1';
 const WI_SCOPED_KEYS = ['itc.v3', 'budgetBuilder_v1', 'itc.tabs.v1', 'itc.maxout.v1', 'itc.fire.v1', 'itc.activetab'];
 const WI_RAW_KEYS = new Set(['itc.activetab']);   // stored/transported as a bare string, never JSON-wrapped
+
+// TODO-245: fields that live outside the WI_SCOPED_KEYS system entirely — never written into
+// itc.v3 (or any other persisted key), so wiRepopulateDom()'s restoreState()/restoreTabs() chain
+// has nothing to re-read for them. Left alone, an in-mode edit to one of these lingers in the DOM
+// after Discard/Exit-keep/Activate until the next reload, transiently showing a scenario-tainted
+// value (e.g. MAGI/AGI derived from a what-if-only investment-income figure) on what's supposed to
+// be the real page. INVARIANT: any future session-only field (never persisted, editable while
+// WhatIf.active) MUST be added here — see wiSnapshotSessionOnlyFields/wiRestoreSessionOnlyFields.
+const WI_SESSION_ONLY_FIELDS = ['inv_int', 'inv_odiv', 'inv_qdiv', 'inv_stg', 'inv_ltg'];
 const WI_LOCK_STALE_MS = 15000;
 const WI_HEARTBEAT_MS = 5000;
 
@@ -2413,6 +2517,30 @@ function wiCheckResumeOnBoot() {
     const lbl = document.getElementById('wi_resume_label');
     if (lbl) lbl.textContent = 'Resume what-if “' + ((session.meta && session.meta.name) || 'Untitled') + '”?';
     el.hidden = false;
+  }
+}
+
+// TODO-243 Phase 2 code-review SHOULD-FIX (2026-07-28): boot-time reconcile of an interrupted
+// activate→materialize gap. Fire-and-forget (never awaited by its caller) — mirrors
+// bootProfileSyncEngine's rationale just below in the boot chain: this can involve real network
+// round trips and must never stall __wiBootDone or the rest of boot behind it. Top-level (like
+// wiCheckResumeOnBoot) because it must run from inside the DOMContentLoaded handler, which is
+// registered before the "Feature tabs" IIFE below runs but whose BODY only executes after that
+// IIFE has already finished (see that IIFE's own "boot-order" note) — so window.wiMaterializeAndRecord
+// / window.glLoad / window.sfLoad are guaranteed to already exist by the time this actually runs.
+async function wiCheckPendingMaterializeOnBoot() {
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(WI_PENDING_MATERIALIZE_KEY)); } catch (e) { pending = null; }
+  if (!pending || !pending.scenarioId || !pending.draftEntities) return;
+  if (typeof window.wiMaterializeAndRecord !== 'function') return;
+  const r = await window.wiMaterializeAndRecord(
+    pending.draftEntities, pending.scenarioId, pending.doneGoals || {}, pending.doneFunds || {});
+  if (!r.needsRetry) {
+    if (typeof window.glLoad === 'function') window.glLoad();
+    if (typeof window.sfLoad === 'function') window.sfLoad();
+    if ((r.createdTotal || r.existedTotal) && typeof showToast === 'function') {
+      showToast('Finished creating planned items from an interrupted what-if activation');
+    }
   }
 }
 
@@ -3866,14 +3994,19 @@ async function repaintAfterHydrate() {
   }
 }
 
-// Minimal, honest, non-blocking conflict affordance for D2/X1 (§4/§7) — @designer can polish the
-// copy later; the underlying prev_blob one-level-undo mechanics are what actually protect the
-// data, this is only a courtesy notice. Recorded on window.__profileSync.lastConflictNote too, so
-// a driver/test can assert on it without depending on toast DOM/timing.
+// Honest, non-blocking conflict affordance for D2/X1 (§4/§7). Both `kind`s reach this after a
+// flush already went through server.py's put_profile — which always writes (last-write-wins)
+// and moves whatever it displaces into a one-level `prev_blob` undo (no user-facing button reads
+// that back today; it's a server-side safety net, not a client Restore feature — don't imply one
+// in the copy). TODO-241 (2026-07-28): reworded for a user with no mental model of "devices",
+// "sync", or "versions" as engineering terms — plain description of what just happened plus the
+// one true fact worth knowing (nothing was thrown away). Recorded on
+// window.__profileSync.lastConflictNote too, so a driver/test can assert on it without depending
+// on toast DOM/timing.
 function showProfileConflictNote(kind) {
   const msg = kind === 'two-device'
-    ? 'Synced — another device had newer changes; those are kept as a recoverable previous version.'
-    : 'Synced from this device — a copy already on the server was kept as a recoverable previous version.';
+    ? 'Synced — another device saved changes here since this one last checked in, and this device’s edit just replaced them. Nothing’s lost; the older version is kept as a backup on the server.'
+    : 'Synced — this account already had data saved from another device, and this device’s copy just replaced it. Nothing’s lost; the older version is kept as a backup on the server.';
   try { window.__profileSync.lastConflictNote = { kind: kind, at: new Date().toISOString(), msg: msg }; } catch (e) {}
   if (typeof showToast === 'function') showToast(msg);
 }
@@ -4895,6 +5028,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } finally {
     WhatIf.suppress = false;
     wiCheckResumeOnBoot();   // never auto-enters — only shows a Resume/Discard affordance
+    wiCheckPendingMaterializeOnBoot();   // fire-and-forget — see its own comment for why it's never awaited here
     window.__wiBootDone = true;   // test/debug surface (IR-7-lite): boot-complete signal so
                                    // external probes (QA driver, console) don't race the async chain
   }
@@ -5002,7 +5136,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     h += '<div class="tiles">'
       + '<div class="tile"><div class="k">Total comp</div><div class="v">' + f$(comp) + '</div></div>'
       + '<div class="tile"><div class="k">Taxes</div><div class="v">' + f$(taxTot) + '</div><div class="s">' + (eff * 100).toFixed(1) + '% effective</div></div>'
-      + '<div class="tile good"><div class="k">Invested / yr</div><div class="v">' + f$(invest) + '</div><div class="s">' + (saveRate * 100).toFixed(0) + '% savings rate</div></div>'
+      // ui-redesign.md §G "Deferred (P1)" — this tile is the tax-advantaged + stock lens (401k/
+      // Roth/HSA/ESPP-RSU), NOT total investing; the forecast tile below can legitimately show a
+      // bigger number once after-tax Budget investing is added on top. Relabeled so the two read
+      // as intentional, not a bug. Does not touch the savings-rate math (audit note, unchanged).
+      + '<div class="tile good"><div class="k">Tax-advantaged invest/yr</div><div class="v">' + f$(invest) + '</div><div class="s">' + (saveRate * 100).toFixed(0) + '% savings rate</div></div>'
       + (pj ? '<div class="tile good"><div class="k">Net worth in ' + pj.years + ' yr</div><div class="v">' + f$(pj.totals.futureValue) + '</div></div>'
             : '<div class="tile"><div class="k">Net worth</div><div class="v muted">—</div><div class="s"><a href="#" data-go="invest">project it →</a></div></div>')
       + '</div>';
@@ -5735,10 +5873,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mw = $('gl_manual_wrap'); if (mw) mw.style.display = sel.value ? 'none' : '';
   }
   function glAcctName(id) { const a = GL.accounts.find(x => x.id === id); return a ? a.name : null; }
+  // Rough client-side pace for a DRAFT goal's "→ Budget line" action (no server round-trip
+  // in-mode, per M4/§3.3 — this is a cheap stand-in for goals.goal_progress(), good enough for
+  // a suggested monthly reservation the user can still edit in the budget builder afterward).
+  function glDraftMonthsLeft(dateStr) {
+    try {
+      const now = new Date(), parts = String(dateStr).split('-').map(Number);
+      const target = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+      const months = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+      return Math.max(1, months);
+    } catch (e) { return 1; }
+  }
   function glRender() {
     const el = $('gl_list'); if (!el) return;
-    if (!GL.goals.length) { el.innerHTML = 'No goals yet — add one below.'; return; }
-    el.innerHTML = GL.goals.map(g => {
+    const wi = WhatIf.active;
+    const drafts = wi ? wiDraftGoals() : [];
+    if (!GL.goals.length && !drafts.length) { el.innerHTML = 'No goals yet — add one below.'; return; }
+    let html = GL.goals.map(g => {
       const p = g.progress || {};
       const pct = Math.round((p.pct || 0) * 100);
       const src = g.accountId != null ? (glAcctName(g.accountId) || ('account #' + g.accountId)) : 'manual';
@@ -5750,22 +5901,41 @@ document.addEventListener('DOMContentLoaded', async () => {
         : p.done ? '<span class="good-text">reached ✓</span>'
         : p.overdue ? '<span class="bad-text">past due — ' + glMoney(p.remaining) + ' still to save</span>'
         : '<b>' + glMoney(p.neededPerMonth) + '/mo</b> · ' + glMoney(p.neededPerPaycheck) + '/paycheck · ' + p.monthsLeft + ' mo left';
+      // TODO-243 Phase 2 §3.2: real goals are read-only in What-If Mode — mark-reached/delete
+      // are replaced by a muted locked tag; → Budget line stays live (it only writes bgb, scoped).
+      const realActs = wi
+        ? '<span class="wi-locked-tag">· locked in What-If</span>'
+        : '<a href="#" class="gl-act gl-act-done" data-gl-done="' + g.id + '" title="mark reached" style="margin-right:6px">✓</a>'
+          + '<a href="#" class="gl-act gl-act-del" data-gl-del="' + g.id + '" title="delete">✕</a>';
       return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px">'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
         + '<b>' + esc(g.name) + '</b><span class="muted">' + glMoney(g.target) + ' by ' + esc(g.targetDate) + ' · from ' + esc(src) + '</span>'
         + '<span style="margin-left:auto;white-space:nowrap">'
         + (p.done ? '' : '<a href="#" class="gl-act gl-act-primary" data-gl-budget="' + g.id + '" title="reserve the monthly amount in the budget" style="margin-right:6px">→ Budget line</a>')
-        + '<a href="#" class="gl-act gl-act-done" data-gl-done="' + g.id + '" title="mark reached" style="margin-right:6px">✓</a>'
-        + '<a href="#" class="gl-act gl-act-del" data-gl-del="' + g.id + '" title="delete">✕</a></span></div>'
+        + realActs + '</span></div>'
         + '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'
         + '<div style="flex:1;height:6px;background:var(--line);border-radius:4px;overflow:hidden"><div style="height:6px;width:' + pct + '%;background:var(--good)"></div></div>'
         + '<span style="font-size:var(--fs-xs);white-space:nowrap">' + glMoney(p.saved != null ? p.saved : g.saved) + ' / ' + glMoney(g.target) + ' (' + pct + '%)' + pace + '</span></div>'
         + '<div class="mini" style="margin-top:5px">' + ask + '</div>'
         + '</div>';
     }).join('');
+    if (wi && drafts.length) {
+      html += '<div class="mini muted" style="margin:10px 0 4px">Planned in this what-if — created when you Activate.</div>'
+        + drafts.map(g => {
+            const src = g.accountId != null ? (glAcctName(+g.accountId) || ('account #' + g.accountId)) : (g.savedSoFar ? glMoney(g.savedSoFar) + ' so far' : 'manual');
+            return '<div class="wi-draft-entity" style="margin:10px 0;padding:10px;border-radius:8px">'
+              + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
+              + '<span class="sc-badge wi-planned">Planned</span>'
+              + '<b>' + esc(g.name) + '</b><span class="muted">' + glMoney(g.target) + ' by ' + esc(g.targetDate) + ' · from ' + esc(src) + '</span>'
+              + '<span style="margin-left:auto;white-space:nowrap">'
+              + '<button type="button" class="gl-act gl-act-primary" data-gl-draftbudget="' + g.uid + '" style="margin-right:6px">→ Budget line</button>'
+              + '<button type="button" class="gl-act gl-act-del" data-gl-draftdel="' + g.uid + '">✕ Remove</button>'
+              + '</span></div></div>';
+          }).join('');
+    }
+    el.innerHTML = html;
   }
   async function glAdd() {
-    if (acWriteGuard()) return;
     const name = ($('gl_name').value || '').trim();
     const target = rn($('gl_target').value);
     const date = $('gl_date').value;
@@ -5775,6 +5945,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const acct = $('gl_acct').value;
     const body = { name: name, target: target, targetDate: date };
     if (acct) body.accountId = +acct; else body.savedSoFar = rn($('gl_manual').value);
+    // TODO-243 Phase 2 §3.3: redirect, don't block — in-mode this appends a draft entity to the
+    // session (no server write); out of mode it's the original POST, byte-for-byte.
+    if (WhatIf.active) {
+      if (!WhatIf.session.draftEntities) WhatIf.session.draftEntities = { goals: [], funds: [] };
+      WhatIf.session.draftEntities.goals.push(Object.assign({ uid: wiDraftUid() }, body));
+      wiDraftPersist();
+      $('gl_name').value = ''; $('gl_target').value = ''; $('gl_manual').value = '';
+      // Code-review fix item 4 (cheap guard, 2026-07-28): warn — never block — when the name
+      // collides with an existing REAL goal (same case-insensitive rule materialization itself
+      // uses). GL.goals only holds ACTIVE real goals (glLoad's default), matching that rule.
+      const collides = GL.goals.some(g => (g.name || '').trim().toLowerCase() === name.trim().toLowerCase());
+      showToast(collides
+        ? 'Planned “' + name + '” — a real goal already has this name, so Activate will skip creating a duplicate unless you rename one of them'
+        : 'Planned “' + name + '” — created when you Activate');
+      glRender();
+      return;
+    }
     try {
       await post('/api/tracking/goals?payFreq=' + payFreq(), body);
       $('gl_name').value = ''; $('gl_target').value = ''; $('gl_manual').value = '';
@@ -5785,8 +5972,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   { const s = $('gl_acct'); if (s) s.addEventListener('change', () => { const mw = $('gl_manual_wrap'); if (mw) mw.style.display = s.value ? 'none' : ''; }); }
   { const l = $('gl_list'); if (l) l.addEventListener('click', async e => {
       const bd = e.target.closest('[data-gl-budget]'), dn = e.target.closest('[data-gl-done]'), dl = e.target.closest('[data-gl-del]');
-      if (!bd && !dn && !dl) return;
+      const dbd = e.target.closest('[data-gl-draftbudget]'), ddl = e.target.closest('[data-gl-draftdel]');
+      if (!bd && !dn && !dl && !dbd && !ddl) return;
       e.preventDefault();
+      if (dbd) {   // draft-row reservation — client-only, mirrors the real-row branch below
+        const g = wiDraftGoals().find(x => x.uid === dbd.dataset.glDraftbudget);
+        if (!g) return;
+        const monthly = Math.max(0, ((+g.target || 0) - (+g.savedSoFar || 0)) / glDraftMonthsLeft(g.targetDate));
+        if (!(monthly > 0)) { showToast('Nothing left to reserve'); return; }
+        addBudgetItem('Savings', 'Goals', 'Goal: ' + g.name, monthly);
+        showToast('Reserved ' + glMoney(monthly) + '/mo under Savings › Goals');
+        return;
+      }
+      if (ddl) { wiDraftRemoveGoal(ddl.dataset.glDraftdel); glRender(); return; }   // client-only, no confirm (§3.2)
       if (bd) {   // reserving a budget line writes bgb (a scoped key) — safe in AND out of What-If Mode
         const g = GL.goals.find(x => String(x.id) === bd.dataset.glBudget);
         if (!g || !g.progress || !(g.progress.neededPerMonth > 0)) { showToast('Nothing left to reserve'); return; }
@@ -5794,7 +5992,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         showToast('Reserved ' + glMoney(g.progress.neededPerMonth) + '/mo under Savings › Goals');
         return;
       }
-      if (acWriteGuard()) return;   // server writes stay blocked in-mode (M4)
+      if (wiPlanEntityGuard('goal')) return;   // real-goal mutations stay blocked in-mode (§3.4) — real rows render no dn/dl UI while active anyway
       try {
         if (dn) { await _fetchJSON('/api/tracking/goals/' + dn.dataset.glDone, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }); showToast('Goal marked reached'); }
         if (dl) { if (!window.confirm('Delete this goal?')) return; await _fetchJSON('/api/tracking/goals/' + dl.dataset.glDel, { method: 'DELETE' }); showToast('Goal deleted'); }
@@ -5843,30 +6041,56 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   function sfRender() {
     const el = $('sf_list'); if (!el) return;
+    const wi = WhatIf.active;
     const active = SF.funds.filter(f => f.status !== 'archived');
     const archived = SF.funds.filter(f => f.status === 'archived');
-    if (!active.length) { el.innerHTML = 'No funds yet — add one below.'; }
+    const drafts = wi ? wiDraftFunds() : [];
+    let html = '';
+    if (!active.length && !(wi && drafts.length)) { html = 'No funds yet — add one below.'; }
     else {
-      el.innerHTML = active.map(f => {
+      html = active.map(f => {
         const target = f.target ? sfMoney(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') : '';
         const recur = f.recurrence === 'yearly' ? ' · renews yearly' : '';
+        // TODO-243 Phase 2 §3.2: real funds are read-only in What-If Mode — edit/archive are
+        // replaced by a muted locked tag; → Budget line stays live (it only writes bgb, scoped).
+        const realActs = wi
+          ? '<span class="wi-locked-tag">· locked in What-If</span>'
+          : '<a href="#" class="gl-act" data-sf-edit="' + f.id + '" title="edit" style="margin-right:6px">✎</a>'
+            + '<a href="#" class="gl-act gl-act-del" data-sf-archive="' + f.id + '" title="archive — stops new flows, keeps history">archive</a>';
         return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px">'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
           + '<b>' + esc(f.name) + '</b><span class="muted"><span style="color:' + categoryColor(f.bucket || 'need') + '">●</span> ' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + sfMoney(f.monthlyContribution) + '/mo' + (target ? ' · target ' + target : '') + recur + '</span>'
           + '<span style="margin-left:auto;white-space:nowrap">'
           + (f.monthlyContribution > 0 ? '<a href="#" class="gl-act gl-act-primary" data-sf-budget="' + f.id + '" title="reserve the monthly amount in the budget" style="margin-right:6px">→ Budget line</a>' : '')
-          + '<a href="#" class="gl-act" data-sf-edit="' + f.id + '" title="edit" style="margin-right:6px">✎</a>'
-          + '<a href="#" class="gl-act gl-act-del" data-sf-archive="' + f.id + '" title="archive — stops new flows, keeps history">archive</a></span></div>'
+          + realActs + '</span></div>'
           + '</div>';
       }).join('');
     }
+    if (wi && drafts.length) {
+      html += '<div class="mini muted" style="margin:10px 0 4px">Planned in this what-if — created when you Activate.</div>'
+        + drafts.map(f => {
+            const target = f.target ? sfMoney(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') : '';
+            const recur = f.recurrence === 'yearly' ? ' · renews yearly' : '';
+            return '<div class="wi-draft-entity" style="margin:10px 0;padding:10px;border-radius:8px">'
+              + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline">'
+              + '<span class="sc-badge wi-planned">Planned</span>'
+              + '<b>' + esc(f.name) + '</b><span class="muted"><span style="color:' + categoryColor(f.bucket || 'need') + '">●</span> ' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + sfMoney(f.monthlyContribution) + '/mo' + (target ? ' · target ' + target : '') + recur + '</span>'
+              + '<span style="margin-left:auto;white-space:nowrap">'
+              + (f.monthlyContribution > 0 ? '<button type="button" class="gl-act gl-act-primary" data-sf-draftbudget="' + f.uid + '" style="margin-right:6px">→ Budget line</button>' : '')
+              + '<button type="button" class="gl-act gl-act-del" data-sf-draftdel="' + f.uid + '">✕ Remove</button>'
+              + '</span></div></div>';
+          }).join('');
+    }
+    el.innerHTML = html;
     const aw = $('sf_archived_wrap'), ael = $('sf_archived');
     if (aw && ael) {
       aw.style.display = archived.length ? '' : 'none';
       ael.innerHTML = archived.map(f => '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line-faint)">'
         + '<span>' + esc(f.name) + '</span><span style="margin-left:auto;white-space:nowrap">'
-        + '<a href="#" class="gl-act" data-sf-restore="' + f.id + '" style="margin-right:6px">restore</a>'
-        + '<a href="#" class="gl-act gl-act-del" data-sf-harddelete="' + f.id + '">delete permanently</a></span></div>').join('');
+        + (wi ? '<span class="wi-locked-tag">· locked in What-If</span>'
+             : '<a href="#" class="gl-act" data-sf-restore="' + f.id + '" style="margin-right:6px">restore</a>'
+               + '<a href="#" class="gl-act gl-act-del" data-sf-harddelete="' + f.id + '">delete permanently</a>')
+        + '</span></div>').join('');
     }
   }
   function sfResetForm() {
@@ -5896,7 +6120,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('sf_name').focus();
   }
   async function sfAdd() {
-    if (acWriteGuard()) return;
     const name = ($('sf_name').value || '').trim();
     const bucket = $('sf_bucket').value || null;
     const monthly = rn($('sf_monthly').value);
@@ -5904,6 +6127,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     const date = $('sf_date').value;
     const recurrence = $('sf_recur').value || 'none';
     if (!name) { showToast('Name the fund'); return; }
+    // TODO-243 Phase 2 §3.3/§3.8: in-mode, a fund add is always a NEW draft — there is no
+    // edit-a-draft affordance in v1, so SF.editingId (only ever set by clicking a real row's
+    // now-hidden ✎, §3.2) is deliberately ignored while WhatIf.active.
+    if (WhatIf.active) {
+      if (!WhatIf.session.draftEntities) WhatIf.session.draftEntities = { goals: [], funds: [] };
+      const draft = { uid: wiDraftUid(), name: name, bucket: bucket, monthlyContribution: monthly || 0, recurrence: recurrence };
+      if (target > 0) draft.target = target;
+      if (target > 0 && date) draft.targetDate = date;
+      WhatIf.session.draftEntities.funds.push(draft);
+      wiDraftPersist();
+      // Code-review fix item 4 (cheap guard, 2026-07-28): warn — never block — when the name
+      // collides with an existing REAL fund (same case-insensitive, active-only rule
+      // materialization itself uses; SF.funds includes archived rows, so filter those out here).
+      const collides = SF.funds.some(f => f.status !== 'archived' && (f.name || '').trim().toLowerCase() === name.trim().toLowerCase());
+      showToast(collides
+        ? 'Planned “' + name + '” — a real fund already has this name, so Activate will skip creating a duplicate unless you rename one of them'
+        : 'Planned “' + name + '” — created when you Activate');
+      sfResetForm();
+      sfRender();
+      return;
+    }
     const body = { name: name, bucket: bucket, monthlyContribution: monthly || 0, recurrence: recurrence };
     if (target > 0) body.target = target; else if (SF.editingId) body.clearTarget = true;
     if (target > 0 && date) body.targetDate = date;
@@ -5921,17 +6165,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { showToast('Could not save the fund: ' + (e.message || '')); }
   }
   async function sfArchive(id) {
-    if (acWriteGuard()) return;
+    if (wiPlanEntityGuard('fund')) return;
     try { await _fetchJSON('/api/tracking/funds/' + id, { method: 'DELETE' }); showToast('Fund archived'); sfLoad(); }
     catch (e) { showToast('Could not archive the fund'); }
   }
   async function sfRestore(id) {
-    if (acWriteGuard()) return;
+    if (wiPlanEntityGuard('fund')) return;
     try { await _fetchJSON('/api/tracking/funds/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'active' }) }); showToast('Fund restored'); sfLoad(); }
     catch (e) { showToast('Could not restore the fund'); }
   }
   async function sfHardDelete(id) {
-    if (acWriteGuard()) return;
+    if (wiPlanEntityGuard('fund')) return;
     if (!window.confirm('Permanently delete this fund and its transaction links? This cannot be undone.')) return;
     try { await _fetchJSON('/api/tracking/funds/' + id + '?hard=true', { method: 'DELETE' }); showToast('Fund deleted'); sfLoad(); return; }
     catch (e) {
@@ -5946,8 +6190,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   { const b = $('sf_cancel_edit'); if (b) b.onclick = sfCancelEdit; }
   { const l = $('sf_list'); if (l) l.addEventListener('click', e => {
       const bd = e.target.closest('[data-sf-budget]'), ed = e.target.closest('[data-sf-edit]'), ar = e.target.closest('[data-sf-archive]');
-      if (!bd && !ed && !ar) return;
+      const dbd = e.target.closest('[data-sf-draftbudget]'), ddl = e.target.closest('[data-sf-draftdel]');
+      if (!bd && !ed && !ar && !dbd && !ddl) return;
       e.preventDefault();
+      if (dbd) {   // draft-row reservation — client-only, mirrors the real-row branch below
+        const f = wiDraftFunds().find(x => x.uid === dbd.dataset.sfDraftbudget);
+        if (!f || !(f.monthlyContribution > 0)) { showToast('Nothing to reserve'); return; }
+        const bname = sfBgbBucketName(f.bucket);
+        addBudgetItem(bname, 'Sinking funds', 'Fund: ' + f.name, f.monthlyContribution);
+        showToast('Reserved ' + sfMoney(f.monthlyContribution) + '/mo under ' + bname + ' › Sinking funds');
+        return;
+      }
+      if (ddl) { wiDraftRemoveFund(ddl.dataset.sfDraftdel); sfRender(); return; }   // client-only, no confirm (§3.2)
       if (bd) {
         const f = SF.funds.find(x => String(x.id) === bd.dataset.sfBudget);
         if (!f || !(f.monthlyContribution > 0)) { showToast('Nothing to reserve'); return; }
@@ -7657,6 +7911,71 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (typeof recompute === 'function') recompute();
   }
   function scRefreshActuals() { try { if (typeof ACT !== 'undefined' && ACT.month) acRefresh(); } catch (e) {} }
+  // ---- Revert's entity companion (TODO-243 Phase 2, §0 decision 1: revert removes materialized
+  // entities — full symmetry, with the touched-rule). Code-review BLOCKER fix (2026-07-28):
+  // acts STRICTLY on `materializedIds` — the exact ids the /materialized endpoint recorded at
+  // create-time (see wiMaterializeAndRecord above) — never on a fresh name re-match. The prior
+  // name-based design was confirmed catastrophic: a pre-existing real "Vacation" goal sharing a
+  // draft's name got archived/deleted on revert even though materialization correctly SKIPPED
+  // creating it, and a second scenario's revert could hard-delete a fund a completely different,
+  // earlier scenario had materialized. Since `materializedIds` only ever contains ids THIS
+  // scenario's own materialization actually created (never a skipped pre-existing collision,
+  // never another scenario's rows), both failure modes are now structurally impossible — the id
+  // set itself is the safety boundary, not a heuristic.
+  //
+  // `materializedIds` is absent/empty whenever nothing was ever recorded (never activated with
+  // drafts, or a materialize+record run never completed and was dismissed) — that's fix item 3:
+  // revert then does NOTHING here, on purpose (the caller's confirm copy reflects this).
+  //
+  // Touched signal (schema has no updated_at/row-version column, per the task's fallback
+  // instruction): fund = has ANY fund_txn rows (§0 decision 1's own literal test — read from
+  // /fund-rollup's `history`, not month-scoped despite the endpoint's `month` param). Goal = a
+  // field-value diff against its ORIGINAL creation values. Those originals are looked up from
+  // the scenario's own `spec.draftEntities` by NAME — this is NOT the id-set that decides which
+  // rows are ours (that's `materializedIds`, already resolved above); getting this origin-lookup
+  // wrong only affects whether an ALREADY-correctly-identified row (by id) is archived vs
+  // deleted, never which row is touched. A row whose current name no longer matches ANY draft
+  // entity (e.g. renamed) defaults to the SAFE branch — treated as touched (archived, not
+  // deleted) — rather than guessing.
+  async function wiRevertDraftEntities(scenarioId, materializedIds) {
+    const goalIds = (materializedIds && materializedIds.goals) || [];
+    const fundIds = (materializedIds && materializedIds.funds) || [];
+    if (!goalIds.length && !fundIds.length) return null;
+    let goals = [], fundRows = [], draftEntities = { goals: [], funds: [] };
+    try { goals = (await _fetchJSON('/api/tracking/goals?includeInactive=true')).goals || []; } catch (e) {}
+    try { fundRows = (await _fetchJSON('/api/tracking/fund-rollup?month=' + scDefaultMonth() + '&includeArchived=true')).funds || []; } catch (e) {}
+    try {
+      const full = await scGet('/api/tracking/scenarios/' + scenarioId);
+      draftEntities = ((full.payload || {}).spec || {}).draftEntities || { goals: [], funds: [] };
+    } catch (e) {}
+    const draftGoalByName = new Map((draftEntities.goals || []).map(g => [(g.name || '').trim().toLowerCase(), g]));
+    const draftFundByName = new Map((draftEntities.funds || []).map(f => [(f.name || '').trim().toLowerCase(), f]));
+    let removed = 0, archived = 0;
+    for (const gid of goalIds) {
+      const g = goals.find(x => x.id === gid);
+      if (!g) continue;   // already gone some other way (user hard-deleted it) — nothing to do; id-scoped, so this can NEVER be a stranger's row
+      const orig = draftGoalByName.get((g.name || '').trim().toLowerCase());
+      const touched = !orig || g.status !== 'active'
+        || Math.abs((+g.target || 0) - (+orig.target || 0)) > 0.005
+        || (g.targetDate || '') !== (orig.targetDate || '')
+        || (g.accountId ?? null) !== (orig.accountId ?? null)
+        || Math.abs((+g.manualSaved || 0) - (+orig.savedSoFar || 0)) > 0.005;
+      try {
+        if (touched) { await _fetchJSON('/api/tracking/goals/' + gid, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) }); archived++; }
+        else { await _fetchJSON('/api/tracking/goals/' + gid, { method: 'DELETE' }); removed++; }
+      } catch (e) {}
+    }
+    for (const fid of fundIds) {
+      const f = fundRows.find(x => x.id === fid);
+      if (!f) continue;
+      const touched = (f.history || []).length > 0;
+      try {
+        if (touched) { await _fetchJSON('/api/tracking/funds/' + fid, { method: 'DELETE' }); archived++; }              // no ?hard — archives (delete_fund default)
+        else { await _fetchJSON('/api/tracking/funds/' + fid + '?hard=true', { method: 'DELETE' }); removed++; }        // zero linked txns → reserve is necessarily 0, hard delete never needs force
+      } catch (e) {}
+    }
+    return { removed: removed, archived: archived };
+  }
   async function scRevert(id) {
     // Coherence guard (code-review must-fix #2): reverting while in a what-if would commit the
     // SERVER revert but strand the client-side budget/split restore inside the sandbox (it
@@ -7666,17 +7985,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!confirm('Reverting the active scenario first exits this what-if — sandbox edits are discarded. Continue?')) return;
       await wiExitDiscardCore();
     }
-    if (!confirm('Revert this scenario?\n\nEvery plan baseline it installed is restored to what it was (or removed where none existed). Months you edited AFTER activating are kept as-is. The scenario goes back to draft.')) return;
+    // Code-review fix item 3 (2026-07-28): only mention entity removal in the confirm copy when
+    // it's LITERALLY true — a scenario with nothing recorded (never had drafts, or the
+    // materialize+record run never completed) has revert touch NO entities at all.
+    let matIds = null;
+    try { const full = await scGet('/api/tracking/scenarios/' + id); matIds = ((full.payload || {}).revert || {}).materializedIds || null; } catch (e) {}
+    const hasEntities = !!(matIds && (((matIds.goals || []).length) || ((matIds.funds || []).length)));
+    const entityLine = hasEntities
+      ? ' Any goals/funds it created are removed too — unless you\'ve touched them since, in which case they\'re archived instead.'
+      : '';
+    if (!confirm('Revert this scenario?\n\nEvery plan baseline it installed is restored to what it was (or removed where none existed). Months you edited AFTER activating are kept as-is.' + entityLine + ' The scenario goes back to draft.')) return;
     try {
       const out = await scSend('POST', '/api/tracking/scenarios/' + id + '/revert', {});
       const kept = Object.keys(out.restored || {}).filter(m => out.restored[m] === 'kept-user-edit');
-      showToast('Reverted — plan baselines restored' + (kept.length ? ' (' + kept.join(', ') + ' kept your edits)' : ''));
+      const ent = await wiRevertDraftEntities(id, out.materializedIds);
+      let msg = 'Reverted — plan baselines restored' + (kept.length ? ' (' + kept.join(', ') + ' kept your edits)' : '');
+      if (ent && (ent.removed || ent.archived)) msg += ' · ' + ent.removed + ' removed' + (ent.archived ? ', ' + ent.archived + ' archived — it had activity' : '');
+      showToast(msg);
       const cs = out.clientState;
       if (cs) scRestoreLiveBudget(cs);
       if (cs && cs.salaryAnnual && confirm('Also restore your Tax inputs to the pre-scenario values?\n\nBase back to ' + fmt$(cs.salaryAnnual) + '.')) {
         scApplyComp(null, cs);
       }
-      wiRefreshDraftsList(); scRefreshActuals();
+      wiRefreshDraftsList(); scRefreshActuals(); glLoad(); sfLoad();
     } catch (e) { showToast('Revert failed: ' + (e.message || '')); }
   }
 
@@ -7706,6 +8037,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     return { budgetPlan: budgetPlan, taxResult: taxResult, fireResult: fireResult };
   }
 
+  // TODO-245: snapshot/restore for WI_SESSION_ONLY_FIELDS — the handful of inputs that are
+  // editable in-mode but never persisted anywhere (see the constant's comment). Captured at
+  // wiEnter() into WhatIf.session.meta (so it survives a reload+wiResume via the normal
+  // WI_SESSION_KEY persistence, same as clientState) and restored on every TRUE mode exit
+  // (Discard, Exit-keep, Yield, Activate — i.e. every path that sets WhatIf.active = false for
+  // good, not the temporary Peek toggle or Resume itself) so the DOM never keeps showing a
+  // what-if-only value after the sandbox is gone.
+  function wiSnapshotSessionOnlyFields() {
+    const snap = {};
+    WI_SESSION_ONLY_FIELDS.forEach(id => { const e = $(id); if (e) snap[id] = e.value; });
+    return snap;
+  }
+  function wiRestoreSessionOnlyFields(snap) {
+    const s = snap || (WhatIf.session && WhatIf.session.meta && WhatIf.session.meta.sessionOnlyFields);
+    if (!s) return;
+    WI_SESSION_ONLY_FIELDS.forEach(id => { if (s[id] == null) return; const e = $(id); if (e) e.value = s[id]; });
+    try { formatUSDFields(); } catch (e) {}
+  }
+
   // Read-pin (M4): Actuals code reads the frozen pre-enter plan while in mode, never the live
   // in-mode one — so a hypothetical scenario never corrupts the DEC-007 plan-vs-actual baseline.
   function acPlan() { return WhatIf.active ? (WhatIf.frozen && WhatIf.frozen.budgetPlan) : window.__budgetPlan; }
@@ -7716,6 +8066,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!WhatIf.active) return false;
     showToast('Exit What-If Mode to log actuals — that belongs to your real numbers, not the sandbox.');
     return true;
+  }
+
+  // ---- Planning-entity guard (TODO-243 Phase 2 §3.4) — splits the old over-broad acWriteGuard()
+  // into two intents. This one guards MUTATIONS of a REAL goal/fund while in What-If Mode (mark-
+  // reached, delete, edit, archive, restore, hard-delete) — additions are never guarded (§3.3
+  // redirects them into a draft instead). Same "return true = blocked" contract as acWriteGuard,
+  // so call sites change only the function name.
+  function wiPlanEntityGuard(kind) {
+    if (!WhatIf.active) return false;
+    const label = kind === 'fund' ? 'funds' : 'goals';
+    showToast('Real ' + label + ' stay put in What-If. Add a planned one to model changes, or exit to edit this one.');
+    return true;
+  }
+
+  // ---- Draft-scoped goals/funds (TODO-243 Phase 2 §3.1) ----
+  // uid: a client-generated marker so a draft entity can be edited/removed in the sandbox and,
+  // at activation, so retry is idempotent (materialization itself is idempotent BY NAME, §3.5 —
+  // the uid exists for the in-mode remove/list bookkeeping, not for the server round-trip).
+  function wiDraftUid() { return 'd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+  // Mutation choke-point for WhatIf.session.draftEntities — mirrors persist()'s suppress
+  // discipline (M2) so a boot/peek/transition window can never write a half-restored session.
+  function wiDraftPersist() {
+    if (WhatIf.suppress || !WhatIf.session) return;
+    if (!WhatIf.session.draftEntities) WhatIf.session.draftEntities = { goals: [], funds: [] };
+    try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
+  }
+  function wiDraftGoals() { return (WhatIf.session && WhatIf.session.draftEntities && WhatIf.session.draftEntities.goals) || []; }
+  function wiDraftFunds() { return (WhatIf.session && WhatIf.session.draftEntities && WhatIf.session.draftEntities.funds) || []; }
+  function wiDraftRemoveGoal(uid) {
+    if (!WhatIf.session || !WhatIf.session.draftEntities) return;
+    WhatIf.session.draftEntities.goals = wiDraftGoals().filter(g => g.uid !== uid);
+    wiDraftPersist();
+  }
+  function wiDraftRemoveFund(uid) {
+    if (!WhatIf.session || !WhatIf.session.draftEntities) return;
+    WhatIf.session.draftEntities.funds = wiDraftFunds().filter(f => f.uid !== uid);
+    wiDraftPersist();
   }
 
   // Re-run the exact same DOM-repopulation chain the app uses at boot, but reading through the
@@ -7759,6 +8146,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Same rationale as the FIRE branch above; hidden-tab staleness self-heals on tab open.
     const ivTab = document.getElementById('tab-invest');
     if (ivTab && ivTab.classList.contains('active')) { try { calcInvest(); calcProject(); } catch (e) {} }
+    // TODO-243 Phase 2: gl_card/sf_card's real-row lock state and draft group depend on
+    // WhatIf.active — re-render on every transition this function already covers (resume,
+    // discard, exit-keep, peek start/end) so an already-open Budget tab never shows stale
+    // lock/unlock chrome. Cheap (no fetch): reuses whatever GL.goals/SF.funds already hold.
+    try { glRender(); sfRender(); } catch (e) {}
   }
   const wiRepopulateDom = repopulateFromStorage;   // local alias — every call site below is unchanged
   window.repopulateFromStorage = repopulateFromStorage;   // Fix A: consumed by repaintAfterHydrate()
@@ -7766,24 +8158,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ---- Banner hero deltas (P1): live "vs the reality you left" readout ----
   // Polled on a short interval while in-mode: every editable surface can change the numbers
   // (Tax inputs, budget builder, FIRE assumptions), so one timer beats hooking every renderer.
+  //
+  // TODO-221 P1b (2nd priority, after the details drawer): each delta is now a tappable CHIP
+  // that jumps to the tab it summarizes (Tax/Budget/FIRE), not plain joined text — the spec
+  // (docs/whatif-planning-entities.md) is silent on chip placement for THIS feature (it covers
+  // the picker, a different half of TODO-221/TODO-243), so per the dev-plan fallback these live
+  // right in the existing banner delta line. The three quantities and their derivation are
+  // UNCHANGED from the pre-chip version — same-snapshot-pair discipline below is load-bearing,
+  // see the 2026-07-26 provenance-asymmetry note; only the rendering (chips.push objects, then
+  // buttons) changed. Click wiring is a single delegated listener on #wi_banner (below, wired
+  // once), not re-attached per render — this function only ever rewrites innerHTML.
   function wiUpdateBannerDeltas() {
     const el = $('wi_banner_deltas'); if (!el) return;
     if (!WhatIf.active || !WhatIf.frozen || wiPeeking) return;
-    const parts = [];
+    const chips = [];
     const cT = window.__taxResult && window.__taxResult.cash, fT = WhatIf.frozen.taxResult && WhatIf.frozen.taxResult.cash;
-    if (cT && fT) { const d = (cT.takeHome - fT.takeHome) / 12; if (Math.abs(d) >= 1) parts.push('Take-home ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo'); }
+    if (cT && fT) { const d = (cT.takeHome - fT.takeHome) / 12; if (Math.abs(d) >= 1) chips.push({ tab: 'tax', text: 'Take-home ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo' }); }
     // Income base MUST be derived from the same snapshot pair as take-home above (never from
     // window.__budgetPlan / frozen.budgetPlan) — that cache is scheduled on its own timer and its
     // contribution fold (taxInvest, mirrored below — see the live version at ~6971, the two must
     // stay in lockstep) can sit behind bgbBaseTouched (~7163) and go stale. A live budgetPlan
     // compared against a frozen one then diffs a fresh rollup against a stale one and inflates the
     // delta to the FULL contribution amount instead of the true income-base change. Diagnosed
-    // 2026-07-26. Same-snapshot-per-side is the rule: cT vs fT, nothing else, both lines.
+    // 2026-07-26. Same-snapshot-per-side is the rule: cT vs fT, nothing else, both lines. This is
+    // also the one number that actually feeds the budget builder's income base, so it's the
+    // honest stand-in for a "Budget" delta — jumps to the Budget tab, not a fresh derivation.
     const incomeBaseMo = c => c.takeHome / 12 + ((c.trad401k || 0) + (c.roth401k || 0) + (c.rothIra || 0) + (c.hsa || 0) + (c.eeStock || 0) + (c.afterTax401k || 0)) / 12;
-    if (cT && fT) { const d = incomeBaseMo(cT) - incomeBaseMo(fT); if (Math.abs(d) >= 1) parts.push('Income base ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo'); }
+    if (cT && fT) { const d = incomeBaseMo(cT) - incomeBaseMo(fT); if (Math.abs(d) >= 1) chips.push({ tab: 'budget', text: 'Income base ' + (d >= 0 ? '+' : '−') + fmt$(Math.abs(d)) + '/mo' }); }
     const cF = window.__fireResult, fF = WhatIf.frozen.fireResult;
-    if (cF && fF && cF.coastReadyAge != null && fF.coastReadyAge != null) { const d = cF.coastReadyAge - fF.coastReadyAge; if (Math.abs(d) >= 0.5) parts.push('Coast FI ' + (d <= 0 ? '▼' : '▲') + Math.abs(d).toFixed(1) + ' yr'); }
-    el.textContent = parts.length ? '· ' + parts.join(' · ') : '· matches your live numbers so far';
+    if (cF && fF && cF.coastReadyAge != null && fF.coastReadyAge != null) { const d = cF.coastReadyAge - fF.coastReadyAge; if (Math.abs(d) >= 0.5) chips.push({ tab: 'fire', text: 'Coast FI ' + (d <= 0 ? '▼' : '▲') + Math.abs(d).toFixed(1) + ' yr' }); }
+    el.innerHTML = chips.length
+      ? chips.map(c => '<button type="button" class="wi-delta-chip" data-go="' + c.tab + '">' + esc(c.text) + '</button>').join('')
+      : '<span class="mini muted">matches your live numbers so far</span>';
   }
 
   // ---- Hold-to-peek (P1): flash the whole app back to reality while held ----
@@ -7818,6 +8224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nm = $('wi_banner_name'); if (nm) nm.textContent = (WhatIf.session && WhatIf.session.meta && WhatIf.session.meta.name) || 'Untitled';
     const startBtn = $('wi_start_btn'); if (startBtn) startBtn.hidden = true;
     document.body.classList.add('whatif-active');
+    wiDetailsClose();   // defensive: never inherit a stale open drawer from a prior session
     wiUpdateBannerDeltas();
     if (!WhatIf.deltaTimer) WhatIf.deltaTimer = setInterval(wiUpdateBannerDeltas, 1500);
   }
@@ -7827,9 +8234,120 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.classList.remove('whatif-active');
     document.body.classList.remove('wi-peek');
     wiPeeking = false;
+    wiDetailsClose();
     if (WhatIf.deltaTimer) { clearInterval(WhatIf.deltaTimer); WhatIf.deltaTimer = null; }
   }
   function wiHideResumeBanner() { const el = $('wi_resume_banner'); if (el) el.hidden = true; }
+
+  // ---- Scenario-details drawer (TODO-221 P1b, the priority sub-item) ----
+  // Exposes the one thing the spec calls "the biggest gap": the activation month, which today
+  // silently defaults to next month (scDefaultMonth(), set at wiEnter()) with no visible editor.
+  // Everything this drawer writes lands inside WhatIf.session (never a new itc.whatif.* key,
+  // never a WI_SCOPED_KEYS live key) via the SAME direct `localStorage.setItem(WI_SESSION_KEY,
+  // JSON.stringify(WhatIf.session))` one-liner already used by wiSaveDraftAs/wiLoadScenarioIntoMode
+  // — there is no separate "session-scoped persist()" function beyond that convention; persist()
+  // itself is reserved for the 6 WI_SCOPED_KEYS (Tax/budget/tabs/maxout/FIRE/activetab), not for
+  // session.meta. Because wiBuildSpecFromLive() always reads WhatIf.session.meta.activationMonth
+  // (Save draft / Exit-keep / Activate all call it that way already), updating meta here is
+  // sufficient — every downstream write path picks up the new month with zero further plumbing.
+
+  function wiDetailsOpen() {
+    const el = $('wi_details_drawer'), btn = $('wi_details_btn');
+    if (!el || !btn || !WhatIf.active || !WhatIf.session) return;
+    el.hidden = false; btn.setAttribute('aria-expanded', 'true');
+    const nameInp = $('wi_details_name_input');
+    if (nameInp) nameInp.value = (WhatIf.session.meta && WhatIf.session.meta.name) || '';
+    const monthInp = $('wi_details_month_input');
+    if (monthInp) monthInp.value = (WhatIf.session.meta && WhatIf.session.meta.activationMonth) || scDefaultMonth();
+    wiDetailsRefreshCatchup();
+  }
+  function wiDetailsClose() {
+    const el = $('wi_details_drawer'), btn = $('wi_details_btn');
+    if (!el || !btn) return;
+    el.hidden = true; btn.setAttribute('aria-expanded', 'false');
+  }
+  function wiDetailsToggle() {
+    const el = $('wi_details_drawer'); if (!el) return;
+    if (el.hidden) wiDetailsOpen(); else wiDetailsClose();
+  }
+
+  // Rename (reuses the picker's exact PUT plumbing, wiPickerCommitRename's sibling): always
+  // updates the local session name immediately (so the banner reflects it even for a what-if
+  // that was never saved); additionally PUTs to the server ONLY when a draftId already exists
+  // — an unsaved sandbox has nothing server-side to rename yet, and that is not an error.
+  function wiDetailsRenameCommit() {
+    const inp = $('wi_details_name_input'); if (!inp || !WhatIf.active || !WhatIf.session) return;
+    const name = (inp.value || '').trim();
+    if (!name) { inp.focus(); return; }
+    WhatIf.session.meta.name = name;
+    try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
+    const nm = $('wi_banner_name'); if (nm) nm.textContent = name;
+    if (WhatIf.session.meta.draftId) {
+      scSend('PUT', '/api/tracking/scenarios/' + WhatIf.session.meta.draftId, { name: name })
+        .then(() => { wiRefreshDraftsList(); })
+        .catch(e => showToast('Renamed locally — saving the name to your account failed: ' + (e.message || '')));
+    } else {
+      showToast('Renamed — Save draft (or Exit — keep) to carry this name past this session');
+    }
+  }
+
+  // <input type=month> hands back 'YYYY-MM' natively; still validated defensively before it
+  // ever reaches WhatIf.session (a malformed value must never corrupt the spec activation flows
+  // this feeds — wiBuildSpecFromLive/wiActivate/wiExitKeep all trust meta.activationMonth as-is).
+  function wiDetailsMonthChange() {
+    const inp = $('wi_details_month_input'); if (!inp || !WhatIf.active || !WhatIf.session) return;
+    const v = (inp.value || '').trim();
+    // NIT (code review 2026-07-28): tightened from \d{2} (accepted e.g. "00"/"13") to a real
+    // 01-12 month range — matches _valid_month's server-side check (tracking_store.py).
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) { inp.value = (WhatIf.session.meta && WhatIf.session.meta.activationMonth) || scDefaultMonth(); return; }
+    WhatIf.session.meta.activationMonth = v;
+    try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
+    wiDetailsRefreshCatchup();
+  }
+
+  // Per-account catch-up rows, built from the SAME five payroll-deferred fields SC_PAYLOAD_KEYS/
+  // scApplyComp already treat as the scenario's contribution set — no new inputs, no new state.
+  // "alreadyIn" (manual YTD, DEC-017 decision #3) has no capture surface anywhere in the app
+  // since the old sc_wrap form was deleted (DEC-018) — it defaults to 0 here, which is the
+  // WORST-CASE pace (the full annual target is still treated as ahead), never an optimistic
+  // guess dressed up as data. Zero-target accounts are dropped — they'd only add noise rows.
+  const WI_CATCHUP_LABELS = { trad401k: '401(k) Traditional', roth401k: '401(k) Roth', hsa: 'HSA', rothIra: 'Roth IRA', afterTax401k: 'After-tax 401(k)' };
+  function wiDetailsCatchupAccounts() {
+    return SC_PAYLOAD_KEYS.map(k => {
+      let target = 0; try { target = scR2(resolveAnnual(k)); } catch (e) {}
+      return { key: k, label: WI_CATCHUP_LABELS[k] || k, annualTarget: target, alreadyIn: 0 };
+    }).filter(a => a.annualTarget > 0);
+  }
+  async function wiDetailsRefreshCatchup() {
+    const el = $('wi_details_catchup'); if (!el || !WhatIf.active || !WhatIf.session) return;
+    const month = (WhatIf.session.meta && WhatIf.session.meta.activationMonth) || scDefaultMonth();
+    const accounts = wiDetailsCatchupAccounts();
+    if (!accounts.length) { el.innerHTML = '<span class="mini muted">No payroll-deferred contributions set on the Tax tab yet — nothing to pace.</span>'; return; }
+    let netPerPaycheck = null;
+    try { const tr = window.__taxResult, pf = payFreq(); if (tr && tr.cash && pf > 0) netPerPaycheck = tr.cash.takeHome / pf; } catch (e) {}
+    let out;
+    try {
+      out = await scSend('POST', '/api/scenario/catchup', {
+        accounts: accounts, activationMonth: month, payFreq: payFreq(),
+        extraPrincipalGoals: [], netPerPaycheck: netPerPaycheck,
+      });
+    } catch (e) { el.innerHTML = '<span class="mini muted">Could not compute the catch-up pace: ' + esc(e.message || '') + '</span>'; return; }
+    const rows = (out.accounts || []).map(a =>
+      '<tr><td>' + esc(a.label) + '</td><td class="num">' + fmt$(a.annualTarget) + '</td><td class="num">' + fmt$(a.alreadyIn) + '</td>'
+      + '<td class="num">' + fmt$(a.remaining) + '</td><td class="num">' + fmt$(a.perMonth) + '/mo</td><td class="num">' + fmt$(a.perPaycheck) + '/pay</td></tr>'
+    ).join('');
+    const t = out.totals || {};
+    const warn = out.cantCatchUpFromPayroll === true
+      ? '<div class="mini" style="color:var(--warn-text-strong);margin-top:6px">This pace exceeds a single paycheck’s take-home — payroll deferral alone can’t catch up from ' + esc(month) + '.</div>'
+      : '';
+    el.innerHTML = '<table class="wi-catchup-table"><thead><tr><th>Account</th><th class="num">Target</th><th class="num">Already in</th><th class="num">Remaining</th><th class="num">Per month</th><th class="num">Per paycheck</th></tr></thead><tbody>'
+      + rows
+      + '<tr class="total"><td>Total</td><td></td><td></td><td class="num">' + fmt$(t.accountsRemaining || 0) + '</td>'
+      + '<td class="num">' + fmt$(t.accountsPerMonth || 0) + '/mo</td><td class="num">' + fmt$(t.accountsPerPaycheck || 0) + '/pay</td></tr>'
+      + '</tbody></table>'
+      + '<div class="mini muted" style="margin-top:6px">' + (out.monthsLeft || 0) + ' month' + (out.monthsLeft === 1 ? '' : 's') + ' left in ' + esc(String(month.slice(0, 4))) + ' from ' + esc(month) + ' · "Already in" is 0 until you track it manually.</div>'
+      + warn;
+  }
 
   // ---- Cross-tab lock (M3): localStorage single-writer lock + sessionStorage owner id ----
   function wiAcquireLock(name) {
@@ -7864,6 +8382,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.active = false;
     wiStopHeartbeat();
     wiRepopulateDom();
+    wiRestoreSessionOnlyFields();   // TODO-245: WhatIf.session still holds the pre-enter snapshot here
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
@@ -7903,14 +8422,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.session = {
       meta: { name: (name || 'Untitled what-if').trim() || 'Untitled what-if', draftId: null,
               baselineAt: new Date().toISOString(), enteredAt: new Date().toISOString(),
-              payloadVersion: 2, clientState: clientState, activationMonth: scDefaultMonth() },
+              payloadVersion: 2, clientState: clientState, activationMonth: scDefaultMonth(),
+              sessionOnlyFields: wiSnapshotSessionOnlyFields() },   // TODO-245
       live: wiScopedSnapshotLive(),
       baseline: wiScopedSnapshotLive(),
+      draftEntities: { goals: [], funds: [] },   // TODO-243 Phase 2 §3.1 — additions only, never real rows
     };
     try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
     WhatIf.active = true;   // set BEFORE any input can fire
     wiShowActiveBanner();
     wiStartHeartbeat();
+    try { glRender(); sfRender(); } catch (e) {}   // TODO-243 Phase 2: lock real rows / show the (empty) draft group immediately
     showToast('What-If Mode on — edit anything, nothing real changes until you Activate');
   }
 
@@ -7943,6 +8465,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     wiReleaseLock();
     wiStopHeartbeat();
     wiRepopulateDom();
+    wiRestoreSessionOnlyFields();   // TODO-245: WhatIf.session still holds the pre-enter snapshot here
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
@@ -7979,6 +8502,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     wiReleaseLock();
     wiStopHeartbeat();
     wiRepopulateDom();
+    wiRestoreSessionOnlyFields();   // TODO-245: WhatIf.session still holds the pre-enter snapshot here
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
@@ -8028,6 +8552,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       budgetPlan: bp, takeHome: tr.cash.takeHome,
       catchup: { accounts: [], activationMonth: month, payFreq: payFreq(), extraPrincipalGoals: [] },   // the full catch-up editor is P1
       sessionLive: WhatIf.session ? WhatIf.session.live : null,   // opaque whole-namespace stash (F1)
+      // TODO-243 Phase 2 §3.7: rides the same opaque payload_json as sessionLive (F1) — a few
+      // hundred bytes per entity, nowhere near the 512KB _scenario_blob_guard ceiling. This is
+      // ALSO the revert-time lookup key (see scRevert below) — zero backend change, per the
+      // spec's "index.html only" blast radius (see that function's comment for the full reasoning).
+      draftEntities: WhatIf.session ? (WhatIf.session.draftEntities || { goals: [], funds: [] }) : { goals: [], funds: [] },
     };
   }
   async function wiSaveDraft(silent) {
@@ -8046,13 +8575,149 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { if (!silent) showToast('Save failed: ' + (e.message || '')); return null; }
   }
 
+  // ---- Materialize draft goals/funds (TODO-243 Phase 2 §3.5–§3.6) ----
+  // Called from wiActivate/Retry/boot-reconcile ONLY, strictly after mode teardown (live mode).
+  //
+  // Code-review BLOCKER fix (2026-07-28): identity for "which rows are ours" is now the
+  // per-draft-entity `uid`, never the entity's NAME. `alreadyDone` ({goals:{uid:id},
+  // funds:{uid:id}}) is the set of draft uids a PRIOR attempt (this session or a resumed
+  // pending record) already definitively created — those are skipped outright, never
+  // re-checked against a name. Only draft entities NOT yet in `alreadyDone` go through the
+  // name-collision check, and that check's ONLY purpose is the original §3.5 intent — "don't
+  // create a duplicate of a pre-existing REAL entity that merely shares a name" — it decides
+  // whether to CREATE, never which existing row to touch. This is the fix for the confirmed
+  // catastrophic bug: revert (wiRevertDraftEntities) now acts strictly on the ids this
+  // function returns (recorded server-side by wiMaterializeAndRecord below), never on a
+  // fresh name re-match — so a pre-existing "Vacation" goal or another scenario's own
+  // materialized fund can never be touched by THIS scenario's revert again.
+  async function wiMaterializeDraftEntities(draftEntities, alreadyDone) {
+    alreadyDone = alreadyDone || { goals: {}, funds: {} };
+    const goals = ((draftEntities && draftEntities.goals) || []).filter(g => !(g.uid in alreadyDone.goals));
+    const funds = ((draftEntities && draftEntities.funds) || []).filter(f => !(f.uid in alreadyDone.funds));
+    const out = { createdGoalIds: {}, createdFundIds: {}, existedGoals: 0, existedFunds: 0, failedGoals: [], failedFunds: [] };
+    if (!goals.length && !funds.length) return out;
+    let existingGoals = [], existingFunds = [];
+    try { existingGoals = (await _fetchJSON('/api/tracking/goals?payFreq=' + payFreq())).goals || []; } catch (e) {}
+    try { existingFunds = (await _fetchJSON('/api/tracking/funds')).funds || []; } catch (e) {}
+    const goalNames = new Set(existingGoals.map(g => (g.name || '').trim().toLowerCase()));
+    const fundNames = new Set(existingFunds.map(f => (f.name || '').trim().toLowerCase()));
+    for (const g of goals) {
+      const key = (g.name || '').trim().toLowerCase();
+      if (goalNames.has(key)) { out.existedGoals++; continue; }   // a REAL pre-existing goal — skip creating a duplicate; its id is NEVER recorded against this scenario
+      try {
+        const body = { name: g.name, target: g.target, targetDate: g.targetDate };
+        if (g.accountId != null) body.accountId = g.accountId; else body.savedSoFar = g.savedSoFar || 0;
+        const created = await post('/api/tracking/goals?payFreq=' + payFreq(), body);
+        goalNames.add(key);   // two draft goals sharing a name collapse to one create — benign dedupe (§3.5)
+        out.createdGoalIds[g.uid] = created.id;
+      } catch (e) { out.failedGoals.push(g); }
+    }
+    for (const f of funds) {
+      const key = (f.name || '').trim().toLowerCase();
+      if (fundNames.has(key)) { out.existedFunds++; continue; }
+      try {
+        const body = { name: f.name, bucket: f.bucket, monthlyContribution: f.monthlyContribution || 0, recurrence: f.recurrence || 'none' };
+        if (f.target > 0) body.target = f.target;
+        if (f.target > 0 && f.targetDate) body.targetDate = f.targetDate;
+        const created = await post('/api/tracking/funds', body);
+        fundNames.add(key);
+        out.createdFundIds[f.uid] = created.id;
+      } catch (e) { out.failedFunds.push(f); }
+    }
+    return out;
+  }
+  // Persistent, dismissible partial-failure banner (§3.6). Pending state now ALSO mirrors into
+  // WI_PENDING_MATERIALIZE_KEY (SHOULD-FIX, 2026-07-28) so a reload mid-retry-loop resumes from
+  // exactly where it left off (see wiCheckPendingMaterializeOnBoot, top-level) instead of
+  // relying on the in-memory closure var surviving, which a reload would wipe.
+  let wiMaterializePending = null;
+  function wiMaterializeShowBanner(summary) {
+    const el = $('wi_materialize_banner'), lbl = $('wi_materialize_banner_label');
+    if (!el || !lbl) return;
+    const okTotal = summary.createdTotal + summary.existedTotal;
+    const total = okTotal + summary.failedTotal;
+    lbl.textContent = (!summary.bookkeepingOk && !summary.failedTotal)
+      ? 'Activated — planned items were created, but recording them for revert failed. Retry to finish.'
+      : 'Activated. ' + okTotal + ' of ' + total + ' planned items were created — ' + summary.failedTotal + " couldn't be saved.";
+    el.hidden = false;
+  }
+  function wiMaterializeHideBanner() {
+    const el = $('wi_materialize_banner'); if (el) el.hidden = true;
+    wiMaterializePending = null;
+    try { localStorage.removeItem(WI_PENDING_MATERIALIZE_KEY); } catch (e) {}
+  }
+  // ---- Materialize-and-record wrapper (TODO-243 Phase 2 code-review BLOCKER fix) ----
+  // The bookkeeping-POST half of the fix: after (idempotently) creating whatever hasn't been
+  // created yet, it POSTS the FULL accumulated {uid:id} sets — not just this call's new ones —
+  // to the new /materialized endpoint, which REPLACES the scenario's recorded set server-side.
+  // A bookkeeping-POST failure (network blip after successful creates) is treated exactly like
+  // a creation failure — same Retry banner, same idempotent re-POST semantics — because an
+  // unrecorded created entity is exactly as unsafe for revert as an uncreated one (revert simply
+  // won't touch it, per fix item 3, which is the safe-by-default outcome either way).
+  async function wiMaterializeAndRecord(draftEntities, scenarioId, doneGoals, doneFunds) {
+    doneGoals = doneGoals || {}; doneFunds = doneFunds || {};
+    const mat = await wiMaterializeDraftEntities(draftEntities, { goals: doneGoals, funds: doneFunds });
+    const allDoneGoals = Object.assign({}, doneGoals, mat.createdGoalIds);
+    const allDoneFunds = Object.assign({}, doneFunds, mat.createdFundIds);
+    let bookkeepingOk = true;
+    if (Object.keys(allDoneGoals).length || Object.keys(allDoneFunds).length) {
+      try {
+        await post('/api/tracking/scenarios/' + scenarioId + '/materialized',
+          { goalIds: Object.values(allDoneGoals), fundIds: Object.values(allDoneFunds) });
+      } catch (e) {
+        // 409 = the scenario is no longer active (reverted/re-activated elsewhere in the
+        // meantime) — there is nothing more this run can or should do; don't loop it into a
+        // permanent Retry banner. Any other failure (network, 5xx) IS retryable.
+        // 409 = scenario no longer active (reverted meanwhile) and 404 = scenario deleted —
+        // both TERMINAL: there is nothing left to record against, so retrying forever would
+        // only pin the Retry banner across reboots (verify-pass NIT, 2026-07-28). Any other
+        // failure (network, 5xx) stays retryable.
+        bookkeepingOk = /^(409|404)/.test(String(e.message || ''));
+      }
+    }
+    const failedTotal = mat.failedGoals.length + mat.failedFunds.length;
+    const createdTotal = Object.keys(mat.createdGoalIds).length + Object.keys(mat.createdFundIds).length;
+    const existedTotal = mat.existedGoals + mat.existedFunds;
+    const needsRetry = failedTotal > 0 || !bookkeepingOk;
+    if (needsRetry) {
+      wiMaterializePending = { scenarioId: scenarioId, draftEntities: draftEntities, doneGoals: allDoneGoals, doneFunds: allDoneFunds };
+      try { localStorage.setItem(WI_PENDING_MATERIALIZE_KEY, JSON.stringify(wiMaterializePending)); } catch (e) {}
+      wiMaterializeShowBanner({ createdTotal: createdTotal, existedTotal: existedTotal, failedTotal: failedTotal, bookkeepingOk: bookkeepingOk });
+    } else {
+      wiMaterializePending = null;
+      try { localStorage.removeItem(WI_PENDING_MATERIALIZE_KEY); } catch (e) {}
+    }
+    return { createdTotal: createdTotal, existedTotal: existedTotal, failedTotal: failedTotal, bookkeepingOk: bookkeepingOk, needsRetry: needsRetry };
+  }
+  async function wiMaterializeRetry() {
+    if (!wiMaterializePending) return;
+    const p = wiMaterializePending;
+    const r = await wiMaterializeAndRecord(p.draftEntities, p.scenarioId, p.doneGoals, p.doneFunds);
+    if (!r.needsRetry) showToast('All planned items created');
+    glLoad(); sfLoad();
+  }
+  function wiMaterializeDismiss() {
+    wiMaterializeHideBanner();
+    showToast('Dismissed — a created item stays either way; if it wasn\'t recorded, revert simply won\'t touch it (nothing is lost) — Retry any time from here');
+  }
+  { const b = $('wi_materialize_retry_btn'); if (b) b.onclick = wiMaterializeRetry; }
+  { const b = $('wi_materialize_dismiss_btn'); if (b) b.onclick = wiMaterializeDismiss; }
+
   // ---- ACTIVATE: install the plan baseline for months >= M, then copy the twin -> the live keys ----
   async function wiActivate() {
     if (!WhatIf.active || !WhatIf.session) return;
     const actMonth = (WhatIf.session.meta && WhatIf.session.meta.activationMonth) || scDefaultMonth();
     const spec = wiBuildSpecFromLive(actMonth);
     if (!spec) { showToast('Nothing to activate yet — let the Tax tab calculate once'); return; }
-    if (!confirm('Activate “' + ((WhatIf.session.meta && WhatIf.session.meta.name) || 'this what-if') + '” from ' + actMonth + '?\n\nThis writes your plan baseline for ' + scMonthsSpan(actMonth) + '. Earlier months are untouched, your current plans for those months are snapshotted, and one click reverts everything.')) return;
+    const draftGoalsN = (spec.draftEntities && spec.draftEntities.goals && spec.draftEntities.goals.length) || 0;
+    const draftFundsN = (spec.draftEntities && spec.draftEntities.funds && spec.draftEntities.funds.length) || 0;
+    const draftSuffix = (draftGoalsN || draftFundsN)
+      ? ('\n\n…and creates ' + [
+          draftGoalsN ? (draftGoalsN + ' planned goal' + (draftGoalsN === 1 ? '' : 's')) : null,
+          draftFundsN ? (draftFundsN + ' planned fund' + (draftFundsN === 1 ? '' : 's')) : null,
+        ].filter(Boolean).join(' + ') + '.')
+      : '';
+    if (!confirm('Activate “' + ((WhatIf.session.meta && WhatIf.session.meta.name) || 'this what-if') + '” from ' + actMonth + '?\n\nThis writes your plan baseline for ' + scMonthsSpan(actMonth) + '. Earlier months are untouched, your current plans for those months are snapshotted, and one click reverts everything.' + draftSuffix)) return;
     let draftId = WhatIf.session.meta.draftId;
     if (!draftId) {
       const created = await wiSaveDraft(true);
@@ -8065,6 +8730,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         clientState: (WhatIf.session.meta && WhatIf.session.meta.clientState) || {},
       });
       const sm = out.summary || {};
+      // SHOULD-FIX (code review 2026-07-28): snapshot the pending-materialization record BEFORE
+      // any teardown below clears WI_SESSION_KEY — a reload between here and the materialize
+      // calls a few lines down must not silently lose the planned items (wiCheckPendingMaterializeOnBoot,
+      // top-level, reconciles this on next boot). wiMaterializeAndRecord keeps this key in sync
+      // as it progresses; this is only the FIRST write, covering the gap before it ever runs.
+      if (draftGoalsN || draftFundsN) {
+        try {
+          localStorage.setItem(WI_PENDING_MATERIALIZE_KEY,
+            JSON.stringify({ scenarioId: draftId, draftEntities: spec.draftEntities, doneGoals: {}, doneFunds: {} }));
+        } catch (e) {}
+      }
       // Copy twin -> live: the DOM already reflects exactly this data (it was edited in place),
       // so this just makes the real keys match what the user has been looking at.
       WI_SCOPED_KEYS.forEach(k => {
@@ -8075,11 +8751,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { localStorage.removeItem(WI_SESSION_KEY); } catch (e) {}
       wiReleaseLock();
       wiStopHeartbeat();
+      // TODO-245: these fields are never part of WI_SCOPED_KEYS/spec (session-only, never
+      // persisted), so Activate never carries a what-if edit to them into the real plan — revert
+      // to the pre-enter snapshot, same as the other true-exit paths, before WhatIf.session goes away.
+      wiRestoreSessionOnlyFields();
       WhatIf.active = false; WhatIf.session = null; WhatIf.frozen = null;
       wiHideBanner();
       showToast('Activated — ' + (sm.monthsWritten || 0) + ' month plans installed (' + (sm.monthsOverwritten || 0) + ' replaced)');
       WhatIf.suppress = true;
       try { await recompute(); } finally { WhatIf.suppress = false; }
+      // TODO-243 Phase 2 §3.5 step 4: materialize draft goals/funds — strictly AFTER full
+      // teardown (WhatIf.active is already false, twin→live already copied, session already
+      // gone, the settling recompute above already ran) so these POSTs are ordinary LIVE-mode
+      // scoped writes: never blocked, never reflecting a still-active sandbox (M4). `spec` is a
+      // local var captured before any of that teardown, so spec.draftEntities is unaffected by
+      // WhatIf.session having just been nulled out above.
+      if (draftGoalsN || draftFundsN) {
+        const r = await wiMaterializeAndRecord(spec.draftEntities, draftId, {}, {});
+        if (!r.needsRetry && (r.createdTotal || r.existedTotal)) {
+          showToast(r.createdTotal + ' planned item' + (r.createdTotal === 1 ? '' : 's') + ' created' + (r.existedTotal ? ' · ' + r.existedTotal + ' already existed' : ''));
+        }
+      }
+      // Unconditional (not just when there were drafts): the cards also need to drop their
+      // "locked in What-If" chrome now that WhatIf.active is false again.
+      glLoad(); sfLoad();
       // S1.2 Mechanism 1 (§6.1) — DEFERRED, load-bearing placement. The twin→live copy loop above
       // (WI_SCOPED_KEYS.forEach) runs while WhatIf.active is still true, so a mark placed INSIDE
       // that loop would be swallowed by markProfileDirty()'s own self-guard. This call sits here,
@@ -8245,6 +8940,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.session.meta.draftId = opts.detach ? null : s.id;
     WhatIf.session.meta.name = displayName;
     if (spec.activationMonth) WhatIf.session.meta.activationMonth = spec.activationMonth;
+    // TODO-243 Phase 2 §3.7: legacy/v1 drafts (no draftEntities) degrade to an empty set —
+    // never crash, exactly like the sessionLive legacy path just below.
+    WhatIf.session.draftEntities = (spec.draftEntities && typeof spec.draftEntities === 'object')
+      ? spec.draftEntities : { goals: [], funds: [] };
     const nm = $('wi_banner_name'); if (nm) nm.textContent = displayName;
     // payloadVersion 2 drafts stash the WHOLE session.live blob (F1) at Save-draft time — replay
     // it verbatim so every scoped surface (Tax, budget, tabs, maxout, FIRE, active tab) shows
@@ -8263,6 +8962,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (spec.comp) scApplyComp(spec, null);   // legacy draft (no sessionLive) — comp fields only
       showToast(opts.toastLegacy || ('Loaded “' + displayName + '” into What-If Mode — legacy draft: comp applied; adjust the budget as needed'));
     }
+    try { glRender(); sfRender(); } catch (e) {}   // reflect the loaded draftEntities immediately if the Budget tab is already open
   }
   async function wiLoadDraftIntoMode(id) { return wiLoadScenarioIntoMode(id, {}); }
   async function wiPickerResumeParked(id) {
@@ -8362,6 +9062,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   { const b = $('wi_activate_btn'); if (b) b.onclick = wiActivate; }
   { const b = $('wi_resume_btn'); if (b) b.onclick = wiResume; }
 
+  // ---- Scenario-details drawer wiring (TODO-221 P1b) ----
+  { const b = $('wi_details_btn'); if (b) b.onclick = wiDetailsToggle; }
+  { const b = $('wi_details_rename_btn'); if (b) b.onclick = wiDetailsRenameCommit; }
+  { const inp = $('wi_details_name_input'); if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); wiDetailsRenameCommit(); } }); }
+  { const inp = $('wi_details_month_input'); if (inp) inp.addEventListener('change', wiDetailsMonthChange); }
+  // Delta-chip jump-to-tab (TODO-221 P1b): ONE delegated listener on the static banner element,
+  // not re-attached on every wiUpdateBannerDeltas() re-render (that function only rewrites
+  // innerHTML). Mirrors the existing [data-go] pattern used by #ov_out's Overview quick-links.
+  { const b = $('wi_banner'); if (b) b.addEventListener('click', e => {
+      const c = e.target.closest('.wi-delta-chip[data-go]'); if (!c) return;
+      const tb = document.querySelector('.tab-btn[data-tab="' + c.dataset.go + '"]'); if (tb) tb.click();
+    }); }
+
   // ---- Test/debug surface (IR-8) ----
   // These functions live inside this IIFE and are otherwise invisible outside it; expose the
   // real transition entry points (not simulators) so external drivers/console can exercise the
@@ -8382,6 +9095,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.wiLoadDraftIntoMode = wiLoadDraftIntoMode;   // driver-facing: "load/resume a saved draft into mode"
   window.wiLoadDraft = wiLoadDraftIntoMode;           // shorter alias, in case the driver probes this name
   window.wiRepopulateDom = wiRepopulateDom;           // exposed for direct DOM-repopulation assertions
+  // TODO-221 P1b (details drawer) test/debug surface — same IR-8 convention as above.
+  window.wiDetailsOpen = wiDetailsOpen;
+  window.wiDetailsClose = wiDetailsClose;
+  window.wiDetailsRenameCommit = wiDetailsRenameCommit;
+  window.wiDetailsMonthChange = wiDetailsMonthChange;
+  window.wiDetailsRefreshCatchup = wiDetailsRefreshCatchup;
+  window.wiUpdateBannerDeltas = wiUpdateBannerDeltas;
   // TODO-243 Feature 2 (picker) test/debug surface — same IR-8 convention as above.
   window.wiPickerOpen = wiPickerOpen;
   window.wiPickerClose = wiPickerClose;
@@ -8389,6 +9109,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.wiRefreshDraftsList = wiRefreshDraftsList;
   window.wiParkUpsert = wiParkUpsert;                 // driver-facing: exercise the parked-slot upsert directly
   window.WI_PARKED_NAME = WI_PARKED_NAME;
+  // TODO-243 Phase 2 (draft goals/funds) test/debug surface — same IR-8 convention as above.
+  window.glLoad = glLoad; window.glRender = glRender; window.glAdd = glAdd;
+  window.sfLoad = sfLoad; window.sfRender = sfRender; window.sfAdd = sfAdd;
+  window.wiDraftGoals = wiDraftGoals; window.wiDraftFunds = wiDraftFunds;
+  window.wiDraftRemoveGoal = wiDraftRemoveGoal; window.wiDraftRemoveFund = wiDraftRemoveFund;
+  window.wiPlanEntityGuard = wiPlanEntityGuard;
+  window.wiMaterializeDraftEntities = wiMaterializeDraftEntities;
+  window.wiMaterializeAndRecord = wiMaterializeAndRecord;   // code-review fix: create+record wrapper, also used by boot-reconcile
+  window.wiMaterializeRetry = wiMaterializeRetry;
+  window.scRevert = scRevert;
+  window.wiRevertDraftEntities = wiRevertDraftEntities;
 
   const bgStratEl = $('bgb_strategy');
   if (bgStratEl) { bgStratEl.value = bgb.strategy; bgStratEl.addEventListener('change', () => { bgb.strategy = bgStratEl.value; saveBgb(); bgbTotals(); }); }
@@ -9206,6 +9937,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = any ? h : '<div class="mini muted">Your budget has no line items yet.</div>';
   }
 
+  // Sinking funds Phase 2 (TODO-238, DEC-034 §5, docs/sinking-funds-design.md "Phase 2"
+  // section): a small legibility line under the "Am I on track?" verdict explaining WHY
+  // the folded total differs from what the user might expect from raw spending — the
+  // server already netted each fund's `fundedDraw` out of its bucket before this data
+  // arrived (tracking_store.month_actuals), so no math happens here, only presentation.
+  // Judgment call (flagged): shows BOTH halves — money set aside into funds this month
+  // (contributions, which still count normally against the plan, exactly like any other
+  // budgeted line) AND the pre-funded amount excluded from the total (the actual fold) —
+  // rather than only one, so a user watching the headline move can trace both directions.
+  function sfExcusalNote(fx) {
+    if (!fx || !((fx.contributions || 0) > 0.005 || (fx.total || 0) > 0.005)) return '';
+    const parts = [];
+    if (fx.contributions > 0.005) parts.push('+' + acAmt(fx.contributions) + ' set aside in funds');
+    if (fx.total > 0.005) parts.push(acAmt(fx.total) + ' pre-funded from reserves — excluded above');
+    return '<div class="mini muted" style="margin-top:4px">' + parts.join(' · ') + '</div>';
+  }
+
   function acRenderPVA(data) {
     const el = $('ac_pva'); if (!el) return;
     if (data.needsPlan) {
@@ -9214,13 +9962,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Using Object.entries(a.buckets) rather than local TRACK_BUCKETS ensures unknown server
       // buckets (cross-device or post-delete) are included and the total isn't understated.
       const spent = Object.entries(a.buckets).reduce((s, [k, v]) => k === 'investment' ? s : s + v, 0);
-      el.innerHTML = '<div class="note-box">No plan baseline for ' + acMonthLabel(ACT.month) + ' yet. Logged so far: <b>' + acAmt(a.income || 0) + '</b> in, <b>' + acAmt(spent) + '</b> out.<br><button class="seed-btn" id="ac_pva_sync" type="button" style="margin-top:8px">↻ Sync plan from Budget</button></div>';
+      el.innerHTML = '<div class="note-box">No plan baseline for ' + acMonthLabel(ACT.month) + ' yet. Logged so far: <b>' + acAmt(a.income || 0) + '</b> in, <b>' + acAmt(spent) + '</b> out.<br><button class="seed-btn" id="ac_pva_sync" type="button" style="margin-top:8px">↻ Sync plan from Budget</button></div>'
+        + sfExcusalNote(data.fundExcusal);
       const b = $('ac_pva_sync'); if (b) b.onclick = acSyncPlan;
       return;
     }
     const c = data.comparison, sr = c.savingsRate;
     const ok = sr.actual >= sr.planned * 0.95;
-    let h = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (ok ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Invested ' + acAmt(c.buckets.investment.actual) + ' of ' + acAmt(c.buckets.investment.planned) + ' — saved ' + (sr.actual * 100).toFixed(0) + '% vs ' + (sr.planned * 100).toFixed(0) + '% plan</div><div class="s">' + acMonthLabel(ACT.month) + (data.planStatus === 'draft' ? ' · draft plan' : '') + '</div></div></div>';
+    let h = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (ok ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Invested ' + acAmt(c.buckets.investment.actual) + ' of ' + acAmt(c.buckets.investment.planned) + ' — saved ' + (sr.actual * 100).toFixed(0) + '% vs ' + (sr.planned * 100).toFixed(0) + '% plan</div><div class="s">' + acMonthLabel(ACT.month) + (data.planStatus === 'draft' ? ' · draft plan' : '') + '</div></div></div>'
+      + sfExcusalNote(data.fundExcusal);
     // Compute each bucket's partner total from local txns (same apportionment logic as acActualByCat).
     const partnerByBucket = {};
     (ACT.txns || []).forEach(t => {
@@ -9257,7 +10007,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const dcls = k === 'investment' ? (yourVariance >= 0 ? 'good-text' : 'bad-text') : (yourVariance <= 0 ? 'good-text' : 'bad-text');
       const pct = b.planned > 0 ? (yourBucketActual / b.planned * 100).toFixed(0) + '%' : (yourBucketActual > 0 ? 'no budget' : '—');
       const partnerNote = bucketPartner > 0 ? ' <span class="muted" style="font-size:var(--fs-2xs)">· partner covers ' + acAmt(bucketPartner) + '</span>' : '';
-      const dotSpan = bucketPartner > 0 ? '<span style="display:block;height:8px;width:' + partnerW + '%;background:repeating-linear-gradient(45deg,rgba(138,146,166,0.55) 0,rgba(138,146,166,0.55) 2px,transparent 2px,transparent 7px)"></span>' : '';
+      // H5 (docs/ui-redesign.md §H): color-mix(var(--muted)) instead of the hardcoded rgba
+      // equivalent so the partner-contribution hatch re-themes in shiro instead of staying a
+      // fixed dark-slate gray on light surfaces.
+      const dotSpan = bucketPartner > 0 ? '<span style="display:block;height:8px;width:' + partnerW + '%;background:repeating-linear-gradient(45deg,color-mix(in srgb, var(--muted) 55%, transparent) 0,color-mix(in srgb, var(--muted) 55%, transparent) 2px,transparent 2px,transparent 7px)"></span>' : '';
       h += '<div style="margin:6px 0">'
         + '<div style="display:flex;justify-content:space-between;font-size:var(--fs-sm);margin-bottom:2px"><span><span style="color:' + kc + '">●</span> ' + klabel + '</span><span>' + acAmt(yourBucketActual) + partnerNote + ' / ' + acAmt(b.planned) + ' · ' + pct + ' · <span class="' + dcls + '">' + (yourVariance >= 0 ? '+' : '') + acAmt(yourVariance) + '</span></span></div>'
         + '<span style="display:flex;background:var(--chip);border-radius:4px;overflow:hidden;height:8px"><span style="display:block;height:8px;width:' + solidW + '%;background:' + fill + '"></span>' + dotSpan + '</span>'
@@ -9546,8 +10299,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---- Sinking funds: the fund lens (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md
   // §6.2) — per-fund reserve trajectory + linked-transaction history, mirroring the card rollup's
-  // structure verbatim (same .ac-cards-* classes). Purely additive: never touches acRenderPVA /
-  // the plan-vs-actual headline math above (Phase 2's job, not this pass's). ----
+  // structure verbatim (same .ac-cards-* classes). This table itself is untouched by Phase 2 (the
+  // headline fold, DEC-034 §5) — Phase 2 lives entirely server-side (tracking_store.month_actuals)
+  // + a small breakdown line in acRenderPVA/sfExcusalNote above; the per-fund Funded/Unfunded
+  // columns here already showed this same math since Phase 1. ----
   function acRenderFunds(data) {
     const el = $('ac_funds'); if (!el) return;
     if (data == null) {   // fetch failed — don't claim "no funds" when the server is down

@@ -2092,6 +2092,59 @@ def delete_plan(conn, user_id, month) -> int:
 
 # ---------- the aggregate the dashboard endpoint consumes ----------
 
+def _fund_draw_bucket_cents(conn, user_id, fund_id, month: str) -> dict:
+    """{bucket_or_None: cents} for the RAW amount of this fund's `role='draw'` txns
+    actually posted in `month` — grouped by the DRAW TXN'S OWN `bucket` column, not the
+    fund's configured bucket. Summed the same way `fund_monthly_flows` sums `drawCents`
+    (plain `SUM(t.amount_cents)`, no refund sign-flip), so these per-bucket weights
+    always sum to EXACTLY that same month's `drawCents` total — the invariant the
+    proportional split below relies on. `ORDER BY t.bucket` makes iteration order (and
+    therefore any largest-remainder tie-break) deterministic."""
+    rows = conn.execute(
+        "SELECT t.bucket AS bucket, SUM(t.amount_cents) AS c "
+        "FROM fund_txn ft JOIN txn t ON t.id = ft.txn_id "
+        "WHERE ft.fund_id = ? AND ft.role = 'draw' AND t.user_id = ? "
+        "AND substr(t.posted_on, 1, 7) = ? GROUP BY t.bucket ORDER BY t.bucket",
+        (fund_id, user_id, month)).fetchall()
+    return {r["bucket"]: r["c"] for r in rows}
+
+
+def _allocate_cents_by_weight(total_c: int, weights: dict) -> dict:
+    """Split `total_c` integer cents across `weights` (key -> a non-negative raw cents
+    weight) proportionally, CENT-EXACT via the largest-remainder method: each key's base
+    share is `floor(total_c * weight / sum(weights))`, then the `total_c - Σ(base)`
+    leftover cents (always < len(weights)) go one each to the keys with the largest
+    fractional remainder. Two structural guarantees this relies on elsewhere (proved by
+    the caller's own invariant `total_c <= sum(weights)`):
+      1. Output sums to EXACTLY `total_c` (never a stray rounding cent lost or invented).
+      2. Every key's allocated share is `<= weights[key]` — a key can never be allocated
+         MORE than its own raw weight, because `total_c/sum(weights) <= 1` scales every
+         share down (or leaves it equal only when `total_c == sum(weights)`, the
+         fully-funded case, where remainders are all zero and no leftover cents exist to
+         push any share past its own weight).
+    (Same largest-remainder apportionment family as the Next-Dollar election-aware
+    waterfall's trad/Roth split in investing.py -- that one streams a cumulative delta
+    across steps, this one splits a single total across buckets in one pass; both exist
+    to guarantee a whole-cents split reconciles EXACTLY to its total.)"""
+    weight_sum = sum(weights.values())
+    if weight_sum <= 0 or total_c <= 0:
+        return {k: 0 for k in weights}
+    shares: dict = {}
+    remainders: list = []
+    allocated = 0
+    for k, w in weights.items():
+        exact = total_c * w / weight_sum
+        base = int(exact)                     # floor (weights/total_c are both >= 0)
+        shares[k] = base
+        allocated += base
+        remainders.append((exact - base, k))
+    leftover = total_c - allocated
+    remainders.sort(key=lambda pair: pair[0], reverse=True)   # largest fractional remainder first
+    for i in range(leftover):
+        shares[remainders[i][1]] += 1
+    return shares
+
+
 def month_actuals(conn, user_id, month: str) -> dict:
     """Fetch the month's transactions + ALL snapshots (scoped to `user_id`) and hand
     them to the pure aggregator. (Snapshots span history because the net-worth overlay
@@ -2114,10 +2167,100 @@ def month_actuals(conn, user_id, month: str) -> dict:
                   s.bucket, t.is_transfer
              FROM txn_split s JOIN txn t ON t.id = s.txn_id WHERE t.posted_on LIKE ? AND t.user_id = ?""",
         (like, user_id, like, user_id)).fetchall()]
+
+    # ---- Sinking funds Phase 2 fold (TODO-238, DEC-034 §5, docs/sinking-funds-design.md
+    # §amendment-following "Phase 2" section) ----
+    # A contribution is ALREADY counted as spend in its fund's bucket the moment it's
+    # logged (it's an ordinary out-txn like any other). Drawing the reserve back down to
+    # pay the big expense would double-count that same money as spend a second time unless
+    # excused. The excusal is expressed EXACTLY like DEC-011 #2's refund sign-flip: one or
+    # more synthetic negative out-lines, sized in total to that fund's `fundedDraw` for
+    # THIS month only (never the whole reserve). `tracking.fund_rollup`'s per-month floor
+    # already guarantees an `unfundedDraw` is never retroactively excused by a later
+    # contribution (§5.1 invariant #4), so folding month-by-month here is exactly correct
+    # — no separate clamping needed at this layer.
+    #
+    # This is the ONLY place the fold happens: `tracking.aggregate_actuals` /
+    # `tracking.plan_vs_actual` never see a fund and stay byte-unchanged (DEC-009 #1). A
+    # user with zero funds gets a `txn_rows` list identical to pre-Phase-2 output — the
+    # loop below simply never appends anything — so the headline is byte-identical to
+    # today's numbers by construction (§5.1 invariant #3), not by a special case.
+    #
+    # SHOULD-FIX from code review (2026-07-28): the offset now targets the bucket(s) of
+    # the fund's ACTUAL `role='draw'` txns THIS month (`_fund_draw_bucket_cents`), split
+    # proportionally by `_allocate_cents_by_weight` when a month's draws span more than
+    # one bucket — NOT `fund["bucket"]` (the fund's merely-configured "home" bucket, kept
+    # below only as descriptive metadata on `byFund`). The prior draft targeted the
+    # configured bucket unconditionally, which could drive an unrelated bucket negative
+    # (a fund configured for "need" but drawn against "travel" would wrongly credit
+    # "need"), or even the SAME bucket negative when refunds there had nothing to do with
+    # the fund's own draws. Attributing to the draw's own bucket makes the offset
+    # STRUCTURALLY bounded: `_allocate_cents_by_weight` never assigns a bucket more than
+    # its own share of the fund's draws THIS month (proof in that function's docstring),
+    # and `sum(that bucket's linked draws) <= that bucket's raw spend` (a draw txn is
+    # itself one of the addends aggregate_actuals sums into the bucket) — so the offset
+    # can never exceed, and thus never drive negative, the portion of that bucket's total
+    # actually contributed by THIS fund's own draws. It does NOT protect against a large
+    # UNRELATED refund in that same bucket outweighing everything else there (a pre-
+    # existing, fund-independent DEC-011 property: any bucket can go negative from
+    # refunds exceeding its charges) — that is a different, already-accepted behavior,
+    # not a new failure mode introduced by funds.
+    #
+    # NIT 5 (cheap guard, verified rather than special-cased): a fund with `bucket=None`
+    # cannot spuriously post an offset into "uncategorized" anymore — the offset's bucket
+    # now comes from the DRAW TXN's own `bucket` column via `_fund_draw_bucket_cents`,
+    # never from `fund["bucket"]`. It lands in "uncategorized" (bucket key `None`) if and
+    # ONLY if that is genuinely where the draw's own spend was categorized — symmetric
+    # with how that same spend was counted in the first place, so no special case needed.
+    #
+    # include_archived=True: an archived fund's PAST funded draws must stay excused (§4.3
+    # "archive... preserves history and past excusals") — archiving only stops NEW flows,
+    # it must never silently re-blow a month that already relied on the fold.
+    fund_excusal_c = 0
+    fund_contrib_c = 0
+    fund_breakdown: list[dict] = []
+    for f in list_funds(conn, user_id, include_archived=True):
+        flows = fund_monthly_flows(conn, user_id, f["id"], upto_month=month)
+        if month not in flows:
+            continue                                  # no contribute/draw activity this month
+        contribution_c = int(flows[month].get("contributeCents", 0))
+        trajectory = tracking.fund_rollup(flows, upto_month=month)["trajectory"]
+        # `month` is present in `flows` and `upto_month=month` bounds the fold, so the
+        # trajectory for `month` always exists — searched explicitly (not `[-1]`) so this
+        # stays correct even if fund_rollup's internal ordering ever changes.
+        entry = next((row for row in trajectory if row["month"] == month), None)
+        funded_draw_c = round(entry["fundedDraw"] * 100) if entry else 0
+        if contribution_c <= 0 and funded_draw_c <= 0:
+            continue
+        if funded_draw_c > 0:
+            draw_by_bucket_c = _fund_draw_bucket_cents(conn, user_id, f["id"], month)
+            for bucket, offset_c in _allocate_cents_by_weight(funded_draw_c, draw_by_bucket_c).items():
+                if offset_c <= 0:
+                    continue
+                txn_rows.append({
+                    "account_id": None, "posted_on": f"{month}-01", "direction": "out",
+                    "amount_cents": -offset_c, "bucket": bucket, "is_transfer": 0,
+                })
+            fund_excusal_c += funded_draw_c
+        fund_contrib_c += contribution_c
+        fund_breakdown.append({
+            "fundId": f["id"], "name": f["name"], "bucket": f["bucket"],  # descriptive only — see above
+            "contribution": round(contribution_c / 100.0, 2),
+            "fundedDraw": round(funded_draw_c / 100.0, 2),
+        })
+
     snap_rows = [dict(r) for r in conn.execute(
         "SELECT account_id, as_of, balance_cents FROM balance_snapshot WHERE user_id = ?",
         (user_id,)).fetchall()]
-    return tracking.aggregate_actuals(txn_rows, snap_rows, account_liability_map(conn, user_id), month)
+    result = tracking.aggregate_actuals(txn_rows, snap_rows, account_liability_map(conn, user_id), month)
+    # Additive breakdown for the client's "Am I on track?" annotation — rides ALONGSIDE
+    # aggregate_actuals' own (untouched) output dict, never inside it.
+    result["fundExcusal"] = {
+        "total": round(fund_excusal_c / 100.0, 2),
+        "contributions": round(fund_contrib_c / 100.0, 2),
+        "byFund": fund_breakdown,
+    }
+    return result
 
 
 def suggestions(conn, user_id) -> dict:
@@ -2940,8 +3083,55 @@ def revert_scenario(conn, user_id, scenario_id) -> dict | None:
     except Exception:
         conn.rollback()
         raise
+    # materializedIds is read from `revert` (the pre-wipe local var) BEFORE the UPDATE
+    # above set body["revert"] = None -- handed back so the client can act on the exact
+    # ids in the SAME round trip that confirms the plan-baseline revert committed,
+    # instead of a separate GET that would race a concurrent second write.
     return {"scenario": get_scenario(conn, user_id, scenario_id), "restored": restored,
-            "clientState": revert.get("clientState")}
+            "clientState": revert.get("clientState"), "materializedIds": revert.get("materializedIds")}
+
+
+def record_scenario_materialization(conn, user_id, scenario_id, goal_ids: list[int],
+                                    fund_ids: list[int]) -> dict | None:
+    """TODO-243 Phase 2 code-review BLOCKER fix (2026-07-28): records EXACTLY which real
+    goal/fund rows a What-If activation materialized, so revert acts ONLY on these ids —
+    never re-derives them by name. Name-matching was confirmed catastrophic in review: a
+    pre-existing real "Vacation" goal sharing a draft's name got archived/deleted on
+    revert even though materialization correctly SKIPPED creating it (idempotency), and a
+    second scenario's revert could hard-delete a fund a completely different, earlier
+    scenario had materialized. Recording the real ids at materialize-time makes the
+    colliding pre-existing row (or another scenario's row) structurally unreachable by
+    revert — it was never IN the recorded set to begin with.
+
+    Allowed ONLY while `status == 'active'` — the one window materialization itself runs
+    in (strictly after activate, §3.5 step 4) — and deliberately bypasses
+    update_scenario's active-guard: that guard protects `spec` (the plan-baseline
+    contract callers must not silently drift out from under an installed plan); this
+    touches only `revert` bookkeeping, scoped to the CURRENT activation, which is exactly
+    what must stay writable while active (activate_scenario itself writes `revert` at the
+    same status). Idempotent: REPLACES the recorded set (not append/union) — a Retry
+    after a partial-materialization failure (§3.6) posts the full up-to-date id list each
+    time, so retrying twice is a no-op, never a duplicate-record bug. Returns None for an
+    unknown id (or one belonging to another user — scoped lookup, never leaks existence)."""
+    r = conn.execute(
+        "SELECT * FROM scenario WHERE id = ? AND user_id = ?", (scenario_id, user_id)).fetchone()
+    if not r:
+        return None
+    if r["status"] != "active":
+        raise ScenarioConflictError("scenario is not active; nothing to record materialization for")
+    if not isinstance(goal_ids, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in goal_ids):
+        raise ValueError("goalIds must be a list of integers")
+    if not isinstance(fund_ids, list) or not all(isinstance(x, int) and not isinstance(x, bool) for x in fund_ids):
+        raise ValueError("fundIds must be a list of integers")
+    body = json.loads(r["payload_json"])
+    revert = body.get("revert") or {}
+    revert["materializedIds"] = {"goals": goal_ids, "funds": fund_ids}
+    body["revert"] = revert
+    conn.execute(
+        "UPDATE scenario SET payload_json = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+        (json.dumps(body), _now(), scenario_id, user_id))
+    conn.commit()
+    return get_scenario(conn, user_id, scenario_id)
 
 
 # ---------- backup / restore ----------

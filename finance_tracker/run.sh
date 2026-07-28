@@ -19,6 +19,16 @@ fi
 # the explicit export just makes the contract visible in logs/env.
 export ACTUALS_DB_PATH=/data/actuals.db
 
+# SEV-003 (2026-07-28): structurally disable resolve_user()'s dev-identity override
+# (FINANCE_DEV_USER env / ?user= query param / fps_dev_user cookie) in this production
+# image. Previously the override was only BEHAVIORALLY inert here (a trusted
+# X-Remote-User-Id header rides every real ingress request and always wins) -- never
+# structurally impossible. This flag makes it structurally impossible: server.py skips
+# the entire dev-override branch outright when set. The sandbox launcher (repo-root
+# run.sh / a bare `python3 server.py`) never sets this, so DEC-022 sandbox parity
+# (simulating any household member locally via ?user=) is unaffected.
+export FINANCE_DISABLE_DEV_OVERRIDE=1
+
 cd /app
 bashio::log.info "Starting Finance Tracker on :8099 (ingress-only)"
 # --no-proxy-headers (SEV-001 hardening): uvicorn 0.51.0 defaults proxy_headers=True,

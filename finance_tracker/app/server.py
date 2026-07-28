@@ -146,15 +146,42 @@ def resolve_user(request: Request | None) -> dict:
          ``" abc "`` and ``"abc"`` are always the same id -- never two distinct
          provisioned members.
       2. DEV OVERRIDE (DEC-022 sandbox parity) -- the ``FINANCE_DEV_USER`` env var,
-         else the ``?user=`` query param (env wins when both are set -- an arbitrary
-         but stable, documented precedence). INERT whenever step 1 found a trusted
-         header, so a sandbox/dev artifact can never ride along with, or override, a
-         real ingress session.
-      3. OWNER FALLBACK (DEC-031 §3) -- no trusted header AND no dev override. There
-         is NO unauthenticated profile picker: this always resolves to the concrete
-         household owner, lazily provisioning the canonical sentinel owner row if the
-         `users` table is still empty (first boot, sandbox, or a pre-header HA Core
-         version). This closes the DEC-026 fallback vulnerability by design.
+         else the ``?user=`` query param, else the sticky ``fps_dev_user`` cookie (env
+         wins when more than one is set -- an arbitrary but stable, documented
+         precedence). INERT whenever step 1 found a trusted header, so a sandbox/dev
+         artifact can never ride along with, or override, a real ingress session.
+         STRUCTURALLY DISABLED (SEV-003 closure, 2026-07-28) whenever the
+         ``FINANCE_DISABLE_DEV_OVERRIDE=1`` env flag is set: the production add-on
+         image (addon/run.sh) sets this flag, so ALL THREE channels -- env var, query
+         param, AND cookie -- are skipped entirely, unconditionally, before any of them
+         is even read. This is a stronger guarantee than "inert under a trusted
+         header": it holds even for a request that somehow reaches this resolver with
+         no header at all (e.g. a bug or misconfiguration upstream), because the
+         branch that would consult FINANCE_DEV_USER/``?user=``/the cookie never
+         executes in that build. The sandbox entry points (repo-root ``run.sh``, or a
+         bare ``python3 server.py``) never set this flag -- DEC-022 sandbox parity
+         (simulating any household member locally) depends on the override working
+         there, unchanged.
+      3. OWNER FALLBACK (DEC-031 §3) -- no trusted header AND no dev override (either
+         because none was supplied, or because step 2 is structurally disabled).
+         There is NO unauthenticated profile picker: this always resolves to the
+         concrete household owner, lazily provisioning the canonical sentinel owner
+         row if the `users` table is still empty (first boot, sandbox, or a
+         pre-header HA Core version). This closes the DEC-026 fallback vulnerability
+         by design.
+
+    SEV-003 CLOSURE NOTE (2026-07-28): before this flag existed, the dev override was
+    only BEHAVIORALLY inert in production (a trusted header is present on every real
+    ingress request, so step 2 never won against step 1) -- it was never
+    STRUCTURALLY impossible for ``?user=``, the cookie, or ``FINANCE_DEV_USER`` to
+    influence identity resolution in the production image. ``FINANCE_DISABLE_DEV_OVERRIDE``
+    closes that gap: the production Dockerfile/run.sh sets it unconditionally, so the
+    override is removed at the code-path level, not just shadowed by precedence. The
+    ``?user=off`` cookie-CLEARING sentinel in ``GET /`` (below) is deliberately left
+    running even when this flag is set -- it is harmless hygiene (it only ever deletes
+    a stray ``fps_dev_user`` cookie a browser might still be carrying from before the
+    flag was introduced, or from a sandbox/production URL mixup) and this resolver
+    never reads that cookie's value once the flag is set regardless.
 
     ACCOUNT LINKING (identity aliases -- "appoint admins" via linking, N HA accounts ->
     1 profile): once a concrete `seen_id` is determined above (trusted header or dev
@@ -225,11 +252,20 @@ def resolve_user(request: Request | None) -> dict:
     # under ingress the header is present on every request and shadows everything else.
     # "off" is the cookie-clearing sentinel (see GET /), never an identity: the clearing
     # load itself must already resolve as the owner, not provision a member named "off".
-    _dev_param = getattr(request, "query_params", {}).get("user")
-    _dev_cookie = getattr(request, "cookies", {}).get("fps_dev_user") if header_id is None else None
-    if _dev_param == "off":
-        _dev_param, _dev_cookie = None, None
-    seen_id = header_id or os.environ.get("FINANCE_DEV_USER") or _dev_param or _dev_cookie
+    #
+    # SEV-003 (2026-07-28): FINANCE_DISABLE_DEV_OVERRIDE=1 (set by addon/run.sh in the
+    # production image only) structurally skips this ENTIRE branch -- FINANCE_DEV_USER,
+    # ?user=, and the fps_dev_user cookie are never read, unconditionally. See this
+    # function's docstring "SEV-003 CLOSURE NOTE" for the full rationale.
+    if os.environ.get("FINANCE_DISABLE_DEV_OVERRIDE") == "1":
+        _dev_env = _dev_param = _dev_cookie = None
+    else:
+        _dev_env = os.environ.get("FINANCE_DEV_USER")
+        _dev_param = getattr(request, "query_params", {}).get("user")
+        _dev_cookie = getattr(request, "cookies", {}).get("fps_dev_user") if header_id is None else None
+        if _dev_param == "off":
+            _dev_param, _dev_cookie = None, None
+    seen_id = header_id or _dev_env or _dev_param or _dev_cookie
 
     # SEV-S1.1-001: "__owner__" is a reserved sentinel (tracking_store._SENTINEL_OWNER_ID)
     # meaning "the owner's data-scope slot", never a real identity. If a trusted header or
@@ -959,6 +995,16 @@ def index(request: Request) -> HTMLResponse:
     # page's own API calls resolve to the same simulated identity (see resolve_user's
     # precedence comment). Only when NO trusted header is present — under ingress the
     # header rides every request and this whole block is skipped. `?user=off` clears it.
+    #
+    # SEV-003 (2026-07-28): deliberately NOT gated on FINANCE_DISABLE_DEV_OVERRIDE.
+    # In production, `has_trusted_header` is true on every real ingress request, so
+    # this block is already skipped there in practice — same as before the flag
+    # existed. Leaving the set/clear logic itself unconditional means a stray
+    # `fps_dev_user` cookie (e.g. left over from before the flag was introduced) is
+    # still cleared by `?user=off` even in the hypothetical case of a request that
+    # reaches this handler without a trusted header — harmless hygiene, since
+    # resolve_user() ignores the cookie's value entirely once the flag is set
+    # regardless of what this endpoint does with it.
     client = getattr(request, "client", None)
     peer_host = getattr(client, "host", None) if client is not None else None
     has_trusted_header = (
@@ -1425,6 +1471,21 @@ class ScenarioActivateModel(BaseModel):
     plan_months: list[ScenarioPlanMonthModel] = Field(..., alias="planMonths",
                                                       min_length=1, max_length=_SCENARIO_MAX_MONTHS)
     client_state: dict | list | str | None = Field(None, alias="clientState")
+    model_config = {"populate_by_name": True}
+
+
+# TODO-243 Phase 2 code-review BLOCKER fix (2026-07-28): the client-facing bookkeeping
+# endpoint that records EXACTLY which real goal/fund rows a What-If activation
+# materialized, so revert can act on those ids and never re-derive them by name (a name
+# match was confirmed to catch pre-existing/cross-scenario rows it must never touch).
+# Bounded the same way plan_months is above — a what-if's draft-entity count is always a
+# handful, never unbounded input.
+_SCENARIO_MAX_MATERIALIZED_IDS = 500
+
+
+class ScenarioMaterializedModel(BaseModel):
+    goal_ids: list[int] = Field(default_factory=list, alias="goalIds", max_length=_SCENARIO_MAX_MATERIALIZED_IDS)
+    fund_ids: list[int] = Field(default_factory=list, alias="fundIds", max_length=_SCENARIO_MAX_MATERIALIZED_IDS)
     model_config = {"populate_by_name": True}
 
 
@@ -2128,15 +2189,24 @@ def get_plan_endpoint(month: str, request: Request = None) -> dict:
 
 @app.get("/api/tracking/plan-vs-actual")
 def plan_vs_actual_endpoint(month: str, tol: float = 0.05, request: Request = None) -> dict:
+    """Sinking funds Phase 2 (TODO-238, DEC-034 §5): `actuals` (from `month_actuals`) has
+    already had each fund's `fundedDraw` for `month` netted out of its bucket before
+    `tracking.plan_vs_actual` ever runs — the pure comparison function is untouched and
+    never sees a fund; it just receives already-folded bucket totals (DEC-009 #1). The
+    `fundExcusal` key rides alongside `comparison`/`actuals` as an ADDITIVE sibling (never
+    inside either), giving the client the numbers to render the "why doesn't this match
+    the raw total" breakdown line without re-deriving fund math client-side."""
     scope = resolve_user(request)["scopeId"]
     with closing(tracking_store.connect()) as c:
         actuals = tracking_store.month_actuals(c, scope, month)
         plan = tracking_store.get_plan(c, scope, month)
     if plan is None:
         # No baseline yet — return actuals so the UI can still show them and prompt to lock.
-        return {"month": month, "needsPlan": True, "comparison": None, "actuals": actuals}
+        return {"month": month, "needsPlan": True, "comparison": None, "actuals": actuals,
+                "fundExcusal": actuals.get("fundExcusal")}
     comparison = tracking.plan_vs_actual(plan["payload"], actuals, month, tol)
-    return {"month": month, "needsPlan": False, "planStatus": plan["status"], "comparison": comparison}
+    return {"month": month, "needsPlan": False, "planStatus": plan["status"], "comparison": comparison,
+            "fundExcusal": actuals.get("fundExcusal")}
 
 
 # ----- scenarios (TODO-219, DEC-017): what-if comp + catch-up + revertible activation -----
@@ -2218,6 +2288,30 @@ def activate_scenario_endpoint(scenario_id: int, m: ScenarioActivateModel, reque
         try:
             out = tracking_store.activate_scenario(
                 c, scope, scenario_id, m.activation_month, plan_months, client_state=m.client_state)
+        except tracking_store.ScenarioConflictError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    if out is None:
+        raise HTTPException(status_code=404, detail="scenario not found")
+    return out
+
+
+@app.post("/api/tracking/scenarios/{scenario_id}/materialized")
+def materialize_scenario_endpoint(scenario_id: int, m: ScenarioMaterializedModel, request: Request = None) -> dict:
+    """TODO-243 Phase 2 code-review BLOCKER fix: records the EXACT goal/fund ids a What-If
+    activation just materialized (client calls this right after the normal create POSTs,
+    from live mode, per §3.5 step 4). Allowed ONLY while the scenario is ACTIVE — the one
+    window materialization itself runs in. Idempotent: replaces the recorded set, so a
+    Retry after a partial-failure banner (§3.6) re-posting the up-to-date full id list is
+    always safe, never a duplicate-record bug. This is intentionally a narrower write than
+    update_scenario's general PUT (which stays 409-while-active, unchanged) — it only ever
+    touches `revert` bookkeeping, never `spec`."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            out = tracking_store.record_scenario_materialization(
+                c, scope, scenario_id, m.goal_ids, m.fund_ids)
         except tracking_store.ScenarioConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.9
+
+- **"Am I on track?" now understands your sinking funds.** Spending drawn
+  from a fund you saved up for (car repair, annual insurance) no longer
+  reads as overspending — the monthly verdict excuses the funded part,
+  attributed to the bucket where the money was actually spent, with a
+  breakdown line showing what the funds covered.
+- **What-If scenarios grew a details drawer.** Open it from the banner:
+  rename the scenario, set its **activation month** explicitly (previously
+  it silently assumed next month), and see the rest-of-year catch-up pace
+  for your accounts and goals. The banner's delta readouts are now
+  tappable chips that jump straight to the Tax, Budget, or FIRE tab.
+- **Plan goals and funds inside a What-If.** Add "planned" goals and
+  sinking funds while exploring a scenario — they're clearly badged, touch
+  nothing real, and survive parking/resuming. Activating the scenario
+  creates them for real; reverting it cleanly removes exactly what it
+  created (anything you've since touched is archived instead of deleted,
+  and pre-existing items with the same name are never affected).
+- **What-If exits got tidier:** investment figures you typed while
+  exploring no longer linger after a discard, and the two-device sync
+  notice now explains itself in plain language.
+- Polish: the Overview tile is now labeled "Tax-advantaged invest/yr" (it
+  never included regular brokerage investing), the Budget catch-up notice
+  and pop-up shadows follow your theme properly, and the partner-share
+  hatching re-themes in light mode.
+- Under the hood: the developer identity override is now structurally
+  disabled in the production image (it was already inert behind Home
+  Assistant's ingress — now it's impossible).
+
 ## 0.3.8
 
 - **Linked accounts now truly share one view.** Fixed the reported bug where
