@@ -2050,14 +2050,49 @@ window.__role = 'owner';
 // this client-side to detect a shared-browser scopeId mismatch in itc.profile.meta. Defaults to
 // '__owner__' before whoami resolves (and on any resolution failure), matching the fallback above.
 window.__scopeId = '__owner__';
-const __roleReady = (async () => {
+// Fix B (2026-07-27 account-linking divergence diagnosis, Defect B — THE main prod defect):
+// factored out of the boot IIFE below so the SAME identity-resolution logic can be re-run later
+// in the session (see foregroundResyncAction() near runProfileSyncEngine, ~line 4113) without
+// re-implementing it.
+//
+// BLOCKER FIX (2026-07-27 code review): this used to fall through to the conservative
+// owner/'__owner__' default on ANY failure (fetch throw, non-ok, malformed body) — safe as a
+// one-time BOOT default (nothing has loaded yet, there is nothing to lose), but LETHAL if reused
+// mid-session: for an established member with dirty un-flushed edits, one transient whoami
+// network blip would make identityChanged('member','bob',{owner,'__owner__'}) read `true` (a
+// FAILURE indistinguishable from a real "linked to the primary" resolution), flip
+// window.__scopeId to '__owner__', collapse local to 'empty' via the scopeId-mismatch guard
+// (§4.0), and HYDRATE-REPLACE right over the dirty edit — network-blip-triggered silent data
+// loss. The fix: a conservative default that ALSO doubles as a failure sentinel is safe at boot
+// and unsafe mid-session — "resolution failed" must be its own distinct NO-DECISION outcome, not
+// silently folded into "resolved to owner". This now returns `null` for every failure case
+// (network error, non-2xx, unparseable/malformed body); ONLY the one boot call site below still
+// applies the conservative owner/'__owner__' default, exactly like the boot fallback above and
+// server.py's own resolve_user() fallback (DEC-031) — every other caller (foregroundResyncAction)
+// must treat null as "no decision" and change nothing. See there for how.
+async function resolveIdentity() {
+  let r;
   try {
-    const r = await fetch('/api/whoami');
-    if (r.ok) {
-      const d = await r.json();
-      if (d && d.role === 'member') { window.__role = 'member'; window.__scopeId = d.id; }
-    }
-  } catch (e) {}
+    r = await fetch('/api/whoami');
+  } catch (e) { return null; }
+  if (!r.ok) return null;
+  let d;
+  try { d = await r.json(); } catch (e) { return null; }
+  if (!d || typeof d !== 'object') return null;
+  if (d.role === 'member') {
+    if (typeof d.id !== 'string' || !d.id) return null;   // malformed member payload
+    return { role: 'member', scopeId: d.id };
+  }
+  if (d.role === 'owner') return { role: 'owner', scopeId: '__owner__' };
+  return null;   // unrecognized/missing role — malformed body, not a resolution
+}
+const __roleReady = (async () => {
+  // BOOT-ONLY conservative default (see the BLOCKER FIX note above for why this must NOT be
+  // baked into resolveIdentity() itself): nothing has loaded yet, so falling back to owner on a
+  // failed resolution is exactly today's pre-fix behavior and safe here.
+  const ident = (await resolveIdentity()) ?? { role: 'owner', scopeId: '__owner__' };
+  window.__role = ident.role;
+  window.__scopeId = ident.scopeId;
 })();
 
 // ---------- HA theme adapter (DEC-024; shipping default + persistent picker) ----------
@@ -2518,7 +2553,7 @@ function foldCategoriesByCountsAs(categories, rawTotals) {
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
 window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
-  rosterDisplayName, foldCategoriesByCountsAs };
+  rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange };
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -3715,9 +3750,35 @@ async function doProfileFlush(isMigration) {
     res = await fetch('/api/tracking/profile', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blob: blob, baseStateVersion: baseStateVersion, migration: !!isMigration }),
+      body: JSON.stringify({
+        blob: blob, baseStateVersion: baseStateVersion, migration: !!isMigration,
+        // S5 clobber guard (2026-07-27 diagnosis, ESCALATION S5) — server.py's put_profile_endpoint
+        // compares this against what resolve_user() ACTUALLY resolves for this request right now,
+        // before any write. See the 409 handling right below for the client side of the contract.
+        expectedScope: window.__scopeId || null,
+      }),
     });
   } catch (e) { return false; }   // offline — dirty stays true, retried next boot/edit
+  if (res.status === 409) {
+    // NIT fix (2026-07-27 review): a bare `status === 409` check would treat ANY future 409 from
+    // this endpoint as our S5 scope-mismatch contract — gate on the actual response body instead,
+    // so an unrelated 409 (should one ever be added later) falls through to the generic failure
+    // handling below (keeps dirty, no forced re-sync) instead of being silently reinterpreted.
+    let detail = null;
+    try { const body = await res.json(); detail = body && body.detail; } catch (e) {}
+    if (detail === 'scope-mismatch') {
+      // S5 clobber guard tripped: this device's cached window.__scopeId no longer matches the
+      // scope the server resolves for it (e.g. linked to a primary account by another device
+      // mid-session, Defect B) — the write was refused, NOT applied, so nothing was clobbered. Do
+      // not retry as-is (it would just 409 again against the same stale identity); meta.dirty is
+      // untouched (still true, no setProfileMeta below this branch), so the edit stays safe in
+      // localStorage. Force a foreground re-sync (Fix B's action) to re-resolve identity and let
+      // the §4 decision table arbitrate — the dirty local then flushes to the CORRECT scope once
+      // the engine re-evaluates (D1/D2/D3 always flush dirty local, regardless of how it got here).
+      try { await foregroundResyncAction(true); } catch (e) {}
+    }
+    return false;
+  }
   if (!res.ok) return false;
   let out; try { out = await res.json(); } catch (e) { return false; }
   setProfileMeta({
@@ -3748,6 +3809,61 @@ async function doHydrate(server, scopeId) {
     dirty: false, stateVersion: toVersion, scopeId: scopeId, hydrating: null,
     lastSyncedAt: server.updatedAt || new Date().toISOString(),
   });
+  // Fix A (2026-07-27 diagnosis, Defect A): tells every caller a hydrate actually happened, so
+  // runProfileSyncEngineImpl (below) knows when to repaint — this function only ever writes
+  // localStorage; it was never responsible for the DOM itself, and every call site (crash-
+  // recovery, H1, S2) is unconditional once reached, so "returned" and "hydrated" are the same
+  // thing here.
+  return true;
+}
+
+// Fix A (2026-07-27 diagnosis, Defect A): doHydrate() above only ever wrote localStorage — the
+// app's live view converged only on the NEXT reload, because boot already painted the DOM (from
+// STORAGE_KEY/TABS_KEY, ~line 4426/4621) BEFORE this engine even ran (~4641). Every other
+// writeBackupClientKeys caller reloads the whole page (the restore doors, §6.1 Mechanism 2), so
+// they get a free repaint; this in-session hydrate path never did. Reuses the EXACT DOM-
+// repopulation chain What-If mode transitions already rely on — `window.repopulateFromStorage`,
+// the factored-out body of `wiRepopulateDom()` in the feature-tabs IIFE further down this file —
+// rather than duplicating that restoreState/refreshSalaryDisplay/formatUSDFields/restoreTabs/
+// bgb-reload-render-totals/restoreMaxout/FIRE-if-active/invest-if-active sequence here. That IIFE
+// runs at parse time, strictly before DOMContentLoaded fires (see its own "IIFE boot-order" note),
+// so `window.repopulateFromStorage` is always already set by the time any doHydrate() caller below
+// can possibly run (bootProfileSyncEngine is itself only kicked off from inside DOMContentLoaded).
+async function repaintAfterHydrate() {
+  // INVARIANT: runProfileSyncEngineImpl (below) is a hard no-op whenever WhatIf.active ||
+  // WhatIf.suppress (GUARD-0, §4.1) — every doHydrate() call site that leads here is only
+  // reachable once that guard has already passed, so this can never actually fire in-mode today.
+  // Asserted rather than silently swallowed: a future refactor that broke that invariant should
+  // be loud in the console, not quietly repaint over a live What-If session.
+  if (WhatIf.active || WhatIf.suppress) { console.error('repaintAfterHydrate: unexpected in-mode call — GUARD-0 invariant violated'); return; }
+  // SHOULD-FIX (2026-07-27 review): a mid-session hydrate can land while the user has an
+  // uncommitted keystroke sitting in a live field (mid-typing a salary figure, say) —
+  // repopulating the DOM out from under that field would silently discard it. Storage has
+  // ALREADY converged (doHydrate() already wrote it, before this function was even called), so
+  // skipping the repaint this round costs nothing durable: the next repaint opportunity (another
+  // hydrate, a What-If transition, or the user finishing their edit and triggering a fresh
+  // boot/foreground-resync) picks up the correct values then. Deferring until blur (re-arming a
+  // one-shot listener) was the other option considered, but it needs its own attach/detach/
+  // cleanup lifecycle for a window this narrow; skip-this-round is simpler with no user-visible
+  // downside since nothing is ever lost, only delayed.
+  { const active = document.activeElement, tag = active && active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; }
+  // WhatIf.suppress=true for the duration (same M2 boot-suppression convention wiExitDiscardCore/
+  // wiExitKeep/wiResume already use around their own repopulate+recompute pairs): repopulate's
+  // recompute()/render() cascade round-trips through save()/persist() and saveBgb(), which would
+  // otherwise re-derive-and-rewrite itc.v3/budgetBuilder_v1 the instant they hydrate in — breaking
+  // the §8/TM-EXIT "bit-perfect key-for-key hash round trip" guarantee doHydrate() itself just
+  // established, and re-triggering markProfileDirty() to boot, undoing the hydrate's `dirty:false`
+  // in the same tick. persist()'s very first line is `if (WhatIf.suppress) return` (§6.1), so this
+  // suppresses every one of those writes without needing to touch persist() or the decision table.
+  WhatIf.suppress = true;
+  try {
+    if (typeof window.repopulateFromStorage === 'function') window.repopulateFromStorage();
+    await recompute();
+  } catch (e) {
+  } finally {
+    WhatIf.suppress = false;
+  }
 }
 
 // Minimal, honest, non-blocking conflict affordance for D2/X1 (§4/§7) — @designer can polish the
@@ -3969,6 +4085,18 @@ function runPreMigrationSnapshot() {
 // function's network round-trips can never race a mutation after that point.
 window.__profileMigrationPending = false;   // true when this boot's snapshot prompt was declined
 
+// Fix C (2026-07-27 diagnosis, Defect C): every `WhatIf.active || WhatIf.suppress` early-return
+// below is GUARD-0 aborting the engine because a What-If got entered/resumed DURING one of this
+// function's own network round-trips (the engine still settles — see __profileSyncEngineSettled's
+// comment below — but it made no migration/hydrate/flush decision this boot). Left alone, the
+// skipped decision would only be retried on the device's NEXT cold boot, which for a long-lived
+// companion webview (Defect B) could be days. This flag records "a decision was skipped for
+// What-If, not because there was nothing to do" so every What-If EXIT path (wiExitDiscardCore,
+// wiExitKeep, wiActivate, wiExitYield — see reArmProfileSyncIfSkipped() near foregroundResyncAction
+// below) can retry it immediately instead of waiting for a cold boot that may never come.
+window.__profileSyncSkippedForWhatIf = false;
+function __wiAbortSync() { window.__profileSyncSkippedForWhatIf = true; }
+
 // Boot-completion gate consumed by profileFlushExecutor above. Initialized false at script-start;
 // set true ONLY on a normal (non-throwing) completion of runProfileSyncEngineImpl below — see the
 // runProfileSyncEngine wrapper for exactly how, and the comment there for why a throw must NOT set
@@ -3978,7 +4106,7 @@ window.__profileMigrationPending = false;   // true when this boot's snapshot pr
 // an in-session edit can therefore never hang behind it forever under normal operation.
 window.__profileSyncEngineSettled = false;
 async function runProfileSyncEngineImpl() {
-  if (WhatIf.active || WhatIf.suppress) return;
+  if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
   window.__profileMigrationPending = false;
   const scopeId = window.__scopeId;
   if (scopeId == null) return;   // identity not resolved yet — shouldn't happen post-__roleReady
@@ -3992,7 +4120,7 @@ async function runProfileSyncEngineImpl() {
     if (!res.ok) { window.__profileMigrationPending = true; return; }
     server = await res.json();
   } catch (e) { window.__profileMigrationPending = true; return; }
-  if (WhatIf.active || WhatIf.suppress) return;
+  if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
 
   const meta = getProfileMeta();
 
@@ -4002,7 +4130,7 @@ async function runProfileSyncEngineImpl() {
   // resuming from the (unchanged) server blob is always safe and takes priority over the table
   // below.
   if (meta && meta.hydrating) {
-    if (server.hasState) { await doHydrate(server, scopeId); }
+    if (server.hasState) { if (await doHydrate(server, scopeId)) await repaintAfterHydrate(); }   // Fix A
     else { setProfileMeta({ hydrating: null }); }
     return;
   }
@@ -4015,20 +4143,20 @@ async function runProfileSyncEngineImpl() {
     if (localState === 'empty') return;   // E1 — NO-OP, nothing anywhere
     // M1 / M2 / M3 — snapshot → FLUSH regardless of dirty; same code path either way.
     const ok = await runPreMigrationSnapshot();
-    if (WhatIf.active || WhatIf.suppress) return;
+    if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
     if (!ok) { window.__profileMigrationPending = true; return; }
     await doProfileFlush(true);
     return;
   }
 
   if (localState === 'empty') {
-    await doHydrate(server, scopeId);   // H1 — no client snapshot needed, nothing local to lose
+    if (await doHydrate(server, scopeId)) await repaintAfterHydrate();   // H1 — Fix A: repaint in place
     return;
   }
   if (localState === 'present-no-meta') {
     // X1 — the ambiguous cell: REFUSE to auto-hydrate → snapshot → FLUSH + conflict note.
     const ok = await runPreMigrationSnapshot();
-    if (WhatIf.active || WhatIf.suppress) return;
+    if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
     if (!ok) { window.__profileMigrationPending = true; return; }
     await doProfileFlush(false);
     showProfileConflictNote('migrated-elsewhere');
@@ -4044,9 +4172,9 @@ async function runProfileSyncEngineImpl() {
   if (L === S) return;                                  // S1 — NO-OP, in sync
   if (L < S) {                                           // S2 — another device advanced; safe to hydrate
     const ok = await runPreMigrationSnapshot();
-    if (WhatIf.active || WhatIf.suppress) return;
+    if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
     if (!ok) { window.__profileMigrationPending = true; return; }
-    await doHydrate(server, scopeId);
+    if (await doHydrate(server, scopeId)) await repaintAfterHydrate();   // Fix A: repaint in place
     return;
   }
   // L > S — S3: anomaly (server rolled back/restored older). REFUSE to hydrate → FLUSH, re-assert local.
@@ -4093,6 +4221,145 @@ function bootProfileSyncEngine() {
   });
 }
 
+// ---- Fix B (2026-07-27 diagnosis, Defect B — THE main prod defect) ----
+// window.__scopeId/__role are resolved ONCE at boot (__roleReady above) and bootProfileSyncEngine
+// runs exactly once per boot — that part of §4.1 GUARD-0's contract is correct and untouched. But
+// an HA companion webview can live for DAYS without a real page load: no visibilitychange/
+// pageshow/focus re-sync existed, so a device that gets linked/unlinked/promoted/demoted
+// server-side never learns its own new identity until it happens to cold-boot again. The server
+// already resolves the alias correctly per-request (resolve_user()); only the CLIENT's cached
+// identity goes stale. This adds a foreground re-check that re-resolves identity and, ONLY when it
+// actually changed (or `force` is set — see reArmProfileSyncIfSkipped/Fix C below), re-runs the
+// exact same boot sync engine against the corrected identity.
+
+// Pure comparison, factored out so it's unit-testable via window.__clientMath
+// (tests/test_client_math.js) without a fetch/DOM harness — the network + engine side effects
+// live in foregroundResyncAction below, exercised end-to-end by the S1.2 CDP repro/matrix instead.
+function identityChanged(prevRole, prevScopeId, ident) {
+  return !!ident && (ident.role !== prevRole || ident.scopeId !== prevScopeId);
+}
+
+// Pure decision for item 2 (2026-07-27 review, SHOULD-FIX): "is there a dirty un-flushed edit
+// under the identity we're about to abandon?" — factored out of foregroundResyncAction below for
+// the SAME reason identityChanged() above was: it's the one piece of that fix with no fetch/DOM/
+// Blob-download involved, so it's the seam that's actually unit-testable without a CDP browser
+// (the snapshot-download + conflict-note SIDE EFFECTS this gates are exercised end-to-end by the
+// S1.2 CDP repro instead — see scenario_S2_exit_clean/S4_foreground there for the closest analogs,
+// though neither currently seeds a dirty edit at the moment of the identity swap).
+function shouldSnapshotDirtyEditOnIdentityChange(changed, priorMeta) {
+  return !!(changed && priorMeta && priorMeta.dirty === true);
+}
+
+let __foregroundResyncInFlight = false;   // single-flight: never overlap two in-progress re-checks
+let __foregroundResyncTimer = null;
+const FOREGROUND_RESYNC_DEBOUNCE_MS = 2000;
+
+// `force`: skip the identity-unchanged short-circuit and re-run the engine regardless — used by
+// Fix C (reArmProfileSyncIfSkipped) when a boot hydrate/flush decision was skipped for What-If,
+// which needs a retry even when identity itself turns out to be unchanged.
+async function foregroundResyncAction(force) {
+  if (WhatIf.active || WhatIf.suppress) return;   // in-mode devices re-arm via Fix C on exit instead
+  if (!window.__profilesEnabled) return;          // R1 gate (DEC-035), same posture as the flush executor
+  if (!window.__profileSyncEngineSettled) return; // boot's own run hasn't finished yet — don't race it
+  if (__foregroundResyncInFlight) return;
+  __foregroundResyncInFlight = true;
+  try {
+    const ident = await resolveIdentity();
+    if (WhatIf.active || WhatIf.suppress) return;   // re-check across the await (GUARD-0 convention)
+    // BLOCKER FIX (2026-07-27 review): resolveIdentity() returns `null` for every failure case —
+    // treat that as NO DECISION, never as "resolved to owner". Change nothing (window.__role/
+    // __scopeId stay exactly as they were) and don't run the engine, `force` or not: a transient
+    // whoami blip must never masquerade as an identity change (see resolveIdentity()'s own
+    // BLOCKER FIX note for the concrete data-loss scenario this closes). This is the call site
+    // that makes identityChanged(..., null) => false a live guard rather than dead code — every
+    // other caller of identityChanged only ever sees a real (non-null) ident because of this bail.
+    if (ident == null) return;
+    const changed = identityChanged(window.__role, window.__scopeId, ident);
+    if (!changed && !force) return;   // cheap no-op poll — the common case on every foreground event
+    // SHOULD-FIX (2026-07-27 review, item 2): a REAL identity change with a dirty local edit is
+    // dangerous in a way `force`-only re-arms (Fix C, unchanged identity) are not — the §4.0
+    // scopeId-mismatch guard collapses ANY scope change to derived state 'empty' regardless of
+    // meta.dirty, which routes straight to H1 HYDRATE-REPLACE with NO client snapshot (H1 assumes
+    // "nothing local to lose", which is false here: there's a genuine un-flushed edit under the
+    // OLD identity about to be silently replaced). Snapshot it BEFORE swapping identity, using the
+    // minimal primitive runPreMigrationSnapshot() itself wraps (downloadPreMigrationSnapshotFile)
+    // rather than the full confirm/cancel dialog (showPreMigrationDialog/runPreMigrationSnapshot)
+    // — a blocking "pre-migration" prompt firing out of a background foreground-resync the user
+    // never consciously triggered would be confusing UX, and Cancel would abort the WHOLE sync
+    // (wrong here: the new identity is correct and the hydrate should proceed — only the old
+    // identity's dirty edit needs protecting). Uses window.__role/window.__scopeId as they are
+    // RIGHT NOW (still the OLD identity — the swap happens after this block), so the envelope
+    // reflects the identity whose data is actually at risk.
+    let dirtyEditWasAtRisk = false;
+    if (changed) {
+      const priorScopeId = window.__scopeId;
+      const priorMeta = getProfileMeta();
+      dirtyEditWasAtRisk = shouldSnapshotDirtyEditOnIdentityChange(changed, priorMeta);
+      if (dirtyEditWasAtRisk) {
+        try { await downloadPreMigrationSnapshotFile(priorScopeId); } catch (e) {}
+        if (WhatIf.active || WhatIf.suppress) return;   // re-check across that await too
+      }
+      window.__role = ident.role;
+      window.__scopeId = ident.scopeId;
+      // Refresh owner-gated UI visibility (applyMemberGating only ever REMOVES owner-only
+      // controls — see its own docstring — so this covers the realistic "stale device catches up
+      // to a demotion/link" direction; a rare member->owner promotion mid-session still needs a
+      // reload to bring removed controls back, same limitation the function already had).
+      if (typeof applyMemberGating === 'function') applyMemberGating();
+    }
+    // Re-run the exact engine boot uses. The settled flag stays true across this call (its own
+    // normal-return semantics — see runProfileSyncEngine's comment above) so profileFlushExecutor
+    // is never re-gated mid-session; re-running is safe because the §4 decision table is
+    // idempotent for present-clean L===S (S1: NO-OP), and dirty local correctly flushes (D1-3)
+    // regardless of how many times the engine re-evaluates. A hydrate that occurs during this
+    // re-run repaints itself via Fix A's repaintAfterHydrate() call sites inside the impl — no
+    // separate repaint call is needed here.
+    try { await runProfileSyncEngine(); } catch (e) {}
+    // Item 2 cont'd: let the user know a sync happened and their prior edit was preserved as a
+    // downloaded safety copy rather than silently discarded — same non-blocking affordance §4/§7
+    // already use for the two-device conflict case (closest existing message: "another
+    // device/lineage had different data, kept as a recoverable previous version").
+    if (dirtyEditWasAtRisk) showProfileConflictNote('two-device');
+  } finally {
+    __foregroundResyncInFlight = false;
+  }
+}
+
+function scheduleForegroundResync(force) {
+  if (__foregroundResyncTimer) clearTimeout(__foregroundResyncTimer);
+  __foregroundResyncTimer = setTimeout(() => {
+    __foregroundResyncTimer = null;
+    foregroundResyncAction(force);
+  }, FOREGROUND_RESYNC_DEBOUNCE_MS);
+}
+
+// Trigger #1: tab/webview foreground (covers the HA companion app returning from background).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') scheduleForegroundResync();
+});
+// Trigger #2: pageshow, including a bfcache restore (`event.persisted === true`) — a normal
+// (non-bfcache) pageshow also fires on every ordinary load, where identity was already resolved
+// fresh by boot moments earlier; the debounced re-check there is a harmless no-op poll, not a
+// second source of truth.
+window.addEventListener('pageshow', () => { scheduleForegroundResync(); });
+
+// ---- Fix C (2026-07-27 diagnosis, Defect C) ----
+// Called at the end of every What-If exit path (wiExitDiscardCore, wiExitKeep, wiActivate,
+// wiExitYield — the feature-tabs IIFE further down this file). If GUARD-0 aborted a hydrate/flush
+// decision mid-boot because What-If got entered before the engine's fetch resolved
+// (__profileSyncSkippedForWhatIf, set by __wiAbortSync in runProfileSyncEngineImpl above), the
+// device would otherwise wait for its NEXT What-If-free cold boot to retry — this clears the flag
+// and immediately drives the SAME foreground re-sync action Fix B uses, forced (a skipped decision
+// must retry even if identity itself is unchanged, unlike Fix B's ordinary cheap-poll case).
+// Fire-and-forget — mirrors bootProfileSyncEngine's own posture; a What-If exit's UI response must
+// never stall behind a network round-trip.
+function reArmProfileSyncIfSkipped() {
+  if (window.__profileSyncSkippedForWhatIf) {
+    window.__profileSyncSkippedForWhatIf = false;
+    foregroundResyncAction(true);
+  }
+}
+
 // ---- Test/debug surface (mirrors the WhatIf.* / IR-8 convention above) ----
 window.__profileSync = {
   PROFILE_META_KEY: PROFILE_META_KEY,
@@ -4108,9 +4375,15 @@ window.__profileSync = {
   checkRestoreDisplacement: checkRestoreDisplacement,
   showProfileDisplacementBanner: showProfileDisplacementBanner,
   dismissProfileDisplacementBanner: dismissProfileDisplacementBanner,
+  resolveIdentity: resolveIdentity, identityChanged: identityChanged,
+  foregroundResyncAction: foregroundResyncAction, scheduleForegroundResync: scheduleForegroundResync,
+  reArmProfileSyncIfSkipped: reArmProfileSyncIfSkipped,
 };
 window.markProfileDirty = markProfileDirty;
 window.runProfileSyncEngine = runProfileSyncEngine;
+window.resolveIdentity = resolveIdentity;
+window.foregroundResyncAction = foregroundResyncAction;
+window.reArmProfileSyncIfSkipped = reArmProfileSyncIfSkipped;
 
 // Identify which of the supported backup shapes a parsed JSON file is. Order matters: the
 // fps-backup check MUST run first — a combined backup nests plan/settings data under
@@ -7449,7 +7722,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // choke-point — so ONE function correctly restores either LIVE data (Discard, called after
   // WhatIf.active is set back to false) or SESSION data (Resume, called after WhatIf.active is
   // set true), since load() is mode-aware.
-  function wiRepopulateDom() {
+  //
+  // Fix A (2026-07-27 diagnosis, Defect A): renamed from `wiRepopulateDom` to
+  // `repopulateFromStorage` and exposed on `window` (below) so the S1.2 boot/sync engine's
+  // post-hydrate repaint (repaintAfterHydrate(), ~line 3771) can reuse this EXACT chain instead of
+  // duplicating it — that code lives outside this IIFE and runs from inside `runProfileSyncEngine`
+  // triggered off `bootProfileSyncEngine()`, which only ever kicks off from DOMContentLoaded — this
+  // IIFE always finishes executing (and sets window.repopulateFromStorage) first (see the "IIFE
+  // boot-order" note near the top of this feature-tabs block). `wiRepopulateDom` stays as a local
+  // alias immediately below so every existing in-IIFE call site (What-If enter/exit/resume/peek)
+  // is untouched.
+  function repopulateFromStorage() {
     // Tax tab: restoreState() writes salary/contribution/bracket/filing fields; then explicitly
     // re-derive + reformat everything so the DOM shows the restored numbers immediately (not
     // just whatever restoreState() itself triggers) — belt-and-suspenders per the DISCARD-DOM
@@ -7477,6 +7760,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ivTab = document.getElementById('tab-invest');
     if (ivTab && ivTab.classList.contains('active')) { try { calcInvest(); calcProject(); } catch (e) {} }
   }
+  const wiRepopulateDom = repopulateFromStorage;   // local alias — every call site below is unchanged
+  window.repopulateFromStorage = repopulateFromStorage;   // Fix A: consumed by repaintAfterHydrate()
 
   // ---- Banner hero deltas (P1): live "vs the reality you left" readout ----
   // Polled on a short interval while in-mode: every editable surface can change the numbers
@@ -7582,6 +7867,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
+    reArmProfileSyncIfSkipped();   // Fix C: retry a boot hydrate/flush GUARD-0 skipped for What-If
     showToast('This what-if was taken over in another tab — this tab is back on your real numbers');
   }
   function wiStartHeartbeat() {
@@ -7660,6 +7946,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
+    reArmProfileSyncIfSkipped();   // Fix C: retry a boot hydrate/flush GUARD-0 skipped for What-If
   }
   async function wiExitDiscard() {
     if (!WhatIf.active) return;
@@ -7695,6 +7982,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.session = null; WhatIf.frozen = null;
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
+    reArmProfileSyncIfSkipped();   // Fix C: retry a boot hydrate/flush GUARD-0 skipped for What-If
     wiCheckResumeOnBoot();   // offer the Resume bar right away, same as after a reload
     // The network park runs strictly AFTER the mode teardown above (WhatIf.active is already
     // false) — mirrors wiActivate's "never mid-mode" placement for real-data writes, even though
@@ -7799,6 +8087,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // (WhatIf.suppress=false just above), so the guard passes and the activated live keys
       // actually get flushed.
       markProfileDirty();
+      reArmProfileSyncIfSkipped();   // Fix C: retry a boot hydrate/flush GUARD-0 skipped for What-If
       scRefreshActuals();
     } catch (e) { showToast('Activate failed: ' + (e.message || '')); }
   }

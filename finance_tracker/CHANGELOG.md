@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.8
+
+- **Linked accounts now truly share one view.** Fixed the reported bug where
+  two linked logins saw the same transactions but *different* budget
+  categories (one stuck on the starter template). Three causes, all fixed:
+  a device now shows the shared profile immediately after linking (one
+  reload, not two); a long-lived app view (like the phone companion app)
+  now re-checks who you are whenever it returns to the foreground and pulls
+  the shared profile on its own — no reload ritual; and entering What-If
+  Mode during startup no longer silently skips the sync (it catches up when
+  you exit).
+- **Your shared profile can no longer be overwritten by a stale device.**
+  If a device with an outdated identity tries to save, the server now
+  refuses, the device re-syncs itself, and your real data stays intact —
+  previously such a save could silently replace the shared profile with
+  old values, with no warning.
+- Safety hardening along the way: a failed identity check can never change
+  who the app thinks you are mid-session; if a genuine identity change
+  displaces unsaved edits, a backup snapshot is taken and a visible notice
+  shown; and a background sync will never repaint a field you are actively
+  typing in.
+
 ## 0.3.7
 
 - **One MAGI, the correct one.** The Tax and Invest tabs now share a single

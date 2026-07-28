@@ -2268,6 +2268,11 @@ class ProfilePutModel(BaseModel):
     # way to actually reject a bool value here rather than silently normalizing it.
     base_state_version: int = Field(0, alias="baseStateVersion", strict=True)
     migration: bool = False
+    # S5 clobber guard (2026-07-27 account-linking divergence diagnosis, ESCALATION S5) — OPTIONAL,
+    # defaults to None so an old/unpatched client (or any caller that never sends it) gets today's
+    # behavior byte-for-byte: no guard, no mutation change. When present, the client sends its own
+    # `window.__scopeId` on every flush; see put_profile_endpoint below for how it's checked.
+    expected_scope: str | None = Field(None, alias="expectedScope")
     model_config = {"populate_by_name": True}
 
 
@@ -2310,8 +2315,25 @@ def put_profile_endpoint(m: ProfilePutModel, request: Request = None) -> dict:
     500 (no mutation) only when the ONE-TIME server-side pre-migration snapshot's
     `conn.backup()` raises OSError (§5.2) — abort before the upsert, exactly like
     `import_all`'s pre-mutation copy; the client keeps `dirty` and retries next boot.
+
+    S5 clobber guard (2026-07-27 account-linking divergence diagnosis, ESCALATION S5): a
+    stale linked device's window.__scopeId is a BOOT-TIME cache (§4.0) that only the client
+    fix (index.html's foreground re-sync) keeps current -- this endpoint is the server-side
+    backstop for whatever slips through that. Before any write, if the client sent
+    `expectedScope`, it must match what resolve_user() ACTUALLY resolves for this request
+    right now -- a mismatch means the device is aliased differently than it believes (e.g.
+    it just got linked to a primary account by another device, mid-session) and its flush
+    would otherwise silently land on -- and overwrite -- a DIFFERENT scope's row purely
+    because baseStateVersion happens to coincide (tracking_store.put_profile has no identity
+    check of its own, only a version one -- see its docstring). 409, NO mutation (checked
+    BEFORE _scenario_blob_guard/put_profile ever run) -- tracking_store.py is untouched, this
+    is purely an identity precondition ahead of it. Absent `expectedScope` (None, the
+    Field default) -- e.g. an old client, or a deliberate ?profiles=0-style opt-out -- skips
+    the check entirely, preserving today's behavior byte-for-byte.
     """
     scope = resolve_user(request)["scopeId"]
+    if m.expected_scope is not None and m.expected_scope != scope:
+        raise HTTPException(status_code=409, detail="scope-mismatch")
     _validate_profile_blob(m.blob)
     _scenario_blob_guard(m.blob, "blob")
     with closing(tracking_store.connect()) as c:
