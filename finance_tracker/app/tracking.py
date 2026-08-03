@@ -706,6 +706,208 @@ def card_rollup_running(txn_rows: list[dict], accounts: list[dict], month: str) 
     }
 
 
+# ---------- accounts: flow-driven running balance (S2.1, DEC-038) ----------
+
+def _nw_delta_cents(direction: str, kind: str, amount_cents: int) -> int:
+    """One flow's net-worth-space signed delta (docs/reports-accounts-design.md §3.1):
+    ``+amount`` for ``direction='in'``, ``-amount`` for ``'out'``; a ``kind='refund'``
+    flips the sign (mirrors ``month_actuals``'s refund sign-flip, DEC-011 #2 -- a refund
+    on an ``out`` txn behaves like money coming back in). This is the SAME formula for
+    every account type: the asset/liability sign lives entirely in the snapshot anchor
+    (``nwSign``, scaled once), never re-applied to a flow -- that's what makes a balanced
+    transfer pair cancel to 0 regardless of which leg is the asset and which the
+    liability (invariant I3)."""
+    sign = 1 if direction == "in" else -1
+    if kind == "refund":
+        sign = -sign
+    return sign * amount_cents
+
+
+def account_balances(txn_rows: list[dict], snapshot_rows: list[dict], accounts: list[dict], as_of: str) -> dict:
+    """Per-account flow-driven running balance (docs/reports-accounts-design.md §3) --
+    generalizes ``card_rollup_running``'s credit-only running balance to every account
+    type. Pure (no I/O), float dollars at the edge; all arithmetic is integer cents
+    internally (mirrors ``card_rollup`` / ``fund_rollup``'s discipline). Computed, never
+    stored -- no reconciliation "adjustment transaction" is ever synthesized (§3.2).
+
+    Parameters
+    ----------
+    txn_rows : list[dict]
+        Full account history with ``postedOn <= as_of``, in the ``list_txns`` camelCase
+        shape (``accountId``, ``postedOn``, ``direction``, ``amount`` $, ``isTransfer``,
+        ``status``, ``kind``). Splits are irrelevant here (a split only re-buckets a
+        txn's money, never adds a flow) so this reads the flat parent row, not
+        ``splits``. Transfers are INCLUDED (opposite of ``aggregate_actuals``, which
+        excludes them, DEC-009 #1) -- balance math and spend math read the same
+        ``isTransfer`` flag in opposite directions, by design (§3.4).
+    snapshot_rows : list[dict]
+        Full snapshot history, in the ``list_snapshots`` shape (``accountId``, ``asOf``,
+        ``balance`` $) -- positive magnitudes, exactly as stored today (no re-signing).
+        A snapshot dated AFTER ``as_of`` is defensively ignored (NIT-4, 2026-07-28
+        review) -- the caller (the endpoint) already pre-filters via ``date_to``, but
+        this function no longer trusts that as its only guard, so a future-dated
+        snapshot passed directly (e.g. a bulk-import caller, or a test) can never
+        leak into "today"'s anchor.
+    accounts : list[dict]
+        From ``list_accounts`` (``id``, ``name``, ``type``, ``isLiability``,
+        ``creditLimit``, ...).
+    as_of : str
+        ``'YYYY-MM-DD'``; the query date. ``txn_rows`` are still trusted to already be
+        ``postedOn <= as_of`` (mirrors ``card_rollup_running``'s "caller pre-filters by
+        date_to" contract for flows) -- only the snapshot bound is re-checked here.
+
+    Returns
+    -------
+    dict
+        ``{asOf, netWorth, accounts: [{accountId, name, type, isLiability, opening,
+        flowsSince, reconcileDelta, lastReconcileDelta, balance, netWorthContribution,
+        pendingDelta, creditLimit, utilization}]}``.
+
+        ``opening`` / ``flowsSince`` / ``reconcileDelta`` are the §3.3 decomposition:
+        ``opening`` is the signed value of the FIRST-ever snapshot at/before ``as_of``
+        (or 0 if none -- a virtual zero anchor, so the formula is uniform); ``flowsSince``
+        is the cumulative settled flow-sum from just after that first snapshot's date
+        through ``as_of``; ``reconcileDelta`` is the SUM of every re-anchor's absorbed
+        drift between the first snapshot and the latest one (computed as the closed-form
+        remainder ``netWorthContribution - opening - flowsSince`` via the §3.3
+        telescoping identity, rather than iterating each re-anchor event individually --
+        both are cent-exact equal, see invariant I2). It is 0.0 whenever there is at
+        most one snapshot ever (nothing has been re-anchored yet).
+
+        ``balance`` is the OWN-CONVENTION display number (asset: cash held, positive;
+        liability: amount owed, positive) -- ``= netWorthContribution`` for an asset,
+        ``= -netWorthContribution`` for a liability. ``netWorthContribution`` is the raw
+        signed nw-space number (asset +, liability -); ``netWorth`` is their sum.
+
+        ``pendingDelta`` sums PENDING flows in the same post-anchor window (parity with
+        ``card_rollup_running``'s settled/pending split) -- not folded into ``balance``.
+
+        ``utilization`` is ``balance / creditLimit`` (unfloored, can exceed 1.0 when
+        over limit) for ``type == 'credit'`` accounts with a ``creditLimit`` set and
+        greater than 0; ``None`` otherwise.
+
+        ``lastReconcileDelta`` (S2.1 Phase B review, 2026-07-28) is the SINGLE-STEP drift
+        absorbed by the MOST RECENT re-anchor only -- ``entered(Sk) - (value(Sk-1) +
+        flows in (Sk-1, Sk])`` -- unlike the cumulative ``reconcileDelta`` (the Σ of
+        EVERY re-anchor since the first-ever snapshot, §3.3's provable telescoping
+        identity, left unchanged here since it IS the exit criterion). ``0.0`` when fewer
+        than 2 snapshots exist at/before ``as_of`` (nothing has been re-anchored yet --
+        same "no prior anchor to diverge from" case as ``reconcileDelta``). Returned
+        ALREADY in the account's own display-sign convention (asset/liability flipped the
+        same way ``balance`` is, unlike ``reconcileDelta``/``opening``/``flowsSince``
+        which stay nw-signed) -- a UI reading it needs no isLiability-aware sign flip of
+        its own, only ``balance - lastReconcileDelta`` for "what your logged activity
+        alone implied at this save".
+    """
+    txns_by_acct: dict[int, list[dict]] = {}
+    for t in txn_rows:
+        txns_by_acct.setdefault(t["accountId"], []).append(t)
+
+    snaps_by_acct: dict[int, list[dict]] = {}
+    for sn in snapshot_rows:
+        if sn["asOf"] > as_of:            # NIT-4: defensive -- never anchor on the future
+            continue
+        snaps_by_acct.setdefault(sn["accountId"], []).append(sn)
+    for lst in snaps_by_acct.values():
+        lst.sort(key=lambda s: s["asOf"])
+
+    def _flow_sum_cents(rows: list[dict], lower_date: str | None, status: str,
+                         upper_date: str | None = None) -> int:
+        """Σ nw-delta cents over ``rows`` with this ``status``, in the window
+        ``(lower_date, upper_date or as_of]`` -- strictly after ``lower_date`` (the
+        anchor's own day is assumed already reflected in its hand-entered balance,
+        §3.2), or unbounded below when ``lower_date`` is ``None``. When ``upper_date`` is
+        omitted, behavior is UNCHANGED from before this window param existed: no upper
+        bound is enforced here at all (``txn_rows`` are trusted to already be
+        ``postedOn <= as_of``, per the function's own docstring -- this is the existing
+        "caller pre-filters" contract, not touched by this change). An explicit
+        ``upper_date`` earlier than ``as_of`` is used ONLY by the single-step
+        ``lastReconcileDelta`` window below, which must stop at the latest snapshot's own
+        date rather than running through to ``as_of``."""
+        total = 0
+        for r in rows:
+            if r["status"] != status:
+                continue
+            if lower_date is not None and not (r["postedOn"] > lower_date):
+                continue
+            if upper_date is not None and not (r["postedOn"] <= upper_date):
+                continue
+            total += _nw_delta_cents(r["direction"], r["kind"], round(r["amount"] * 100))
+        return total
+
+    out_accounts: list[dict] = []
+    net_worth_cents = 0
+    for acct in accounts:
+        acct_id = acct["id"]
+        is_liability = bool(acct["isLiability"])
+        nw_sign = -1 if is_liability else 1
+        rows = txns_by_acct.get(acct_id, [])
+        snaps = snaps_by_acct.get(acct_id, [])
+
+        if snaps:
+            v0_date, v0_val = snaps[0]["asOf"], nw_sign * round(snaps[0]["balance"] * 100)
+            vk_date, vk_val = snaps[-1]["asOf"], nw_sign * round(snaps[-1]["balance"] * 100)
+        else:
+            v0_date, v0_val = None, 0
+            vk_date, vk_val = None, 0
+
+        flows_since_cents = _flow_sum_cents(rows, v0_date, "settled")
+        flows_after_anchor_cents = _flow_sum_cents(rows, vk_date, "settled")
+        nw_contribution_cents = vk_val + flows_after_anchor_cents
+        reconcile_delta_cents = nw_contribution_cents - v0_val - flows_since_cents
+        pending_delta_cents = _flow_sum_cents(rows, vk_date, "pending")
+
+        balance_cents = -nw_contribution_cents if is_liability else nw_contribution_cents
+        display_sign = -1 if is_liability else 1
+
+        # lastReconcileDelta (S2.1 Phase B review, 2026-07-28 SHOULD-FIX): the SINGLE-STEP
+        # drift absorbed by the MOST RECENT re-anchor only -- entered(Sk) - (value(Sk-1) +
+        # flows in (Sk-1, Sk]) -- as opposed to reconcile_delta_cents above, which is the
+        # CUMULATIVE Σ of every re-anchor since the first-ever snapshot (the provable §3.3
+        # exit criterion, left untouched). 0 when fewer than 2 snapshots exist (nothing
+        # re-anchored yet -- same case reconcile_delta_cents is 0 for). Computed in
+        # nw-signed cents first (same convention as reconcile_delta_cents above), THEN
+        # flipped to the account's own display-sign convention via `display_sign` --
+        # unlike reconcile_delta_cents/opening/flowsSince, which stay nw-signed for the
+        # provable identity, this one is meant to be read directly by a UI with no
+        # isLiability-aware flip of its own.
+        last_reconcile_delta_cents = 0
+        if len(snaps) >= 2:
+            prior_date = snaps[-2]["asOf"]
+            prior_val = nw_sign * round(snaps[-2]["balance"] * 100)
+            flows_between_cents = _flow_sum_cents(rows, prior_date, "settled", upper_date=vk_date)
+            last_reconcile_delta_cents = vk_val - prior_val - flows_between_cents
+        last_reconcile_delta_display_cents = display_sign * last_reconcile_delta_cents
+
+        credit_limit = acct.get("creditLimit")
+        utilization = None
+        if acct["type"] == "credit" and credit_limit:
+            utilization = round((balance_cents / 100.0) / credit_limit, 4)
+
+        out_accounts.append({
+            "accountId": acct_id,
+            "name": acct["name"],
+            "type": acct["type"],
+            "isLiability": is_liability,
+            "opening": _d(v0_val),
+            "flowsSince": _d(flows_since_cents),
+            "reconcileDelta": _d(reconcile_delta_cents),
+            "lastReconcileDelta": _d(last_reconcile_delta_display_cents),
+            "balance": _d(balance_cents),
+            "netWorthContribution": _d(nw_contribution_cents),
+            "pendingDelta": _d(pending_delta_cents),
+            "creditLimit": credit_limit,
+            "utilization": utilization,
+        })
+        net_worth_cents += nw_contribution_cents
+
+    return {
+        "asOf": as_of,
+        "netWorth": _d(net_worth_cents),
+        "accounts": out_accounts,
+    }
+
+
 # ---------- sinking funds (TODO-238, DEC-034) ----------
 
 def fund_rollup(monthly_flows: dict[str, dict], upto_month: str | None = None) -> dict:
@@ -895,6 +1097,7 @@ __all__ = [
     "plan_vs_actual",
     "card_rollup",
     "card_rollup_running",
+    "account_balances",
     "fund_rollup",
     "fund_effective_target_date",
     "fund_cycle_summary",

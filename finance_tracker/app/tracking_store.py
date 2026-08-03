@@ -51,7 +51,13 @@ _MIN_SQLITE_VERSION = (3, 43, 0)
 # already only uses columns present in the payload row, so the column's
 # `NOT NULL DEFAULT '__owner__'` assigns every restored legacy row to the owner for free.
 _BACKUP_TABLES: tuple = (
-    ("account",          ("id", "user_id", "name", "type", "is_liability", "currency", "archived", "created_at", "invest_group")),
+    # S2.1 (DEC-038): `credit_limit_cents` appended to the EXISTING account column
+    # tuple (not a new table entry, no _BACKUP_OPTIONAL_TABLES change) -- mirrors the
+    # `invest_group` precedent above. A pre-S2.1 backup row simply lacks the key; the
+    # allow-list INSERT in import_all only writes columns present in the payload row,
+    # so the column's NULL-by-default nature backfills every restored legacy row to
+    # "no limit set" for free (same free-backfill story as `user_id`/`recurrence`).
+    ("account",          ("id", "user_id", "name", "type", "is_liability", "currency", "archived", "created_at", "invest_group", "credit_limit_cents")),
     ("tag",              ("id", "user_id", "name", "created_at")),
     ("template",         ("id", "user_id", "name", "direction", "amount_cents", "bucket", "category", "account_id", "description", "created_at")),
     ("txn",              ("id", "user_id", "account_id", "posted_on", "direction", "amount_cents", "bucket", "category", "description", "is_transfer", "transfer_group", "source", "external_id", "partner_owed_cents", "status", "kind", "created_at")),
@@ -112,7 +118,8 @@ CREATE TABLE IF NOT EXISTS account (
   currency     TEXT    NOT NULL DEFAULT 'USD',
   archived     INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT    NOT NULL,
-  invest_group TEXT                        -- Invest-tab grouping (TODO-222): free text with UI presets; NULL = not an investment account grouping
+  invest_group TEXT,                       -- Invest-tab grouping (TODO-222): free text with UI presets; NULL = not an investment account grouping
+  credit_limit_cents INTEGER               -- S2.1 (DEC-038): current credit limit, cents. Nullable; meaningful only for type='credit'. NULL = no limit set
 );
 
 CREATE TABLE IF NOT EXISTS txn (
@@ -805,7 +812,22 @@ def _mig_add_fund_recurrence(conn) -> None:
             "CHECK (recurrence IN ('none','yearly'))")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence]
+def _mig_add_credit_limit(conn) -> None:
+    """Migration 13 (S2.1, DEC-038, docs/reports-accounts-design.md §5): additive
+    `account.credit_limit_cents` column -- v13 -> v14. Idempotent via the standard
+    PRAGMA table_info guard (fresh DBs already have the column from SCHEMA above,
+    mirroring `_mig_add_fund_recurrence`'s ALTER-guard convention -- a column addition
+    to an EXISTING table, not a new table). Nullable, no DEFAULT: every pre-existing
+    account row converges to `credit_limit_cents IS NULL` ("no limit set"), which is
+    exactly its current (unmodeled) behavior -- the running-balance math
+    (`tracking.account_balances`) and credit-card rollup (`tracking.card_rollup_running`)
+    never read this column at all; only the new S2.2 utilization display will."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(account)").fetchall()]
+    if "credit_limit_cents" not in cols:
+        conn.execute("ALTER TABLE account ADD COLUMN credit_limit_cents INTEGER")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit]
 
 
 def _now() -> str:
@@ -1544,13 +1566,53 @@ def list_linked_accounts(conn: sqlite3.Connection, primary_user_id: str) -> list
 
 # ---------- accounts ----------
 
-def create_account(conn, user_id, name, type="other", is_liability=False, currency="USD", invest_group=None) -> dict:
+# S2.1 (DEC-038 §4/§13-Q2, SHOULD-FIX 2026-07-28 review): types whose liability-ness is
+# NOT ambiguous. 'other' is deliberately excluded -- an unclassified account is the one
+# genuinely ambiguous case (legitimately either an asset or a liability), so it always
+# respects whatever the caller/stored value already is.
+_UNAMBIGUOUS_ASSET_TYPES = frozenset({"checking", "savings", "brokerage", "retirement", "hsa", "cash"})
+
+_UNSET = object()   # sentinel: distinguishes "caller omitted is_liability" from "caller passed False"
+
+
+def _normalize_liability(type: str, is_liability_supplied: bool) -> bool | None:
+    """The FORCED is_liability value for `type`, or ``None`` when nothing should be
+    forced (use the caller-supplied/stored value as-is). Shared by create_account and
+    update_account so a type change is never one-directional -- the original guard only
+    forced credit/loan -> True, which left `is_liability=1` STRANDED on a credit->checking
+    retype that didn't also touch isLiability (a checking account with nwSign=-1: the
+    blast radius includes the EXISTING _net_worth_at/account_liability_map, not just the
+    new tracking.account_balances -- live net-worth corruption, the R5 hazard).
+
+    - credit/loan: ALWAYS force True, regardless of whether the caller supplied a value
+      (a type='credit' account persisted with is_liability=0 would invert its sign
+      everywhere that reads it).
+    - An unambiguous asset type (checking/savings/brokerage/retirement/hsa/cash) forces
+      False, but ONLY when the caller did not explicitly supply is_liability -- an
+      explicit request to flag e.g. a checking account as a liability is still honored.
+    - 'other': never forced either way -- legitimately either, always respects the
+      caller-supplied/stored value.
+    """
+    if type in ("credit", "loan"):
+        return True
+    if type in _UNAMBIGUOUS_ASSET_TYPES and not is_liability_supplied:
+        return False
+    return None
+
+
+def create_account(conn, user_id, name, type="other", is_liability=_UNSET, currency="USD", invest_group=None,
+                   credit_limit_cents=None) -> dict:
     if type not in _ACCOUNT_TYPES:
         raise ValueError(f"invalid account type: {type!r}")
     invest_group = (invest_group or "").strip() or None
+    supplied = is_liability is not _UNSET
+    forced = _normalize_liability(type, supplied)
+    is_liability = forced if forced is not None else bool(False if is_liability is _UNSET else is_liability)
     cur = conn.execute(
-        "INSERT INTO account (user_id, name, type, is_liability, currency, created_at, invest_group) VALUES (?,?,?,?,?,?,?)",
-        (user_id, name, type, int(bool(is_liability)), currency, _now(), invest_group),
+        "INSERT INTO account (user_id, name, type, is_liability, currency, created_at, invest_group, credit_limit_cents) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (user_id, name, type, int(bool(is_liability)), currency, _now(), invest_group,
+         (int(credit_limit_cents) if credit_limit_cents is not None else None)),
     )
     conn.commit()
     return get_account(conn, user_id, cur.lastrowid)
@@ -1572,17 +1634,36 @@ def list_accounts(conn, user_id, include_archived=False) -> list[dict]:
 
 
 def update_account(conn, user_id, account_id, **fields) -> dict | None:
-    allowed = {"name", "type", "is_liability", "archived", "currency", "invest_group"}
+    allowed = {"name", "type", "is_liability", "archived", "currency", "invest_group", "credit_limit_cents"}
+    if "type" in fields and fields["type"] not in _ACCOUNT_TYPES:
+        raise ValueError(f"invalid account type: {fields['type']!r}")
+    # S2.1 (DEC-038 §4/§13-Q2, SHOULD-FIX 2026-07-28 review): the SAME symmetric
+    # _normalize_liability used by create_account, applied at update time too -- e.g.
+    # switching an existing account's `type` to 'credit'/'loan' forces True, but
+    # switching AWAY from credit/loan to an unambiguous asset type (checking/savings/
+    # brokerage/retirement/hsa/cash) with no explicit isLiability in this same PATCH now
+    # ALSO clears is_liability back to False -- a retype is no longer one-directional.
+    # Effective type = the incoming `type` if this call is changing it, else the
+    # account's current type (one extra SELECT, only when needed to resolve it).
+    effective_type = fields.get("type")
+    if effective_type is None and "is_liability" in fields:
+        row = conn.execute(
+            "SELECT type FROM account WHERE id = ? AND user_id = ?", (account_id, user_id)).fetchone()
+        effective_type = row["type"] if row else None
+    if effective_type is not None:
+        forced = _normalize_liability(effective_type, "is_liability" in fields)
+        if forced is not None:
+            fields["is_liability"] = forced
     sets, vals = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
-        if k == "type" and v not in _ACCOUNT_TYPES:
-            raise ValueError(f"invalid account type: {v!r}")
         if k == "invest_group":
             v = (v or "").strip() or None   # empty string clears the group
         if k in ("is_liability", "archived"):
             v = int(bool(v))
+        if k == "credit_limit_cents" and v is not None:
+            v = int(v)
         sets.append(f"{k} = ?")
         vals.append(v)
     if sets:
@@ -1612,11 +1693,13 @@ def account_liability_map(conn, user_id) -> dict[int, bool]:
 
 
 def _account_dict(r) -> dict:
+    limit_c = r["credit_limit_cents"]
     return {
         "id": r["id"], "name": r["name"], "type": r["type"],
         "isLiability": bool(r["is_liability"]), "currency": r["currency"],
         "archived": bool(r["archived"]), "createdAt": r["created_at"],
         "investGroup": r["invest_group"],
+        "creditLimit": (round(limit_c / 100.0, 2) if limit_c is not None else None),
     }
 
 
@@ -1862,6 +1945,24 @@ def update_txn(conn, user_id, txn_id, **fields) -> dict | None:
         raise ValueError(f"status must be 'settled' or 'pending', got {fields['status']!r}")
     if "kind" in fields and fields["kind"] not in ("charge", "refund"):
         raise ValueError(f"kind must be 'charge' or 'refund', got {fields['kind']!r}")
+    # create_txn's "refunds cannot be split" guard (line ~1787) only fires at INSERT time --
+    # re-review of the BUG-0005 fix round found this reachable via update: create a split-as-
+    # charge txn, then PATCH kind='refund' onto it, and this function accepted it (no splits
+    # column is writable here, so the only way to reach the invalid state is flipping kind on a
+    # row that ALREADY has splits). Numerically harmless either way -- the month_actuals flatten
+    # query and the client's acSignedLegAmount both still sign a split leg correctly regardless of
+    # the parent's kind -- but the client's own acSignedLegAmount warns "server rejects this"
+    # about a state a user could actually reach, which would send a future debugger hunting for
+    # DB corruption that isn't there. Scoped to this user's own row (joins txn.user_id) so the
+    # existence check can't leak whether a foreign txn_id has splits.
+    if fields.get("kind") == "refund":
+        has_splits = conn.execute(
+            "SELECT 1 FROM txn_split s JOIN txn t ON t.id = s.txn_id "
+            "WHERE s.txn_id = ? AND t.user_id = ? LIMIT 1",
+            (txn_id, user_id),
+        ).fetchone()
+        if has_splits:
+            raise ValueError("refunds cannot be split")
     sets, vals = [], []
     for k, v in fields.items():
         if k not in allowed:

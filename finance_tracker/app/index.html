@@ -260,11 +260,16 @@
   select:focus, input[type="text"]:not(.input-pair *):focus, input[type="number"]:not(.input-pair *):focus, input[type="search"]:not(.input-pair *):focus, textarea:focus {
     border-color: var(--accent); box-shadow: var(--field-focus-ring); outline: none;
   }
-  /* Actuals ledger — inline-edit fields: clearly "in edit mode" against the dark row.
-     td-qualified to beat the global input rule + `.tab-panel select` (both 0,1,1). */
+  /* Actuals ledger — inline-edit fields: clearly "in edit mode" against the row.
+     td-qualified to beat the global input rule + `.tab-panel select` (both 0,1,1).
+     Latent shiro-full bug (found auditing the color-scheme fix): `color-scheme: dark` was
+     hardcoded here regardless of theme, forcing any native chrome on these fields (a <select>'s
+     own dropdown, etc.) dark even in shiro-full. `color-scheme` is an INHERITED property and
+     :root already sets the correct per-theme value (dark default, flipped to light by
+     applyHaTheme's shiro-full branch) — this override served no purpose and is removed. */
   td input.ac-ed, td select.ac-ed {
     background: var(--chip); color: var(--text); border: 1px solid var(--accent-strong);
-    border-radius: 6px; padding: 5px 7px; font: inherit; color-scheme: dark; outline: none;
+    border-radius: 6px; padding: 5px 7px; font: inherit; outline: none;
     transition: border-color .12s ease, box-shadow .12s ease;
   }
   td input.ac-ed:focus, td select.ac-ed:focus {
@@ -282,7 +287,8 @@
   td a.ac-act-edit:focus-visible, td a.ac-act-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* Savings-goals row actions (→ Budget line / ✓ / ✕) — same fix as the ledger icons above:
      UA link-blue is near-invisible on the dark theme. */
-  .gl-act { text-decoration: none; display: inline-block; padding: 2px 6px; border-radius: 6px; line-height: 1.3; }
+  .gl-act { text-decoration: none; display: inline-block; padding: 2px 6px; border-radius: 6px; line-height: 1.3; color: var(--muted); }
+  .gl-act:hover { color: var(--text); background: var(--chip); }
   .gl-act-primary { color: var(--accent); }
   .gl-act-primary:hover { color: var(--text); background: var(--chip); }
   .gl-act-done { color: var(--muted); }
@@ -290,6 +296,25 @@
   .gl-act-del { color: var(--muted); }
   .gl-act-del:hover { color: var(--bad); background: var(--chip); }
   .gl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Manage panel (docs/manage-panel-redesign.md §2) — one shared row grid for categories AND
+     accounts. identity+controls flow in the 1fr cell (wrap within it at narrow widths); actions
+     anchor right so every ✎/✕ aligns — kills the ragged-right-edge mess in one rule. */
+  .mng-list   { display: flex; flex-direction: column; }
+  .mng-row    { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center;
+                column-gap: var(--space-3); row-gap: var(--space-1);
+                padding: var(--space-2) 0; border-bottom: 1px solid var(--line-faint); }
+  .mng-row:last-child { border-bottom: none; }
+  .mng-main   { display: flex; align-items: center; gap: var(--space-2); min-width: 0; flex-wrap: wrap; }
+  .mng-name   { font-weight: var(--fw-semibold); color: var(--text);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mng-meta   { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+  .mng-actions{ display: inline-flex; align-items: center; gap: var(--space-1);
+                justify-self: end; flex-shrink: 0; }
+  /* locked non-editable flag (Liability / built-in) — a chip fill, not a disabled checkbox
+     (readonly-state-legibility: signal not-editable with a FILL, never a subtle edge). */
+  .mng-flag   { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+                border-radius: 999px; background: var(--chip); color: var(--muted);
+                font-size: var(--fs-2xs); white-space: nowrap; }
   /* G) lock toggle — now an in-pair SEGMENT (mirrors .unit): the pill is ONE bordered group
      [value | $ | lock], not a floating square button beside it. Interactive (hover/focus) where
      .unit is static; overflow:hidden on the wrapper clips it into the pill radius, so border-radius:0
@@ -330,6 +355,25 @@
   .filter-opt.is-selected { background: var(--selected-bg); color: var(--selected-ink); }
   .filter-opt-all { border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 4px; padding-bottom: 8px; }
   .filter-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* Custom combobox popup (replaces native <datalist> for Category/Payee/Tags — native datalist
+     popups ignore color-scheme's active/hover-row highlight; no CSS hook exists in any browser
+     engine for it, see the :root comment near the top of this file). Option rows reuse
+     .filter-opt/.is-selected VERBATIM — the same tokens the ledger filter popover already uses —
+     rather than inventing a new popup idiom. Same surface tokens (--panel/--line/--shadow-pop)
+     as .backup-popup for visual consistency, but sized/anchored to match the input's own width
+     instead of .backup-popup's fixed 260px/right:0 shape.
+     .ac-combo-anchor wraps the WHOLE <label> as a SIBLING container (re-review finding C) — the
+     popup is appended there by acComboInit, next to the label, never inside it: a <button
+     role="option"> is not valid content inside <label>, and — the assertable defect — any
+     descendant of a <label> (however deeply nested) contributes to that label's computed
+     accessible name, so a popup living inside the label would make the field announce as
+     "Category Groceries Dining Rent Gas…" while open. */
+  .ac-combo-anchor { position: relative; }
+  .ac-combo-popup {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 250;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 4px; box-shadow: var(--shadow-pop); max-height: 260px; overflow-y: auto;
+  }
   .ac-catlink { color: inherit; text-decoration: none; cursor: pointer; }
   .ac-catlink:hover { color: var(--accent); }
   .ac-catlink.is-active { color: var(--accent); text-decoration: underline; }
@@ -363,6 +407,20 @@
   .pcat-row.is-none .pcat-fill { background:var(--muted); }
   .pcat-bar-partner { height:100%; opacity:.6; background:repeating-linear-gradient(45deg, var(--muted) 0 2px, transparent 2px 6px); }
   @media (max-width:480px) { .pcat-row { grid-template-columns:1fr auto; grid-template-areas:"name name" "amt badge" "bar bar"; } .pcat-amt { align-items:flex-start; } }
+  /* Credit-card utilization meter (docs/manage-panel-redesign.md §3) — re-homed from the Manage
+     account rows to "Pay off your cards"; numerator is the section's OWN runningRemaining figure
+     (never account-balances), so it's structurally immune to the is_liability wrong-sign bug.
+     Reuses the .pcat-bar 6px idiom. 3-band: calm accent <30% -> warn -> bad >=70%; text warns
+     (not alarms) only at the high band. */
+  .ac-util       { display:flex; align-items:center; gap:var(--space-2); margin-top:3px; }
+  .ac-util-track { flex:1 1 auto; min-width:72px; max-width:150px; height:6px;
+                   background:var(--chip); border-radius:999px; overflow:hidden; }
+  .ac-util-fill  { height:100%; background:var(--accent); }        /* < 30%  -- calm/on-brand */
+  .ac-util.is-mid  .ac-util-fill { background:var(--warn); }       /* 30-70% -- caution        */
+  .ac-util.is-high .ac-util-fill { background:var(--bad);  }       /* >= 70% -- high            */
+  .ac-util-cap   { font-size:var(--fs-2xs); color:var(--muted); white-space:nowrap;
+                   font-variant-numeric:tabular-nums; }
+  .ac-util.is-high .ac-util-cap  { color:var(--warn); }            /* text warns, not alarms   */
   /* Category-alias manager (Budget) + Unplanned fixer (Actuals) */
   .bgb-alias-ui      { font-size:var(--fs-sm); padding:8px 14px 12px; }
   .bgb-alias-groups  { display:flex; flex-direction:column; gap:6px; margin:10px 0 2px; }
@@ -812,6 +870,14 @@
     .ac-filterbar .ac-tag.is-active { min-height: 44px; display: inline-flex; align-items: center; padding-block: 12px; }
     .filter-popup { left: 0; right: 0; width: auto; }
     .wi-popup { left: 0; right: 0; width: auto; }
+    /* Manage panel (docs/manage-panel-redesign.md §6) — additive, presentation-only. */
+    .mng-row { column-gap: var(--space-2); }          /* actions stay right-anchored, name ellipsizes */
+    .mng-main { row-gap: var(--space-1); }             /* countsAs / type meta wraps under the name    */
+    /* Adversarial-review finding #7: the Fix / Set-a-balance actions live in .mng-meta, not
+       .mng-actions -- widened from .mng-actions-only so BOTH zones get the 44px tap rule (Fix
+       especially, since it mutates money data). */
+    .mng-row .gl-act { padding: 9px 11px; }            /* inherits the line-808 44px tap rule           */
+    .mng-row select, .ac-manage .ac-field select { min-height: 40px; }   /* type + countsAs tap targets */
   }
 
   /* landscape / short-viewport popup guard (P1) — max-height query, independent of the
@@ -1950,18 +2016,37 @@
         </div>
 
         <!-- Payee / note (drives category) -->
-        <label class="ac-field">
-          <span class="ac-lbl">Payee / note</span>
-          <input id="ac_tx_memo" list="ac_payee_list" type="text" placeholder="e.g. Starbucks">
-        </label>
+        <!-- Re-review finding C: acComboInit's popup must NOT be a DOM descendant of the
+             <label> (any descendant — however deeply nested or repositioned — contributes to
+             the label's computed accessible name, so #ac_tx_memo would announce as "Payee / note
+             Starbucks Chipotle Amazon…" while the popup is open; a <button role="option"> is
+             also not valid content inside <label> to begin with). .ac-combo-anchor wraps the
+             WHOLE label as a sibling container — acComboInit appends the popup there, next to
+             (not inside) the label — while still giving position:relative for the popup's
+             absolute anchoring. aria-label on the input is a second, independent safety net. -->
+        <div class="ac-combo-anchor">
+          <label class="ac-field">
+            <span class="ac-lbl">Payee / note</span>
+            <input id="ac_tx_memo" type="text" placeholder="e.g. Starbucks" aria-label="Payee / note">
+          </label>
+        </div>
+        <!-- Native <datalist> popups ignore color-scheme's active/hover-row highlight (no CSS
+             hook exists in any engine for it — see the :root comment above), so these three
+             fields no longer use `list="..."` on their <input>; acComboInit() (below) reads
+             each datalist's <option> set as pure DATA and renders a fully custom, keyboard-
+             navigable popup instead (reusing .filter-opt/.is-selected — the same tokens the
+             ledger filter popover already uses — rather than a new popup idiom). Nothing that
+             POPULATES these datalists (acFillCatList/acLoadSuggest/acLoadTags) changed. -->
         <datalist id="ac_payee_list"></datalist>
 
         <!-- Category + Bucket (auto) -->
         <div class="ac-row" style="align-items:flex-end">
-          <label class="ac-field" style="flex:1">
-            <span class="ac-lbl">Category</span>
-            <input id="ac_tx_cat" list="ac_cat_list" type="text" placeholder="e.g. Groceries">
-          </label>
+          <div class="ac-combo-anchor" style="flex:1">
+            <label class="ac-field">
+              <span class="ac-lbl">Category</span>
+              <input id="ac_tx_cat" type="text" placeholder="e.g. Groceries" aria-label="Category">
+            </label>
+          </div>
           <datalist id="ac_cat_list"></datalist>
           <label class="ac-field" style="flex:0 0 132px">
             <span class="ac-lbl">Bucket <span style="text-transform:none">· auto</span></span>
@@ -1970,12 +2055,14 @@
         </div>
 
         <!-- Tags -->
-        <label class="ac-field">
-          <span class="ac-lbl"># Tags</span>
-          <span id="ac_tx_tags" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--field)">
-            <input id="ac_tx_tags_in" list="ac_tags_list" type="text" placeholder="add…" style="border:none;background:transparent;flex:1;min-width:64px;outline:none;color:var(--text);font-size:var(--fs-md);padding:1px">
-          </span>
-        </label>
+        <div class="ac-combo-anchor">
+          <label class="ac-field">
+            <span class="ac-lbl"># Tags</span>
+            <span id="ac_tx_tags" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;background:var(--field)">
+              <input id="ac_tx_tags_in" type="text" placeholder="add…" aria-label="Add a tag" style="border:none;background:transparent;flex:1;min-width:64px;outline:none;color:var(--text);font-size:var(--fs-md);padding:1px">
+            </span>
+          </label>
+        </div>
         <datalist id="ac_tags_list"></datalist>
 
         <!-- Tool row: opt-in splits + refund toggle -->
@@ -2030,13 +2117,26 @@
           <div id="ac_cat_manage" style="margin-bottom:4px"></div>
           <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
           <div class="subhead">Accounts</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <label class="mini">Name<br><input id="ac_acct_name" type="text" style="width:130px" placeholder="Checking"></label>
-            <label class="mini">Type<br><select id="ac_acct_type"><option>checking</option><option>savings</option><option>brokerage</option><option>retirement</option><option>hsa</option><option>credit</option><option>loan</option><option>cash</option><option>other</option></select></label>
-            <label class="mini" style="display:flex;align-items:center;gap:5px;padding-bottom:6px">Liability<input id="ac_acct_liab" type="checkbox" style="width:auto"></label>
+          <!-- manage-panel-redesign.md §2d: .ac-row/.ac-field replaces the old flex-wrap;align-items:
+               flex-end form (5 baselines, a padding-bottom shim to fake-align Liability). Shown/hidden
+               and the Liability lock state are driven by acAcctFormTypeChanged() (mirrors
+               tracking_store._normalize_liability so the form never shows a value the server would
+               silently overrule); forced types show a locked .mng-flag chip instead of a disabled
+               checkbox (readonly-state-legibility -- a fill, never a subtle disabled edge). -->
+          <div class="ac-row" style="flex-wrap:wrap">
+            <label class="ac-field"><span class="ac-lbl">Name</span><input id="ac_acct_name" type="text" placeholder="Checking"></label>
+            <label class="ac-field"><span class="ac-lbl">Type</span><select id="ac_acct_type"><option>checking</option><option>savings</option><option>brokerage</option><option>retirement</option><option>hsa</option><option>credit</option><option>loan</option><option>cash</option><option>other</option></select></label>
+            <span class="ac-field">
+              <span class="ac-lbl">Liability</span>
+              <span class="mng-flag" id="ac_acct_liab_flag" style="display:none">Auto: liability</span>
+              <label id="ac_acct_liab_wrap" style="display:flex;align-items:center;gap:5px;min-height:32px">
+                <input id="ac_acct_liab" type="checkbox"> Liability
+              </label>
+            </span>
+            <label class="ac-field" id="ac_acct_limit_wrap" style="display:none"><span class="ac-lbl">Credit limit</span><span class="input-pair"><span class="unit">$</span><input id="ac_acct_limit" type="text" inputmode="decimal" data-fmt="usd" placeholder="5,000"></span></label>
             <button class="seed-btn" id="ac_acct_add" type="button">+ Add account</button>
           </div>
-          <div id="ac_accts" class="mini muted" style="margin-top:8px"></div>
+          <div id="ac_accts" style="margin-top:8px"></div>
 
           <div class="subhead" style="margin-top:14px">Paste from Excel / import CSV</div>
           <div class="mini muted" style="margin:4px 0">Paste rows straight from <b>Excel / Google Sheets</b> (tab-separated) or CSV. Header row required, columns: <span class="mono">date,account,direction,amount,bucket,category,description</span></div>
@@ -2045,13 +2145,17 @@
           <div id="ac_csv_out" class="mini" style="margin-top:6px"></div>
 
           <div class="subhead" style="margin-top:14px">Net-worth snapshot</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <label class="mini">Account<br><select id="ac_snap_acct"></select></label>
-            <label class="mini">Balance<br><span class="input-pair"><input id="ac_snap_bal" type="text" inputmode="decimal" data-fmt="usd" style="width:120px"><span class="unit">$</span></span></label>
-            <label class="mini">As of<br><input id="ac_snap_date" type="date"></label>
+          <!-- manage-panel-redesign.md §2e: identical .ac-row/.ac-field treatment as §2d. -->
+          <div class="ac-row" style="flex-wrap:wrap">
+            <label class="ac-field"><span class="ac-lbl">Account</span><select id="ac_snap_acct"></select></label>
+            <label class="ac-field"><span class="ac-lbl">Balance</span><span class="input-pair"><input id="ac_snap_bal" type="text" inputmode="decimal" data-fmt="usd"><span class="unit">$</span></span></label>
+            <label class="ac-field"><span class="ac-lbl">As of</span><input id="ac_snap_date" type="date"></label>
             <button class="seed-btn" id="ac_snap_save" type="button">Save balance</button>
           </div>
           <div class="mini muted" style="margin-top:5px">Record each account's balance (liabilities subtract). Net worth = sum of the latest balances → plotted on the cone.</div>
+          <!-- S2.1 Phase B (§3.2, §8, §13-Q3): the computed reconciliation plug for the balance just
+               saved -- never stored, re-derived from GET /account-balances each time (acRenderReconcileNote). -->
+          <div id="ac_snap_recon" class="mini" style="margin-top:6px"></div>
         </div>
       </details>
     </section>
@@ -2682,6 +2786,13 @@ function foldCategoriesByCountsAs(categories, rawTotals) {
 window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange };
+// acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
+// separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
+// would throw a ReferenceError at this statement and silently prevent window.__clientMath from
+// ever being created at all (the exact adversarial-review-motivated bug this comment now guards
+// against). They're appended onto this SAME object from inside that later IIFE instead — see the
+// `if (window.__clientMath) window.__clientMath.acUtilBand = ...` assignment near `let
+// acEditAcctId` further down.
 
 // ---------- Utilities ----------
 const $ = id => document.getElementById(id);
@@ -7224,10 +7335,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   function categoryColor(key) { return KINDS[key] ? KINDS[key].color : 'var(--muted)'; }
 
   function catManageRender() {
+    // docs/manage-panel-redesign.md §2b — shared by Budget (#bgb_cat_manage) AND Actuals
+    // (#ac_cat_manage): the .mng-row grid + .gl-act* action family replace the old
+    // flex+.bgb-x rows (ragged right edge, hardcoded-red icons) identically on both tabs.
     ['bgb_cat_manage', 'ac_cat_manage'].forEach(id => {
       const el = $(id); if (!el) return;
       const cats = getCategories();
-      let h = '<div style="display:flex;flex-direction:column;gap:3px;margin-bottom:8px">';
+      let h = '<div class="mng-list" style="margin-bottom:8px">';
       cats.forEach(c => {
         const resolved = categoryColor(c.key);
         if (c.key === catEditKey && c.locked) {
@@ -7235,45 +7349,58 @@ document.addEventListener('DOMContentLoaded', async () => {
           // current resolved color (override if set, else the theme default resolved to hex,
           // since <input type=color> can't accept a raw var(...) string).
           const seedHex = c.colorOverride || resolveCssColorToHex(c.color);
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
+          h += '<div class="mng-row">'
+            + '<div class="mng-main">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(seedHex) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
-            + '<span style="flex:1">' + esc(c.label) + ' <span class="mini" style="color:var(--muted)">(built-in — color only)</span></span>'
-            + '<button class="bgb-x" data-savecat="' + esc(id) + '" title="save" aria-label="save" style="font-size:var(--fs-xs);padding:1px 6px;color:var(--accent)">&#10003;</button>'
-            + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:var(--fs-xs);padding:1px 6px">&#10005;</button>'
+            + '<span class="mng-name">' + esc(c.label) + '</span>'
+            + '<span class="mng-meta">built-in — color only</span>'
+            + '</div>'
+            + '<div class="mng-actions">'
+            + '<a href="#" class="gl-act gl-act-done" data-savecat="' + esc(id) + '" title="Save" aria-label="Save color">&#10003;</a>'
+            + '<a href="#" class="gl-act gl-act-del" data-cancelcat="' + esc(id) + '" title="Cancel" aria-label="Cancel edit">&#10005;</a>'
+            + '</div>'
             + '</div>';
         } else if (c.key === catEditKey && !c.locked) {
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0">'
+          h += '<div class="mng-row">'
+            + '<div class="mng-main">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(c.color) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
-            + '<input id="' + esc(id) + '_editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '" style="flex:1;min-width:0">'
-            + '<button class="bgb-x" data-savecat="' + esc(id) + '" title="save" aria-label="save" style="font-size:var(--fs-xs);padding:1px 6px;color:var(--accent)">&#10003;</button>'
-            + '<button class="bgb-x" data-cancelcat="' + esc(id) + '" title="cancel" aria-label="cancel" style="font-size:var(--fs-xs);padding:1px 6px">&#10005;</button>'
+            + '<input id="' + esc(id) + '_editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '" style="flex:1;min-width:120px">'
+            + '</div>'
+            + '<div class="mng-actions">'
+            + '<a href="#" class="gl-act gl-act-done" data-savecat="' + esc(id) + '" title="Save" aria-label="Save category">&#10003;</a>'
+            + '<a href="#" class="gl-act gl-act-del" data-cancelcat="' + esc(id) + '" title="Cancel" aria-label="Cancel edit">&#10005;</a>'
+            + '</div>'
             + '</div>';
         } else {
           // "Counts toward" (0.3.4 batch): a compact select on EVERY category row — built-in or
-          // custom — that writes c.countsAs via setCategoryCountsAs(). flex-wrap on the row lets
-          // this extra control drop to its own line at narrow widths instead of clipping the
-          // existing swatch/label/edit-button cluster (see technique_scgrid_inline_align_items_trap
+          // custom — that writes c.countsAs via setCategoryCountsAs(). It lives inside .mng-main
+          // (flex-wrap) so it drops to its own line under the name at narrow widths instead of
+          // clipping the swatch/label cluster (see technique_scgrid_inline_align_items_trap
           // precedent: new elements in an existing row need an actual mobile-width check, not an
           // assumption).
           const caOpts = ['need', 'want', 'investment', ''].map(v =>
             '<option value="' + v + '"' + ((c.countsAs || '') === v ? ' selected' : '') + '>' + (v ? esc(KINDS[v].label) : 'Standalone') + '</option>').join('');
-          h += '<div style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:2px 0;flex-wrap:wrap">'
-            + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + resolved + ';vertical-align:middle"></span>'
-            + '<span style="flex:1;min-width:60px">' + esc(c.label) + '</span>'
-            + (c.locked ? '<span style="font-size:var(--fs-2xs);border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)">built-in</span>' : '')
-            + '<select class="cat-countsas" data-countsas="' + esc(c.key) + '" title="counts toward the 50/30/20 framework" aria-label="' + esc(c.label) + ' counts toward" style="font-size:var(--fs-2xs);padding:1px 3px;border-radius:4px;max-width:108px;flex-shrink:0">' + caOpts + '</select>'
-            + (c.locked ? '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="recolor ' + esc(c.label) + '" aria-label="recolor ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#9998;</button>' : '')
-            + (c.locked && c.colorOverride ? '<button class="bgb-x" data-resetcat="' + esc(c.key) + '" title="reset to default color" aria-label="reset ' + esc(c.label) + ' to default color" style="font-size:var(--fs-xs);padding:1px 6px">&#8635;</button>' : '')
-            + (c.locked ? '' : '<button class="bgb-x" data-editcat="' + esc(c.key) + '" title="edit ' + esc(c.label) + '" aria-label="edit ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#9998;</button>')
-            + (c.locked ? '' : '<button class="bgb-x" data-delcat="' + esc(c.key) + '" title="delete ' + esc(c.label) + '" style="font-size:var(--fs-xs);padding:1px 6px">&#215;</button>')
+          h += '<div class="mng-row">'
+            + '<div class="mng-main">'
+            + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + resolved + '"></span>'
+            + '<span class="mng-name">' + esc(c.label) + '</span>'
+            + (c.locked ? '<span class="mng-flag">built-in</span>' : '')
+            + '<select class="cat-countsas" data-countsas="' + esc(c.key) + '" title="counts toward the 50/30/20 framework" aria-label="' + esc(c.label) + ' counts toward" style="font-size:var(--fs-2xs);padding:1px 3px;border-radius:4px;width:116px;flex-shrink:0">' + caOpts + '</select>'
+            + '</div>'
+            + '<div class="mng-actions">'
+            + (c.locked ? '<a href="#" class="gl-act gl-act-primary" data-editcat="' + esc(c.key) + '" title="Recolor ' + esc(c.label) + '" aria-label="Recolor ' + esc(c.label) + '">&#9998;</a>' : '')
+            + (c.locked && c.colorOverride ? '<a href="#" class="gl-act" data-resetcat="' + esc(c.key) + '" title="Reset to default color" aria-label="Reset ' + esc(c.label) + ' to default color">&#8635;</a>' : '')
+            + (c.locked ? '' : '<a href="#" class="gl-act gl-act-primary" data-editcat="' + esc(c.key) + '" title="Edit ' + esc(c.label) + '" aria-label="Edit ' + esc(c.label) + '">&#9998;</a>')
+            + (c.locked ? '' : '<a href="#" class="gl-act gl-act-del" data-delcat="' + esc(c.key) + '" title="Delete ' + esc(c.label) + '" aria-label="Delete ' + esc(c.label) + '">&#215;</a>')
+            + '</div>'
             + '</div>';
         }
       });
       h += '</div>'
-        + '<div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:8px">'
-        + '<label class="mini" style="flex:1;min-width:80px">Label<br>'
-        + '<input id="' + esc(id) + '_lbl" type="text" placeholder="e.g. Medical" style="width:100%"></label>'
-        + '<label class="mini">Color<br>'
+        + '<div class="ac-row" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">'
+        + '<label class="ac-field" style="flex:1 1 140px"><span class="ac-lbl">Label</span>'
+        + '<input id="' + esc(id) + '_lbl" type="text" placeholder="e.g. Medical"></label>'
+        + '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Color</span>'
         + '<input id="' + esc(id) + '_clr" type="color" value="#7aa7ff" style="height:31px;width:40px;padding:2px;cursor:pointer;border-radius:4px"></label>'
         + '<button class="seed-btn" data-addcat="' + esc(id) + '" type="button">+ Add</button>'
         + '</div>';
@@ -9311,11 +9438,41 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---------- Actuals: plan-vs-actual tracking (server-backed; data lives in /data/actuals.db) ----------
   const ACT = { month: null, accounts: [], dir: 'out', isRefund: false, sticky: { bucket: 'need', acct: null }, wired: false,
-                suggest: { payees: {}, catsByBucket: {} }, txns: [], tagState: [], tagFilter: null, catFilter: null, acctFilter: null, templates: [], recurring: [] };
+                suggest: { payees: {}, catsByBucket: {} }, txns: [], tagState: [], tagFilter: null, catFilter: null, acctFilter: null, templates: [], recurring: [],
+                balances: {}, snapAccts: new Set(), latestSnap: {}, snapLoadOk: false };
+                // S2.1 Phase B: GET /account-balances, keyed by accountId (additive readout, §6 zero-regression contract).
+                // snapAccts/latestSnap (manage-panel-redesign.md §4b): joined from GET /snapshots so the Manage
+                // account rows can gate a non-credit balance readout on "has an anchor" rather than a 0-vs-nonzero guess.
+                // snapLoadOk (adversarial review finding #5, re-review follow-up #1): true ONLY after a /snapshots
+                // fetch has actually succeeded at least once. Starts false -- "no fetch yet" is the exact same
+                // unknown state finding #5 already renders as the neutral "—" affordance, so defaulting it true
+                // fabricated a one-frame "Set a balance" nudge flash on every account on the very first Actuals
+                // paint of a session (acRenderAcctList runs synchronously, before acLoadBalances resolves).
+  // Manage panel (docs/manage-panel-redesign.md §2c) — view + edit-one-row for the account list,
+  // mirroring catEditKey: null = every row renders as a quiet view row; an id = that one row (and
+  // only that one) renders as the aligned .ac-row/.ac-field edit mini-form.
+  let acEditAcctId = null;
   // TRACK_BUCKETS = spend categories only (investment excluded). Rebuilt by syncCategoryState().
   let TRACK_BUCKETS = getCategories().filter(c => c.key !== 'investment').map(c => c.key);
   syncCategoryState();   // sets window.__categories, KINDS, TRACK_BUCKETS from the store
-  const acAmt = v => '$' + (Math.round((+v || 0) * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // BUG-0005 fix round: a negative category/bucket actual is now a reachable, legitimate state
+  // (a refund can net a category below zero) -- the old `'$' + n.toLocaleString(...)` put the
+  // negative sign INSIDE after the dollar sign ("$-149.93"), never correct US currency notation.
+  // Matches fmt$'s existing sign-then-$ convention (index.html ~2696) rather than introducing a
+  // second one. Behavior is byte-identical for any non-negative input.
+  const acAmt = v => { const n = Math.round((+v || 0) * 100) / 100; return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  // Test hook (adversarial-review "Tests" ask, tests/test_client_math.js): most of these are
+  // function declarations hoisted to the top of THIS IIFE (so they're already callable here even
+  // though they're defined further down in the file), but this whole IIFE is a separate
+  // top-level scope from the one that builds window.__clientMath — so they must be appended onto
+  // it at runtime, not listed in that literal (see the comment there). ACT is exposed the same
+  // way, as the SAME live reference (not a copy) so a test can mutate it before calling a
+  // function that closes over it. acAmt is a `const` (NOT hoisted like a function declaration —
+  // unlike everything else in this list, it must be defined ABOVE this line, not merely
+  // somewhere in the same IIFE, or this whole Object.assign throws a TDZ ReferenceError and
+  // silently drops every key in it, not just acAmt's).
+  if (window.__clientMath) Object.assign(window.__clientMath, { acUtilBand, acLiabForceFor, acSaveLiabValue, acAcctMetaHtml, ACT,
+    acRefundSign, acSignedAmount, acSignedLegAmount, acSignedPartnerOwed, acActualByCat, acPcatRowMath, acMatchRecurring, acAmt, acLineRows });
   async function getJSON(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
   function acNowMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
   function acToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
@@ -9471,6 +9628,169 @@ document.addEventListener('DOMContentLoaded', async () => {
     return true;
   }
 
+  // Custom combobox — replaces the native <datalist> popup for Category/Payee/Tags. Root cause
+  // this exists at all: native datalist chrome follows `color-scheme` for its overall light/dark
+  // surface (fixed elsewhere, see the :root comment), but NO browser engine exposes a CSS hook
+  // for the active/hover row's own colors — so a highlighted suggestion can render illegibly
+  // regardless of how correctly color-scheme is set. There is no CSS-only fix; this replaces the
+  // native popup with a fully custom one this app fully controls.
+  //
+  // WAI-ARIA COMBOBOX pattern (deliberately NOT the roving-listbox pattern the ledger filter
+  // popover uses, e.g. acOpenFilterPopup/its Arrow-key handler): a live-typing text field must
+  // keep real DOM focus on the <input> at all times. The "active" suggestion is tracked purely
+  // via `aria-activedescendant` + a visual `.is-selected` class — reusing .filter-opt/.is-selected
+  // VERBATIM (the same tokens/classes the ledger filter popover already uses) rather than
+  // inventing a new popup idiom, per the design brief.
+  //
+  // `selectEvent`: 'input' (Category/Payee — fires the EXISTING acCatChanged/acPayeeAutofill
+  // 'input' listeners unchanged) or 'change' (Tags — fires the EXISTING datalist-pick 'change'
+  // listener, which calls acAddTag() and clears the input, unchanged). Nothing that already
+  // listens to these events on these inputs needed to change; this only replaces how a
+  // suggestion gets INTO the input in the first place.
+  function acComboInit(input, listId, opts) {
+    if (!input) return;
+    opts = opts || {};
+    const selectEvent = opts.selectEvent || 'input';
+    const label = opts.label || 'Suggestions';
+    // Re-review finding C: the popup must NOT be a descendant of the <label> (see the
+    // .ac-combo-anchor CSS comment) — find the explicit sibling-anchor wrapper markup provides,
+    // falling back to the input's own parent only if a caller ever omits it.
+    const wrap = input.closest('.ac-combo-anchor') || input.parentElement;
+    const popup = document.createElement('div');
+    const popupId = input.id + '_combo';
+    popup.className = 'ac-combo-popup';
+    popup.id = popupId;
+    popup.setAttribute('role', 'listbox');
+    popup.setAttribute('aria-label', label);
+    popup.hidden = true;
+    wrap.appendChild(popup);
+
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('aria-controls', popupId);
+
+    let activeIndex = -1, currentOpts = [];
+
+    function filterOptions() {
+      const dl = $(listId);
+      const all = dl ? Array.from(dl.options).map(o => o.value).filter(Boolean) : [];
+      const q = (input.value || '').trim().toLowerCase();
+      if (!q) return all;
+      const starts = all.filter(o => o.toLowerCase().startsWith(q));
+      const rest = all.filter(o => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q));
+      return starts.concat(rest);
+    }
+
+    let suppressRender = false;
+    function render() {
+      if (suppressRender) return;
+      currentOpts = filterOptions();
+      activeIndex = -1;
+      input.removeAttribute('aria-activedescendant');
+      if (!currentOpts.length) {
+        popup.innerHTML = '<div class="mini muted" style="padding:6px 8px">No matches</div>';
+      } else {
+        popup.innerHTML = currentOpts.map((o, i) =>
+          '<button type="button" class="filter-opt" role="option" id="' + popupId + '_opt' + i + '" aria-selected="false" tabindex="-1">' + esc(o) + '</button>'
+        ).join('');
+      }
+      popup.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    }
+
+    function close() {
+      popup.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+      activeIndex = -1;
+    }
+
+    function setActive(i) {
+      const btns = popup.querySelectorAll('.filter-opt');
+      btns.forEach(b => { b.classList.remove('is-selected'); b.setAttribute('aria-selected', 'false'); });
+      activeIndex = i;
+      if (i >= 0 && btns[i]) {
+        btns[i].classList.add('is-selected');
+        btns[i].setAttribute('aria-selected', 'true');
+        input.setAttribute('aria-activedescendant', btns[i].id);
+        btns[i].scrollIntoView({ block: 'nearest' });
+      } else {
+        input.removeAttribute('aria-activedescendant');
+      }
+    }
+
+    function choose(value) {
+      input.value = value;
+      close();
+      // Dispatching `selectEvent` (to fire the EXISTING acCatChanged/acPayeeAutofill/tag-add
+      // listeners unchanged) would otherwise also re-trigger THIS module's own 'input' listener
+      // (render()), reopening the popup we just closed since the now-complete value still
+      // matches itself. Suppress render() for the duration of that dispatch AND the subsequent
+      // focus() call -- re-review finding E: focus() is bound to render() via the 'focus'
+      // listener below, and today it only no-ops because the input already happens to be
+      // focused in both selection paths (click, via the mousedown-preventDefault guard; Enter,
+      // since it fires on the already-focused input). That's a real but unasserted invariant --
+      // keeping focus() inside the suppressed window removes the dependency on it entirely.
+      suppressRender = true;
+      input.dispatchEvent(new Event(selectEvent, { bubbles: true }));
+      input.focus();
+      suppressRender = false;
+    }
+
+    input.addEventListener('input', render);
+    input.addEventListener('focus', render);
+    input.addEventListener('blur', () => { close(); });
+    // Capture phase so this always runs BEFORE any EXISTING bubble-phase keydown listener already
+    // on this input (e.g. the category/payee "Enter completes the top match" listener, the tags
+    // Enter/comma/Backspace listener) — only Enter-WITH-an-arrowed-active-item stops that older
+    // listener from also firing (stopImmediatePropagation). Every other key — typing, Enter with
+    // nothing arrow-selected, Backspace, comma — is left completely alone, so all pre-existing
+    // behavior is byte-identical to before this fix.
+    input.addEventListener('keydown', ev => {
+      if (popup.hidden && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) render();
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); if (currentOpts.length) setActive((activeIndex + 1) % currentOpts.length); return; }
+      if (ev.key === 'ArrowUp') { ev.preventDefault(); if (currentOpts.length) setActive((activeIndex - 1 + currentOpts.length) % currentOpts.length); return; }
+      if (ev.key === 'Escape') { if (!popup.hidden) { ev.preventDefault(); close(); } return; }
+      if (ev.key === 'Enter') {
+        if (activeIndex >= 0 && currentOpts[activeIndex] != null) {
+          ev.preventDefault(); ev.stopImmediatePropagation();
+          choose(currentOpts[activeIndex]);
+        } else if (!popup.hidden) {
+          // Re-review finding A: nothing arrow-highlighted, but the popup is open. Native
+          // <datalist> always dismisses its popup on Enter; this branch was falling through to
+          // the OLD per-field Enter handler (acCompleteFromList's top-match completion, or the
+          // tags add-typed-text handler) with no action of our own -- that old handler's own
+          // 'input'/'change' dispatch then re-triggered THIS module's render() (since it isn't
+          // wrapped in OUR suppression), reopening the popup we should have closed. Close it now
+          // (parity with native), and suppress render for the remainder of this synchronous
+          // keydown dispatch -- the old handler runs synchronously right after this listener
+          // returns -- releasing the suppression on the next tick for genuine future typing.
+          close();
+          suppressRender = true;
+          setTimeout(() => { suppressRender = false; }, 0);
+        }
+      }
+    }, true);
+
+    // mousedown (not click) + preventDefault keeps focus on the <input> throughout a pointer
+    // selection (the combobox pattern's own rule — focus never enters the popup); the actual
+    // selection happens on the subsequent click, which still fires normally. Re-review finding
+    // D: guard ANY mousedown inside the popup, not just on a `.filter-opt` row — the popup is
+    // `overflow-y:auto`, so dragging its scrollbar is also a mousedown target; without this the
+    // scrollbar drag blurred the input (closing the popup mid-drag) instead of just scrolling.
+    popup.addEventListener('mousedown', ev => { ev.preventDefault(); });
+    popup.addEventListener('click', ev => {
+      const btn = ev.target.closest('.filter-opt'); if (!btn) return;
+      const idx = Array.from(popup.querySelectorAll('.filter-opt')).indexOf(btn);
+      if (idx >= 0) choose(currentOpts[idx]);
+    });
+
+    document.addEventListener('click', ev => {
+      if (!popup.hidden && !wrap.contains(ev.target)) close();
+    });
+  }
+
   const acAcctName = id => { const a = ACT.accounts.find(x => x.id === id); return a ? a.name : '#' + id; };
 
   // ----- tag chip input (quick-add) -----
@@ -9614,26 +9934,320 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pm = $('ac_pva_month'); if (pm) pm.textContent = acMonthLabel(ACT.month);
   }
 
+  // S2.1 Phase B (docs/reports-accounts-design.md §4, §13-Q2) -- mirrors tracking_store's
+  // server-side `_normalize_liability` exactly: credit/loan ALWAYS force liability=true,
+  // an unambiguous asset type ALWAYS forces false, 'other' is a genuine free choice. The
+  // form pre-reflects this (checkbox locked/disabled) so it can never display or submit a
+  // value the server would silently overrule on save -- the review's Phase-B note.
+  const AC_UNAMBIG_ASSET_TYPES = new Set(['checking', 'savings', 'brokerage', 'retirement', 'hsa', 'cash']);
+  function acLiabForceFor(type) {
+    if (type === 'credit' || type === 'loan') return true;
+    if (AC_UNAMBIG_ASSET_TYPES.has(type)) return false;
+    return null;   // 'other' -- caller's choice, never forced
+  }
+  // Adversarial-review finding #2 / re-review follow-up #2 -- the exact decision
+  // acSaveAccountEdit's PATCH body makes for isLiability, pulled out to a named, independently
+  // testable function so tests/test_client_math.js binds to the SAME production code instead of
+  // re-deriving the rule (a re-derivation would keep passing even if acSaveAccountEdit regressed
+  // back to reading the checkbox verbatim for a forced type). Whenever acLiabForceFor(type) !==
+  // null, the forced value wins over whatever the (possibly stale) checkbox reads -- this is what
+  // self-heals a stranded row on any save, not just via the dedicated Fix action.
+  function acSaveLiabValue(type, checkboxChecked) {
+    const forced = acLiabForceFor(type);
+    return forced !== null ? forced : checkboxChecked;
+  }
+  // Add-account mini-form: swap the Liability zone between a locked .mng-flag chip (forced
+  // types) and the real checkbox ('other' only), and show/hide the credit-limit field, as the
+  // Type select changes. Runs once at wire-time too so the default selected type ('checking')
+  // starts in its correct forced state. manage-panel-redesign.md §2d -- readonly-state-legibility:
+  // a forced type is signaled with a FILL, never a disabled checkbox self-contradiction.
+  function acAcctFormTypeChanged() {
+    const type = $('ac_acct_type').value;
+    const liab = $('ac_acct_liab');
+    const forced = acLiabForceFor(type);
+    const flagEl = $('ac_acct_liab_flag');
+    const checkWrap = $('ac_acct_liab_wrap');
+    if (forced !== null) {
+      if (liab) liab.checked = forced;
+      if (flagEl) { flagEl.style.display = ''; flagEl.textContent = 'Auto: ' + (forced ? 'liability' : 'asset'); }
+      if (checkWrap) checkWrap.style.display = 'none';
+    } else {
+      if (liab) liab.disabled = false;
+      if (flagEl) flagEl.style.display = 'none';
+      if (checkWrap) checkWrap.style.display = 'flex';
+    }
+    const limitWrap = $('ac_acct_limit_wrap');
+    if (limitWrap) limitWrap.style.display = (type === 'credit') ? '' : 'none';
+  }
+
   async function acLoadAccounts() {
     try { ACT.accounts = (await getJSON('/api/tracking/accounts')).accounts || []; } catch (e) { ACT.accounts = []; }
     const opts = ACT.accounts.map(a => '<option value="' + a.id + '">' + esc(a.name) + '</option>').join('');
     ['ac_tx_acct', 'ac_snap_acct'].forEach(id => { const s = $(id); if (s) { const cur = s.value; s.innerHTML = opts || '<option value="">— add an account —</option>'; if (cur) s.value = cur; } });
     if (ACT.sticky.acct && $('ac_tx_acct')) $('ac_tx_acct').value = ACT.sticky.acct;
-    const list = $('ac_accts');
-    if (list) list.innerHTML = ACT.accounts.length
-      ? ACT.accounts.map(a => '<span style="display:inline-block;margin:2px 10px 2px 0">' + esc(a.name) + ' <span class="muted">(' + a.type + (a.isLiability ? ', liability' : '') + ')</span> <a href="#" data-del-acct="' + a.id + '" title="delete">✕</a></span>').join('')
+    acRenderAcctList();     // draw immediately from whatever ACT.balances already has (may be empty/stale)
+    acLoadBalances();       // then refresh the flow-aware readout and redraw
+  }
+
+  // S2.1 Phase B (docs/reports-accounts-design.md §8) -- additive-only readout. Its own fetch
+  // (not folded into acLoadAccounts' /accounts call) so txn/snapshot writes can refresh just
+  // this without re-pulling the account list. Never touches ivBal/the Overview cone/
+  // aggregate_actuals -- those stay snapshot-only and byte-identical per the §6 contract.
+  // manage-panel-redesign.md §4b: also joins GET /snapshots (zero new endpoint -- the same data
+  // the snapshot picker already feeds from, ivAcctLoad's own pattern) to build an "anchor" signal
+  // -- ACT.snapAccts (has >=1 snapshot) + ACT.latestSnap (its most recent as-of date) -- since
+  // `opening === 0` is not a reliable "no snapshot" test (a real $0 opening is legal).
+  // Adversarial-review finding #5: the two fetches settle INDEPENDENTLY (not Promise.all) so one
+  // endpoint failing never blanks the other's data; a /snapshots failure specifically sets
+  // snapLoadOk=false so acAcctMetaHtml renders the neutral "—" instead of ever fabricating the
+  // "no snapshot exists" nudge over an account that may well have years of real anchors.
+  async function acLoadBalances() {
+    try {
+      const data = await getJSON('/api/tracking/account-balances');
+      const map = {}; (data.accounts || []).forEach(a => { map[a.accountId] = a; });
+      ACT.balances = map;
+    } catch (e) { ACT.balances = {}; }
+    try {
+      const snapData = await getJSON('/api/tracking/snapshots');
+      const snapAccts = new Set(), latestSnap = {};
+      (snapData.snapshots || []).forEach(s => {
+        snapAccts.add(s.accountId);
+        if (!latestSnap[s.accountId] || s.asOf > latestSnap[s.accountId]) latestSnap[s.accountId] = s.asOf;
+      });
+      ACT.snapAccts = snapAccts; ACT.latestSnap = latestSnap; ACT.snapLoadOk = true;
+    } catch (e) { ACT.snapLoadOk = false; }
+    acRenderAcctList();
+  }
+
+  // manage-panel-redesign.md §2c — view + edit-one-row. VIEW row (default): a quiet .mng-row
+  // with name + type/balance meta + ✎/✕ actions; the account is otherwise read-only.
+  //
+  // Adversarial-review findings #1/#2 (2026-07-29): the wrong-sign detector and the balance
+  // lane are gated on `acLiabForceFor(a.type) !== null && a.isLiability !== forced` -- i.e. ANY
+  // account whose stored is_liability disagrees with what its type forces -- not `type ∈
+  // {credit,loan}`. That covers both directions: a credit/loan stuck at is_liability=0 (the
+  // original pre-v14 bug) AND an asset-type account stranded at is_liability=1 (a `type=checking,
+  // is_liability=1` row, e.g. from a bad manual PATCH) -- the latter had NO repair affordance
+  // before this fix and rendered shape-identical to a normal asset row. Credit still shows no
+  // balance number (it lives in "Pay off your cards", §3) but ANY isLiability account (loan,
+  // or 'other' flagged as a liability) now gets the `Liability` chip AND, when anchored, its
+  // balance with an ` owed` qualifier -- the fix for finding #1's "loan renders debt as asset"
+  // (a signed `account-balances.balance` for a liability is a POSITIVE owed amount, shape-
+  // identical to an asset's balance without this qualifier).
+  const acDateShort = iso => (iso || '').slice(5);   // 'YYYY-MM-DD' -> 'MM-DD', matches the card-payments list idiom
+  function acAcctMetaHtml(a) {
+    const forced = acLiabForceFor(a.type);
+    const wrongSign = forced !== null && a.isLiability !== forced;
+    if (wrongSign) {
+      const currentWord = a.isLiability ? 'a liability' : 'an asset';
+      const targetWord = forced ? 'a liability' : 'an asset';
+      return '<span style="color:var(--warn)">&#9888; Recorded as ' + currentWord + ' &mdash; </span>'
+        + '<a href="#" class="gl-act gl-act-primary" data-fix-liab="' + a.id + '" data-fix-target="' + forced + '" style="color:var(--warn)" title="Mark as ' + targetWord + '" aria-label="Mark ' + esc(a.name) + ' as ' + targetWord + '">Fix</a>';
+    }
+    const liabChip = a.isLiability ? '<span class="mng-flag">Liability</span>' : '';
+    if (a.type === 'credit') return liabChip || '<span class="mng-flag">Liability</span>';   // no balance -- lives in Pay-off-your-cards (§3)
+    let balanceHtml;
+    if (!ACT.snapLoadOk) {
+      balanceHtml = '<span class="muted">—</span>';   // /snapshots itself failed -- never fabricate the nudge over unknown state (finding #5)
+    } else if (ACT.snapAccts.has(a.id)) {
+      const ab = ACT.balances[a.id];
+      const asOf = ACT.latestSnap[a.id];
+      if (ab && ab.balance != null) balanceHtml = fmt$(ab.balance) + (a.isLiability ? ' owed' : '') + (asOf ? ' (as of ' + acDateShort(asOf) + ')' : '');
+      else balanceHtml = '<span class="muted">—</span>';   // account-balances still loading/failed
+    } else {
+      balanceHtml = '<a href="#" class="gl-act gl-act-primary" data-set-balance="' + a.id + '">Set a balance to start tracking &rarr;</a>';
+    }
+    return (liabChip ? liabChip + ' ' : '') + balanceHtml;
+  }
+  function acAcctRowHtml(a) {
+    return '<div class="mng-row">'
+      + '<div class="mng-main">'
+      + '<span class="mng-name">' + esc(a.name) + '</span>'
+      + '<span class="mng-meta">' + esc(a.type) + ' &middot; ' + acAcctMetaHtml(a) + '</span>'
+      + '</div>'
+      + '<div class="mng-actions">'
+      + '<a href="#" class="gl-act gl-act-primary" data-edit-acct="' + a.id + '" title="Edit ' + esc(a.name) + '" aria-label="Edit ' + esc(a.name) + '">&#9998;</a>'
+      + '<a href="#" class="gl-act gl-act-del" data-del-acct="' + a.id + '" title="Delete ' + esc(a.name) + '" aria-label="Delete ' + esc(a.name) + '">&#10005;</a>'
+      + '</div>'
+      + '</div>';
+  }
+
+  // EDIT row (only when acEditAcctId === a.id) -- an aligned .ac-row/.ac-field mini-form, the
+  // same idiom as the card-payment form (acRenderCards), so labels sit on one baseline and it
+  // stacks cleanly <500px via the existing .ac-row{flex-wrap:wrap} rule. Scope unchanged from
+  // the old always-on form: still writes type/isLiability/creditLimit only (no rename).
+  // Adversarial-review finding #6: the edit row previously carried NO identity -- with two real
+  // look-alike accounts (two type=hsa rows, §1b) there was zero way to tell which one you're
+  // editing. The name now renders in its own identity line above the form.
+  function acAcctEditRowHtml(a) {
+    const forced = acLiabForceFor(a.type);
+    const typeOpts = ['checking', 'savings', 'brokerage', 'retirement', 'hsa', 'credit', 'loan', 'cash', 'other']
+      .map(t => '<option value="' + t + '"' + (t === a.type ? ' selected' : '') + '>' + t + '</option>').join('');
+    return '<div class="mng-row">'
+      + '<div class="mng-main"><span class="mng-name">' + esc(a.name) + '</span></div>'
+      + '<div class="ac-row" style="flex-wrap:wrap;grid-column:1 / -1;margin-top:6px">'
+      + '<label class="ac-field"><span class="ac-lbl">Type</span><select data-acct-type="' + a.id + '">' + typeOpts + '</select></label>'
+      + '<span class="ac-field"><span class="ac-lbl">Liability</span>'
+      + '<span class="mng-flag" data-acct-liab-flag="' + a.id + '" style="display:' + (forced !== null ? '' : 'none') + '">Auto: ' + (forced ? 'liability' : 'asset') + '</span>'
+      + '<label data-acct-liab-wrap="' + a.id + '" style="display:' + (forced === null ? 'flex' : 'none') + ';align-items:center;gap:5px;min-height:32px">'
+      + '<input type="checkbox" data-acct-liab="' + a.id + '"' + (a.isLiability ? ' checked' : '') + '> Liability</label>'
+      + '</span>'
+      + '<span class="ac-field" data-acct-limit-wrap="' + a.id + '" style="display:' + (a.type === 'credit' ? '' : 'none') + '"><span class="ac-lbl">Credit limit</span>'
+      + '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-fmt="usd" data-acct-limit="' + a.id + '" value="' + (a.creditLimit != null ? a.creditLimit : '') + '" placeholder="5,000"></span></span>'
+      + '<button type="button" class="seed-btn" data-acct-save="' + a.id + '">Save</button>'
+      + '<button type="button" class="ac-tool" data-acct-cancel="' + a.id + '">Cancel</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function acRenderAcctList() {
+    const list = $('ac_accts'); if (!list) return;
+    list.innerHTML = ACT.accounts.length
+      ? '<div class="mng-list">' + ACT.accounts.map(a => (acEditAcctId === a.id ? acAcctEditRowHtml(a) : acAcctRowHtml(a))).join('') + '</div>'
       : '<span class="muted">No accounts yet — add one to start logging.</span>';
+    formatUSDFields();   // comma-format the freshly-rendered credit-limit inputs
+  }
+
+  // Adversarial-review finding #8: focus management on enter/cancel now matches the category
+  // manager this was cloned from (catEditKey's data-editcat/data-cancelcat handlers, ~line 7394) —
+  // focus lands on the first real control on enter, and is restored to the row's own ✎ trigger
+  // on cancel, instead of falling through to <body>.
+  function acEnterAcctEdit(id) {
+    acEditAcctId = +id;
+    acRenderAcctList();
+    const typeSel = document.querySelector('[data-acct-type="' + id + '"]');
+    if (typeSel) typeSel.focus();
+  }
+  function acCancelAcctEdit(id) {
+    acEditAcctId = null;
+    acRenderAcctList();
+    const editBtn = id != null ? document.querySelector('[data-edit-acct="' + id + '"]') : null;
+    if (editBtn) editBtn.focus();
+  }
+
+  // manage-panel-redesign.md §4a — the corrective one-tap Fix, NOT client-side display
+  // normalization: PATCHes isLiability to the FORCED value so the STORED sign is corrected (the
+  // server's _normalize_liability then re-derives everything downstream correctly), rather than
+  // just flipping how this one row displays while the DB (and net worth) stay wrong underneath.
+  // Adversarial-review finding #2: `target` is passed explicitly (acAcctMetaHtml's wrong-sign
+  // lane computes it from acLiabForceFor) so this same action also repairs an asset-type account
+  // stranded at is_liability=1 (target=false), not just the original credit/loan=0 case.
+  async function acFixLiability(id, target) {
+    if (acWriteGuard()) return;
+    try {
+      await _fetchJSON('/api/tracking/accounts/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isLiability: target }) });
+      showToast(target ? 'Marked as a liability' : 'Marked as an asset');
+      await acLoadAccounts();
+    } catch (e) { showToast('Could not update the account: ' + (e.message || '')); }
+  }
+
+  // manage-panel-redesign.md §4b — the "Set a balance" nudge scrolls to and preselects the
+  // existing snapshot composer rather than opening any new UI.
+  function acScrollToSnapshotForm(acctId) {
+    const sel = $('ac_snap_acct'); if (sel) sel.value = acctId;
+    const bal = $('ac_snap_bal');
+    if (bal) {
+      bal.scrollIntoView({ behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'center' });
+      bal.focus();
+    }
+  }
+
+  // A row's Type select changed (not yet saved) -- re-lock the Liability flag/checkbox and
+  // show/hide the credit-limit field for the NEW type, same rule as the add-form
+  // (acAcctFormTypeChanged). Forced types show the locked .mng-flag (never a disabled checkbox
+  // -- readonly-state-legibility); 'other' shows the real checkbox.
+  function acAcctRowTypeChanged(id) {
+    const typeSel = document.querySelector('[data-acct-type="' + id + '"]'); if (!typeSel) return;
+    const type = typeSel.value;
+    const liab = document.querySelector('[data-acct-liab="' + id + '"]');
+    const forced = acLiabForceFor(type);
+    const flagEl = document.querySelector('[data-acct-liab-flag="' + id + '"]');
+    const checkWrap = document.querySelector('[data-acct-liab-wrap="' + id + '"]');
+    if (forced !== null) {
+      if (liab) liab.checked = forced;
+      if (flagEl) { flagEl.style.display = ''; flagEl.textContent = 'Auto: ' + (forced ? 'liability' : 'asset'); }
+      if (checkWrap) checkWrap.style.display = 'none';
+    } else {
+      if (liab) liab.disabled = false;
+      if (flagEl) flagEl.style.display = 'none';
+      if (checkWrap) checkWrap.style.display = 'flex';
+    }
+    const limitWrap = document.querySelector('[data-acct-limit-wrap="' + id + '"]');
+    if (limitWrap) limitWrap.style.display = (type === 'credit') ? '' : 'none';
+  }
+
+  async function acSaveAccountEdit(id) {
+    if (acWriteGuard()) return;
+    const typeSel = document.querySelector('[data-acct-type="' + id + '"]'); if (!typeSel) return;
+    const type = typeSel.value;
+    const liabEl = document.querySelector('[data-acct-liab="' + id + '"]');
+    const limitEl = document.querySelector('[data-acct-limit="' + id + '"]');
+    // Adversarial-review finding #2: send the FORCED value whenever acLiabForceFor(type) !== null
+    // -- NEVER the (possibly stale) checkbox state. The hidden checkbox's `checked` attribute
+    // reflects the account's CURRENT stored isLiability at render time (so the Fix-sign lane has
+    // something to compare against), not what this type forces -- reading it here for a forced
+    // type would silently RE-PERSIST a stranded row's wrong sign (e.g. type=checking stuck at
+    // is_liability=1: the flag said "Auto: asset" but the checkbox was still checked=true, and
+    // the server's update_account only forces when isLiability was NOT explicitly supplied --
+    // tracking_store.py's _normalize_liability -- so sending the stale `true` verbatim shipped
+    // isLiability:true and the row stayed corrupted while the UI claimed "asset"). Editing and
+    // saving a stranded row now self-heals it as a side effect, in addition to the dedicated Fix
+    // action (acFixLiability). The decision itself lives in acSaveLiabValue() (not re-derived
+    // here) so tests/test_client_math.js exercises the SAME production function.
+    const body = { type: type, isLiability: acSaveLiabValue(type, liabEl ? liabEl.checked : false) };
+    // creditLimit omitted (not sent as null) when not a credit account or left blank -- the
+    // server treats an absent key as "don't touch" (AccountUpdateModel drops None fields), so
+    // this never clears an existing limit as a side effect of an unrelated type/liability save.
+    if (type === 'credit' && limitEl && limitEl.value.trim() !== '') body.creditLimit = rn(limitEl.value);
+    try {
+      await _fetchJSON('/api/tracking/accounts/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      showToast('Account updated');
+      acEditAcctId = null;   // back to the quiet view row on a successful save
+      // Adversarial-review finding #3: a credit-limit change must reach the "Pay off your cards"
+      // meter immediately -- acLoadAccounts() alone never calls acRenderCards; without this the
+      // meter stayed absent/stale until the user switched tabs.
+      await acLoadAccounts();
+      acRefresh();
+    } catch (e) {
+      showToast('Could not update the account: ' + (e.message || ''));
+      // Review NIT: on a rejected PATCH, don't leave the row showing the values the user just
+      // typed (they were never persisted) -- re-render it from the server's actual current state
+      // (mirrors ivAcctRender's data-ivgrp catch, which does the same). Edit mode stays open so
+      // the user can retry without re-opening the row.
+      await acLoadAccounts();
+    }
+  }
+  {
+    const listEl = $('ac_accts');
+    if (listEl) {
+      listEl.addEventListener('change', e => {
+        const ts = e.target.closest('[data-acct-type]'); if (ts) acAcctRowTypeChanged(ts.dataset.acctType);
+      });
+      listEl.addEventListener('click', async e => {
+        const sv = e.target.closest('[data-acct-save]'); if (sv) { e.preventDefault(); await acSaveAccountEdit(sv.dataset.acctSave); return; }
+        const ea = e.target.closest('[data-edit-acct]'); if (ea) { e.preventDefault(); acEnterAcctEdit(ea.dataset.editAcct); return; }
+        const ca = e.target.closest('[data-acct-cancel]'); if (ca) { e.preventDefault(); acCancelAcctEdit(ca.dataset.acctCancel); return; }
+        const fl = e.target.closest('[data-fix-liab]'); if (fl) { e.preventDefault(); await acFixLiability(fl.dataset.fixLiab, fl.dataset.fixTarget === 'true'); return; }
+        const sb = e.target.closest('[data-set-balance]'); if (sb) { e.preventDefault(); acScrollToSnapshotForm(sb.dataset.setBalance); return; }
+      });
+    }
   }
 
   async function acAddAccount() {
     if (acWriteGuard()) return;
     const name = ($('ac_acct_name').value || '').trim(); if (!name) { showToast('Account name required'); return; }
+    const type = $('ac_acct_type').value;
+    const body = { name: name, type: type, isLiability: $('ac_acct_liab').checked };
+    const limitEl = $('ac_acct_limit');
+    if (type === 'credit' && limitEl && limitEl.value.trim() !== '') body.creditLimit = rn(limitEl.value);
     try {
-      await post('/api/tracking/accounts', { name: name, type: $('ac_acct_type').value, isLiability: $('ac_acct_liab').checked });
-      $('ac_acct_name').value = ''; $('ac_acct_liab').checked = false;
+      await post('/api/tracking/accounts', body);
+      $('ac_acct_name').value = ''; $('ac_acct_liab').checked = false; if (limitEl) limitEl.value = '';
+      acAcctFormTypeChanged();   // re-apply the lock for the (unchanged) type select
       await acLoadAccounts(); showToast('Added account · ' + name);
     } catch (e) { showToast('Could not add account'); }
   }
+  { const at = $('ac_acct_type'); if (at) { at.addEventListener('change', acAcctFormTypeChanged); acAcctFormTypeChanged(); } }
 
   async function acAddTxn() {
     if (acWriteGuard()) return;
@@ -9657,16 +10271,55 @@ document.addEventListener('DOMContentLoaded', async () => {
       const hint = $('ac_tx_hint'); if (hint) hint.innerHTML = '&nbsp;';
       showToast((ACT.dir === 'in' ? '+ ' : (txKind === 'refund' ? '↩ ' : '− ')) + acAmt(amt) + (bucket ? ' · ' + (KINDS[bucket] ? KINDS[bucket].label : bucket) : ''));
       const af = $('ac_tx_amt'); if (af) af.focus();
-      acRefresh(); acLoadSuggest(); acLoadTags();
+      acRefresh(); acLoadSuggest(); acLoadTags(); acLoadBalances();   // S2.1 Phase B: new flow moves every account's running balance
     } catch (e) { showToast('Could not save'); }
+  }
+
+  // Cent-precision "$" formatter (review NIT: the reconciliation note is an honesty message
+  // about exact drift -- rounding a 30-cent gap to fmt$'s whole-dollar "$0" would silently
+  // fall into the "nothing to reconcile" branch below, which is self-contradictory). Reuses
+  // the existing fmtUSD2val 2-decimal formatter for the digits, adding fmt$'s sign-then-$
+  // placement (fmtUSD2val alone has no currency symbol; a bare '$' + fmtUSD2val(-10) would
+  // wrongly read "$-10.00"). The "flows say $X" readout (acAcctRowHtml) deliberately stays
+  // whole-dollar via fmt$ -- it's a glance figure consistent with every other balance shown
+  // in this app (ivBal, budget totals, etc.), not a to-the-penny reconciliation claim.
+  const fmt$2 = n => (n < 0 ? '-$' : '$') + fmtUSD2val(Math.abs(n));
+
+  // S2.1 Phase B (docs/reports-accounts-design.md §3.2, §8, §13-Q3) -- reads the reconciliation
+  // plug the just-saved snapshot absorbed straight back off GET /account-balances (never stored;
+  // recomputed fresh every time, per the "computed, never stored" discipline this whole feature
+  // follows). Honesty-first: shown even when it's a real drift, not silently re-anchored away.
+  function acRenderReconcileNote(info) {
+    const el = $('ac_snap_recon'); if (!el) return;
+    if (!info) { el.innerHTML = ''; return; }
+    // Review SHOULD-FIX (2026-07-28): use `lastReconcileDelta` -- the SINGLE-STEP drift at
+    // just THIS save -- not the cumulative `reconcileDelta` (Σ of every re-anchor since the
+    // first-ever snapshot). By month 3+ of periodic balance-setting the cumulative figure no
+    // longer describes "since your last balance" at all. lastReconcileDelta also arrives
+    // ALREADY display-signed (server-side, tracking.account_balances) -- no isLiability flip
+    // needed here, unlike reconcileDelta/opening/flowsSince.
+    const rDelta = info.lastReconcileDelta;
+    if (!rDelta) { el.innerHTML = '<span class="muted">Matches your logged activity since your last balance — nothing to reconcile.</span>'; return; }
+    const expected = info.balance - rDelta;
+    el.innerHTML = 'Expected <b>' + fmt$2(expected) + '</b> from your logged activity; you entered <b>' + fmt$2(info.balance) + '</b>'
+      + ' — reconciled <b>' + (rDelta > 0 ? '+' : '') + fmt$2(rDelta) + '</b> unaccounted since your last balance.';
   }
 
   async function acAddSnapshot() {
     if (acWriteGuard()) return;
     const acct = $('ac_snap_acct').value; if (!acct) { showToast('Add an account first'); return; }
+    const asOf = $('ac_snap_date').value || acMonthEnd(ACT.month);
     try {
-      await post('/api/tracking/snapshots', { accountId: +acct, asOf: $('ac_snap_date').value || acMonthEnd(ACT.month), balance: rn($('ac_snap_bal').value) });
-      $('ac_snap_bal').value = ''; showToast('Saved balance'); acRefresh(); ivNwRefresh();
+      await post('/api/tracking/snapshots', { accountId: +acct, asOf: asOf, balance: rn($('ac_snap_bal').value) });
+      $('ac_snap_bal').value = ''; showToast('Saved balance'); acRefresh(); ivNwRefresh(); acLoadBalances();
+      // Re-read at the SAME asOf just written so "the latest snapshot at/before asOf" is
+      // unambiguously the one just saved (a backdated entry with later flows already posted
+      // would otherwise fold those into the same window -- see tracking.account_balances docstring).
+      try {
+        const bd = await getJSON('/api/tracking/account-balances?asOf=' + encodeURIComponent(asOf));
+        const info = (bd.accounts || []).find(x => String(x.accountId) === String(acct));
+        acRenderReconcileNote(info);
+      } catch (e2) { acRenderReconcileNote(null); }
     } catch (e) { showToast('Could not save balance'); }
   }
 
@@ -9735,9 +10388,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     acRenderOpenPending();
   }
 
+  // BUG-0005 — the refund sign-flip, extracted ONCE. The server applies it at the query layer
+  // (tracking_store.py:2243/2249's `CASE WHEN t.kind='refund' THEN -amount_cents ELSE
+  // amount_cents END`, feeding tracking.aggregate_actuals — DEC-011 #2) before a client-side
+  // aggregator ever sees the row; every client-side sum over txn/leg amounts (or partnerOwed —
+  // the SAME class of bug, symmetric: a refund's partner share also comes back, it doesn't
+  // additionally accrue) must apply the identical flip or a refund gets ADDED to spend instead
+  // of subtracted. Centralized here (not sprinkled as `t.kind === 'refund'` checks at each call
+  // site) per the prior review round's lesson that a rule spelled out in three places drifts in
+  // one of them. Splits can never carry kind='refund' (tracking_store.py:1787 — "refunds cannot
+  // be split"), so a split leg always inherits its PARENT's kind/sign; acSignedLegAmount asserts
+  // this instead of assuming it (a console.warn, not a throw, so a would-be violation can never
+  // crash rendering).
+  function acRefundSign(t) { return (t && t.kind === 'refund') ? -1 : 1; }
+  function acSignedAmount(t) { return acRefundSign(t) * (t.amount || 0); }
+  function acSignedLegAmount(t, leg) {
+    if (t && t.kind === 'refund') {
+      console.warn('acSignedLegAmount: split leg on a refund txn (server rejects this — tracking_store.py:1787)', t.id);
+    }
+    return acRefundSign(t) * ((leg && leg.amount) || 0);
+  }
+  function acSignedPartnerOwed(t) { return acRefundSign(t) * (t.partnerOwed || 0); }
+
   // Actual spend for a bucket kind, grouped by category (split legs counted under their own bucket).
-  // actual = user's share (amount − partnerOwed); partner = sum of partner's portion.
-  // For split transactions, partnerOwed lives on the parent and is apportioned by leg amount.
+  // actual = user's SIGNED share (signedAmount − signedPartnerOwed); partner = sum of the
+  // partner's SIGNED portion. A refund's actual is negative (net money back), which a category
+  // can legitimately land at overall (a refund exceeding the category's other charges this
+  // month) — see acPcatRowMath for how that renders without a negative-width bar or a backwards
+  // percentage. For split transactions, partnerOwed lives on the parent and is apportioned by
+  // leg amount (splits can't be refunds, so this ratio math never needs a sign of its own).
   function acActualByCat(kind) {
     const map = {};
     const add = (name, share, pOwed) => {
@@ -9748,16 +10427,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     (ACT.txns || []).forEach(t => {
       if (t.direction !== 'out') return;
-      const pOwed = t.partnerOwed || 0;
+      const pOwed = acSignedPartnerOwed(t);
       if (t.splits && t.splits.length) {
         t.splits.forEach(leg => {
           if (leg.bucket === kind) {
+            const legAmt = acSignedLegAmount(t, leg);
             const legPartner = t.amount > 0 ? pOwed * leg.amount / t.amount : 0;
-            add(acCanonCat(leg.category || t.category), leg.amount - legPartner, legPartner);
+            add(acCanonCat(leg.category || t.category), legAmt - legPartner, legPartner);
           }
         });
       } else if (t.bucket === kind) {
-        add(acCanonCat(t.category), t.amount - pOwed, pOwed);
+        add(acCanonCat(t.category), acSignedAmount(t) - pOwed, pOwed);
       }
     });
     return map;
@@ -9803,36 +10483,71 @@ document.addEventListener('DOMContentLoaded', async () => {
     return hits[0];
   }
 
+  // Pure bar/badge/state math for one Plan-vs-Actual category (or bucket) row — extracted out of
+  // acLineRows' row() closure (BUG-0005 fix round) so the negative-actual case (a category can
+  // legitimately net negative when a refund exceeds its other charges this month) is directly
+  // unit-testable and can never silently regress into a negative-width bar or a backwards/
+  // nonsensical percentage like "-75%". Behavior is IDENTICAL to before for any non-negative
+  // yourShare; only the negative branch is new.
+  function acPcatRowMath(planned, yourShare, partner) {
+    const noPlan = planned <= 0, over = !noPlan && yourShare > planned + 0.005;
+    const noBudget = noPlan && yourShare > 0.005;                          // spending with no budget → flag it red
+    const isNetRefund = yourShare < -0.005;
+    // Nit (re-review): a sub-cent negative yourShare (e.g. -0.001, below the isNetRefund
+    // threshold) rounds through .toFixed(0) as the literal string "-0" -- Math.round's negative
+    // zero, `-0 === 0` is true, so normalize it to a plain positive 0 before formatting.
+    const pctRounded = noPlan ? 0 : (Math.round(yourShare / planned * 100) === 0 ? 0 : yourShare / planned * 100);
+    const pct = noPlan
+      ? (yourShare > 0.005 ? 'no budget' : (isNetRefund ? 'net refund' : '—'))
+      : (isNetRefund ? 'net refund' : pctRounded.toFixed(0) + '%');
+    let solidW, partnerW;
+    if (noPlan) {
+      // Re-review finding B: this branch was unclamped and is now reachable specifically because
+      // the Unplanned-row visibility gate changed to Math.abs(total)>0.005 (BUG-0005 fix round)
+      // -- a net-negative yourShare with a positive partner share (e.g. -30/+50) produces
+      // solidW:-150 (invalid, dropped by the browser) and partnerW:250, which the partner bar's
+      // flex:0 1 auto then shrinks to fill 100% -- rendering a completely full striped bar for a
+      // row that's actually net-negative on your side. Same Math.max(0, Math.min(100, …)) clamp
+      // as the else branch below. When both yourShare/partner are non-negative (the common case)
+      // the two ratios already sum to exactly 100 by construction (yourShare+partner === tot), so
+      // clamping to [0,100] independently changes nothing there.
+      const tot = yourShare + partner;
+      solidW = tot > 0 ? Math.max(0, Math.min(100, Math.round(yourShare / tot * 100))) : 0;
+      partnerW = tot > 0 ? Math.max(0, Math.min(100, Math.round(partner / tot * 100))) : 0;
+    } else {
+      // Floor at 0, not just the pre-existing ceiling at 100 -- a net-refund category has
+      // nothing to visualize as "progress toward the budget" (BUG-0005: yourShare can now be
+      // negative), and a negative CSS width is nonsense the browser doesn't reliably clamp for you.
+      solidW = Math.max(0, Math.min(100, yourShare / planned * 100));
+      partnerW = partner > 0 ? Math.min(100 - solidW, partner / planned * 100) : 0;
+    }
+    const spent = yourShare + partner;
+    // Math.abs, not a bare `<= 0.005` -- a net-negative category (real refund activity, just
+    // netting below zero) is NOT the same as a genuinely zero-activity category; the old bare
+    // comparison faded a real net-refund row with the same low-opacity ".is-zero" treatment
+    // meant for "nothing happened here" (BUG-0005 fix round).
+    const isZero = Math.abs(spent) <= 0.005;
+    let state; if (noPlan) state = noBudget ? 'is-over' : 'is-none'; else if (over) state = 'is-over'; else state = (yourShare / planned) < 0.75 ? 'is-good' : 'is-warn';
+    return { pct: pct, solidW: solidW, partnerW: partnerW, state: state, isZero: isZero, over: over, noPlan: noPlan };
+  }
+
   // Per-category plan-vs-actual rows for a bucket: each budget line + an "Unplanned" catch-all.
   // Bar = solid segment (yourShare, green/red/gray) + dotted/striped extension (partner portion).
   function acLineRows(kind) {
     const lines = acBudgetLines(kind), actMap = acActualByCat(kind);
     if (!lines.length && !Object.keys(actMap).length) return '';
     const row = (name, planned, yourShare, partner, catKey) => {
-      const noPlan = planned <= 0, over = !noPlan && yourShare > planned + 0.005;
-      const noBudget = noPlan && yourShare > 0.005;                          // spending with no budget → flag it red
-      const pct = noPlan ? (yourShare > 0 ? 'no budget' : '—') : (yourShare / planned * 100).toFixed(0) + '%';
-      let solidW, partnerW;
-      if (noPlan) {
-        const tot = yourShare + partner;
-        solidW = tot > 0 ? Math.round(yourShare / tot * 100) : 0;
-        partnerW = tot > 0 ? Math.round(partner / tot * 100) : 0;
-      } else {
-        solidW = Math.min(100, yourShare / planned * 100);
-        partnerW = partner > 0 ? Math.min(100 - solidW, partner / planned * 100) : 0;
-      }
+      const m = acPcatRowMath(planned, yourShare, partner);
       const encodedKey = typeof catKey === 'string' ? catKey : '';
       const active = ACT.catFilter && ACT.catFilter.kind === kind && ACT.catFilter.name.toLowerCase() === encodedKey.toLowerCase();
-      const spent = yourShare + partner; const isZero = spent <= 0.005;
-      let state; if (noPlan) state = noBudget ? 'is-over' : 'is-none'; else if (over) state = 'is-over'; else state = (yourShare / planned) < 0.75 ? 'is-good' : 'is-warn';
-      const rowCls = 'pcat-row ' + state + (isZero ? ' is-zero' : '');
+      const rowCls = 'pcat-row ' + m.state + (m.isZero ? ' is-zero' : '');
       const partnerLine = partner > 0 ? '<span class="pcat-partner">+' + acAmt(partner) + ' partner</span>' : '';
-      const partnerBar  = partner > 0 ? '<span class="pcat-bar-partner" style="width:' + partnerW + '%"></span>' : '';
+      const partnerBar  = partner > 0 ? '<span class="pcat-bar-partner" style="width:' + m.partnerW + '%"></span>' : '';
       const label = '<a href="#" class="ac-catlink pcat-name' + (active ? ' is-active' : '') + '" data-catfilter="' + esc(kind) + '|' + esc(encodedKey) + '">' + esc(name) + '</a>';
       return '<div class="' + rowCls + '">' + label
         + '<span class="pcat-amt"><span class="pcat-amt-main"><b class="pcat-actual">' + acAmt(yourShare) + '</b> <span class="pcat-plan">/ ' + acAmt(planned) + '</span></span>' + partnerLine + '</span>'
-        + '<span class="pcat-badge">' + pct + '</span>'
-        + '<span class="pcat-bar"><span class="pcat-fill" style="width:' + solidW + '%"></span>' + partnerBar + '</span></div>';
+        + '<span class="pcat-badge">' + m.pct + '</span>'
+        + '<span class="pcat-bar"><span class="pcat-fill" style="width:' + m.solidW + '%"></span>' + partnerBar + '</span></div>';
     };
     const used = new Set(); let rows = '';
     lines.forEach(o => { const k = o.name.toLowerCase(); used.add(k); rows += row(o.name, o.planned, (actMap[k] || {}).actual || 0, (actMap[k] || {}).partner || 0, o.name); });
@@ -9841,7 +10556,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let unplanned = 0, unplannedPartner = 0;
     unplannedCats.forEach(c => { unplanned += c.actual; unplannedPartner += c.partner; });
     let tail = '';
-    if (unplanned > 0.005 || unplannedPartner > 0.005) {
+    // Math.abs (BUG-0005 fix round): an unplanned refund netting the whole catch-all NEGATIVE
+    // (e.g. an uncategorized purchase refunded this month) is real activity worth showing, not
+    // silently dropped because the old `> 0.005` gate only ever fired on a positive total.
+    if (Math.abs(unplanned) > 0.005 || unplannedPartner > 0.005) {
       rows += row('Unplanned', 0, unplanned, unplannedPartner, '');
       unplannedCats.sort((a, b) => b.actual - a.actual);
       tail = acUnplannedFixer(kind, unplannedCats.filter(c => c.actual > 0.005));
@@ -9870,14 +10588,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     return '<details class="pcat-unplanned-det"><summary class="mini muted">fix ' + cats.length + ' unplanned — assign to a budget line</summary><div class="pcat-unplanned-list">' + rows + '</div></details>';
   }
 
-  // Match this month's actuals to a recurring expectation (by direction + bucket + category, amount-tolerant).
+  // Match this month's actuals to a recurring expectation (by direction + bucket + category,
+  // amount-tolerant). BUG-0005: hit() now takes the SIGNED amount (acSignedAmount/
+  // acSignedLegAmount) -- a refund on a recurring-matched category (rare, but reachable) must
+  // reduce "came through" the same way it reduces every other client-side actual, not inflate it.
+  // acAddTxn (the composer) never sets kind='refund' on a direction='in' row -- so for anything
+  // this app's own UI produces, acSignedAmount is a no-op on 'in' rows and this is routed through
+  // the same helper purely for uniformity, not because a special case was needed. (Correction,
+  // re-review: an 'in'+'refund' row is NOT actually rejected server-side -- tracking_store.py's
+  // create_txn validates kind and direction independently, not their combination -- so this could
+  // theoretically arrive via CSV import/direct API. Harmless either way: acSignedAmount would
+  // flip its sign exactly like it does for an 'out' refund, which is the same rule the server's
+  // own signed_c formula applies regardless of direction.)
   function acMatchRecurring(r) {
     const cat = (r.category || '').toLowerCase(); let actual = 0, count = 0, lastDate = null;
     const hit = (amt, on) => { actual += amt; count++; if (!lastDate || on > lastDate) lastDate = on; };
     (ACT.txns || []).forEach(t => {
       if (t.direction !== r.direction) return;
-      if (t.splits && t.splits.length) t.splits.forEach(leg => { if (r.bucket && leg.bucket === r.bucket && (leg.category || t.category || '').toLowerCase() === cat) hit(leg.amount, t.postedOn); });
-      else { const bucketOk = r.direction === 'in' ? true : (t.bucket === r.bucket); if (bucketOk && (t.category || '').toLowerCase() === cat) hit(t.amount, t.postedOn); }
+      if (t.splits && t.splits.length) t.splits.forEach(leg => { if (r.bucket && leg.bucket === r.bucket && (leg.category || t.category || '').toLowerCase() === cat) hit(acSignedLegAmount(t, leg), t.postedOn); });
+      else { const bucketOk = r.direction === 'in' ? true : (t.bucket === r.bucket); if (bucketOk && (t.category || '').toLowerCase() === cat) hit(acSignedAmount(t), t.postedOn); }
     });
     return { actual: actual, count: count, lastDate: lastDate };
   }
@@ -9971,11 +10700,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const ok = sr.actual >= sr.planned * 0.95;
     let h = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (ok ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">Invested ' + acAmt(c.buckets.investment.actual) + ' of ' + acAmt(c.buckets.investment.planned) + ' — saved ' + (sr.actual * 100).toFixed(0) + '% vs ' + (sr.planned * 100).toFixed(0) + '% plan</div><div class="s">' + acMonthLabel(ACT.month) + (data.planStatus === 'draft' ? ' · draft plan' : '') + '</div></div></div>'
       + sfExcusalNote(data.fundExcusal);
-    // Compute each bucket's partner total from local txns (same apportionment logic as acActualByCat).
+    // Compute each bucket's partner total from local txns (same apportionment logic as
+    // acActualByCat). BUG-0005: pOwed is now acSignedPartnerOwed(t) -- if a refund carries a
+    // partner share (the composer allows it: partnerOwed is computed for any 'out'-direction
+    // txn regardless of the refund toggle), that share comes back too and must reduce the
+    // running partner-owed total the same way it reduces yours, not additionally accrue. Splits
+    // can't be refunds, so the per-leg apportionment ratio itself never needs a sign of its own —
+    // only the parent `pOwed` feeding it does.
     const partnerByBucket = {};
     (ACT.txns || []).forEach(t => {
       if (t.direction !== 'out') return;
-      const pOwed = t.partnerOwed || 0; if (!pOwed) return;
+      const pOwed = acSignedPartnerOwed(t); if (!pOwed) return;
       if (t.splits && t.splits.length) {
         t.splits.forEach(leg => {
           const legPartner = t.amount > 0 ? pOwed * leg.amount / t.amount : 0;
@@ -10078,6 +10813,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- Card rollup: render the "Pay off your cards" section (running/cumulative balance) ----
+  // manage-panel-redesign.md §3 — utilization band + caption. The numerator is ALWAYS this
+  // section's own runningRemaining (never account-balances.balance), so utilization is
+  // structurally immune to the is_liability wrong-sign bug (§4a): it's computed from flow
+  // direction, not from is_liability. 3-band: calm accent <30% -> warn 30-70% -> bad >=70%;
+  // the caption text itself only warns (color) at the high band.
+  function acUtilBand(pct) { return pct >= 0.70 ? 'is-high' : (pct >= 0.30 ? 'is-mid' : ''); }
+  // Summary column: a compact caption only (no bar — the sticky column is too narrow).
+  function acUtilCapHtml(pct, limit) {
+    return '<div class="ac-util ' + acUtilBand(pct) + '" style="justify-content:flex-end">'
+      + '<span class="ac-util-cap">' + Math.round(pct * 100) + '% of ' + fmt$(limit) + '</span></div>';
+  }
+  // Detail expand: the full track+fill bar (legible at full width) + a fuller caption.
+  function acUtilMeterHtml(rr, pct, limit) {
+    const fillPct = Math.min(100, Math.max(0, pct * 100));
+    return '<div class="ac-util ' + acUtilBand(pct) + '">'
+      + '<div class="ac-util-track"><div class="ac-util-fill" style="width:' + fillPct + '%"></div></div>'
+      + '<span class="ac-util-cap">' + fmt$(rr) + ' of ' + fmt$(limit) + ' &middot; ' + Math.round(pct * 100) + '%</span>'
+      + '</div>';
+  }
+
   function acRenderCards(rollup) {
     const el = $('ac_cards'); if (!el) return;
     if (!rollup || !rollup.perAccount || !Object.keys(rollup.perAccount).length) {
@@ -10124,6 +10879,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     accounts.forEach(card => {
       const rr = card.runningRemaining || 0;
       const rc = card.runningCredit    || 0;
+      // manage-panel-redesign.md §3b: creditLimit reads off ACT.accounts (the /accounts payload),
+      // never account-balances -- keeps this section's math fully independent of that endpoint.
+      const acctMeta = ACT.accounts.find(x => x.id === card.accountId);
+      const limit = acctMeta ? acctMeta.creditLimit : null;
+      const hasLimit = limit != null && limit > 0;
+      const utilPct = hasLimit ? Math.max(0, rr / limit) : 0;
+      // Adversarial-review finding #9: any paid-off state (rc>EPS OR rr<EPS) shows NO meter --
+      // 0% utilization tells the user nothing new next to "✓ Paid off", and the summary/detail
+      // must agree (the detail already excluded this; the summary previously didn't, showing a
+      // stray "0% of $5,000" the detail never did). One boolean, used in both places below.
+      const showMeter = hasLimit && rr >= EPS;
 
       // Summary row (always visible) — card name is an expand toggle
       h += '<tr class="ac-card-row"><td class="ac-col-name">';
@@ -10132,14 +10898,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '</button>';
       h += '<button class="ac-tool" type="button" data-card-pay="' + card.accountId + '" aria-expanded="false" aria-controls="ac_pay_form_' + card.accountId + '" title="Record a payment toward this card" style="display:block;width:max-content;margin-top:2px">+ Record payment</button></td>';
 
-      // Balance now cell
+      // Balance now cell — a card with a credit limit set AND an actual balance owed gets a
+      // compact utilization caption underneath (no bar; the sticky column is too narrow).
       if (rc > EPS) {
         h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span>'
           + '<br><span class="ac-pay-credit">' + acAmt(rc) + ' credit</span></td>';
       } else if (rr < EPS) {
         h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span></td>';
       } else {
-        h += '<td class="num ac-col-total"><b>' + acAmt(rr) + '</b></td>';
+        h += '<td class="num ac-col-total"><b>' + acAmt(rr) + '</b>' + (showMeter ? acUtilCapHtml(utilPct, limit) : '') + '</td>';
       }
       h += '</tr>';
 
@@ -10208,6 +10975,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       h += '</div>';
 
+      // 1.5. Utilization meter (manage-panel-redesign.md §3b) — full track+fill bar, legible at
+      // detail width. Skipped for ANY paid-off state (showMeter === hasLimit && rr>=EPS), matching
+      // the summary cell exactly (adversarial-review finding #9).
+      if (showMeter) {
+        h += acUtilMeterHtml(rr, utilPct, limit);
+      }
+
       // 2. Muted subline: carriedIn · payNow · runningPending (omit ~0 clauses)
       const carriedIn = card.carriedIn      || 0;
       const payNow    = card.payNow         || 0;
@@ -10262,10 +11036,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         + getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join('');
       h += '<div class="ac-pay-form" id="ac_pay_form_' + card.accountId + '" hidden>';
       h += '<div class="ac-row" style="flex-wrap:wrap">';
+      // Payment-form Amount field bug (user report): `.ac-field.ac-amt` here sits in a
+      // `flex:0 0 auto` row (unlike the main "Log it" composer's hero Amount field, which is
+      // `flex:1` and self-limits to its own share of the row) -- with no width/size on the
+      // <input>, the browser falls back to its default size=20 at .ac-amt input's --fs-2xl
+      // font, rendering ~390px wide (dwarfing the Date field beside it). max-width:9ch is set
+      // directly on the <input> (not the shared `.ac-amt input` CSS rule, and not the
+      // `.input-pair` wrapper -- `ch` must resolve against the SAME element whose font-size is
+      // actually --fs-2xl, or it computes against a smaller inherited size and clips the digits)
+      // so only THIS payment-form instance is scoped down; the composer's hero field is untouched.
       h += '<label class="ac-field ac-amt" style="flex:0 0 auto"><span class="ac-lbl">Amount</span>'
-        + '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-pay="amt" value="' + _payAmt + '"></span></label>';
+        + '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-pay="amt" value="' + _payAmt + '" style="max-width:9ch"></span></label>';
+      // Latent shiro-full bug (found auditing the datalist color-scheme fix): the inline
+      // `color-scheme:dark` here was hardcoded regardless of theme, forcing this date input's
+      // native calendar-picker chrome dark even in shiro-full. Removed -- color-scheme is
+      // inherited from :root, which is already theme-aware (applyHaTheme's shiro-full branch
+      // flips it to light).
       h += '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Date</span>'
-        + '<input type="date" data-pay="date" value="' + _payDate + '" style="color-scheme:dark"></label>';
+        + '<input type="date" data-pay="date" value="' + _payDate + '"></label>';
       h += '</div>';
       h += '<div class="ac-pay-earmark">';
       h += '<label class="ac-field"><span class="ac-lbl">Paid from</span>'
@@ -10640,6 +11428,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
         ti.addEventListener('change', () => { if (ti.value) acAddTag(ti.value); });             // datalist pick
       } }
+    // Custom combobox popups replacing native <datalist> (color-scheme's documented active/
+    // hover-row limitation — see acComboInit's own comment). selectEvent 'input'/'change' fires
+    // the EXISTING listeners just above verbatim (acCatChanged/acPayeeAutofill/tag-add), so
+    // nothing about what happens AFTER a suggestion is chosen changes.
+    acComboInit($('ac_tx_cat'), 'ac_cat_list', { selectEvent: 'input', label: 'Category suggestions' });
+    acComboInit($('ac_tx_memo'), 'ac_payee_list', { selectEvent: 'input', label: 'Payee suggestions' });
+    acComboInit($('ac_tx_tags_in'), 'ac_tags_list', { selectEvent: 'change', label: 'Tag suggestions' });
     const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
       // Card row expand/collapse
@@ -10764,7 +11559,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Card payment — cancel inline edit (re-render cleans up)
       const xp = ev.target.closest('[data-cancel-payment]');
       if (xp) { ev.preventDefault(); acRefresh(); return; }
-      const da = ev.target.closest('[data-del-acct]'); if (da) { ev.preventDefault(); if (acWriteGuard()) return; try { await fetch('/api/tracking/accounts/' + da.dataset.delAcct, { method: 'DELETE' }); } catch (e) {} acLoadAccounts().then(acRefresh); return; }
+      // Adversarial-review finding #4: DELETE /accounts/{id} cascades its transactions AND
+      // snapshots (tracking_store.py's ON DELETE CASCADE) -- the sole destructive action in the
+      // app with no confirm() (ventures/goals/funds/categories all confirm their deletes) and,
+      // until now, the easiest to fat-finger since it sits 4px from ✎. Name the account and the
+      // consequence; surface a failed DELETE instead of silently swallowing it.
+      const da = ev.target.closest('[data-del-acct]');
+      if (da) {
+        ev.preventDefault();
+        if (acWriteGuard()) return;
+        const acctId = da.dataset.delAcct;
+        const acct = ACT.accounts.find(x => String(x.id) === String(acctId));
+        const name = acct ? acct.name : 'this account';
+        if (!window.confirm('Delete "' + name + '"? Its transactions and snapshots are deleted too. This cannot be undone.')) return;
+        try {
+          const res = await fetch('/api/tracking/accounts/' + acctId, { method: 'DELETE' });
+          if (!res.ok) throw new Error(res.status);
+          showToast('Account deleted');
+        } catch (e) { showToast('Could not delete the account: ' + (e.message || '')); }
+        acLoadAccounts().then(acRefresh);
+        return;
+      }
       // Card payment trigger: toggle form visibility + focus amount
       const cp = ev.target.closest('[data-card-pay]');
       if (cp) { ev.preventDefault(); const aid = cp.dataset.cardPay; const det = document.getElementById('ac_card_det_' + aid); const tog = document.querySelector('[data-card-toggle="' + aid + '"]'); if (det && det.style.display === 'none') { det.style.display = ''; if (tog) tog.setAttribute('aria-expanded', 'true'); } const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; const open = !form.hidden; form.hidden = open; cp.setAttribute('aria-expanded', String(!open)); if (!open) { const ai = form.querySelector('[data-pay="amt"]'); if (ai) ai.focus(); acUpdateEarmarkChip(form); } return; }

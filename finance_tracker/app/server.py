@@ -19,7 +19,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager, closing
-from datetime import date as _date
+from datetime import date as _date, datetime as _datetime
 from pathlib import Path
 from typing import Literal
 
@@ -1345,6 +1345,7 @@ class AccountModel(BaseModel):
     is_liability: bool = Field(False, alias="isLiability")
     currency: str = "USD"
     invest_group: str | None = Field(None, alias="investGroup")   # Invest-tab grouping (TODO-222)
+    credit_limit: float | None = Field(None, alias="creditLimit")  # S2.1 (DEC-038); dollars -> cents at the boundary
     model_config = {"populate_by_name": True}
 
 
@@ -1355,6 +1356,7 @@ class AccountUpdateModel(BaseModel):
     archived: bool | None = None
     currency: str | None = None
     invest_group: str | None = Field(None, alias="investGroup")   # "" clears the group (PATCH drops None)
+    credit_limit: float | None = Field(None, alias="creditLimit")  # S2.1 (DEC-038); dollars -> cents at the boundary
     model_config = {"populate_by_name": True}
 
 
@@ -1527,9 +1529,12 @@ class PlanDeltaModel(BaseModel):
 @app.post("/api/tracking/accounts")
 def create_account_endpoint(m: AccountModel, request: Request = None) -> dict:
     scope = resolve_user(request)["scopeId"]
+    limit_c = _cents(m.credit_limit) if m.credit_limit is not None else None
     with closing(tracking_store.connect()) as c:
         try:
-            return tracking_store.create_account(c, scope, m.name, m.type, m.is_liability, m.currency, invest_group=m.invest_group)
+            return tracking_store.create_account(
+                c, scope, m.name, m.type, m.is_liability, m.currency,
+                invest_group=m.invest_group, credit_limit_cents=limit_c)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
@@ -1545,6 +1550,8 @@ def list_accounts_endpoint(includeArchived: bool = False, request: Request = Non
 def update_account_endpoint(account_id: int, m: AccountUpdateModel, request: Request = None) -> dict:
     scope = resolve_user(request)["scopeId"]
     fields = {k: v for k, v in m.model_dump(by_alias=False).items() if v is not None}
+    if "credit_limit" in fields:                          # dollars -> cents at the boundary
+        fields["credit_limit_cents"] = _cents(fields.pop("credit_limit"))
     with closing(tracking_store.connect()) as c:
         try:
             acct = tracking_store.update_account(c, scope, account_id, **fields)
@@ -2475,6 +2482,30 @@ def card_rollup_endpoint(month: str, request: Request = None) -> dict:
         )
     rollup = tracking.card_rollup_running(txns, accounts, month)
     return {"month": month, "rollup": rollup}
+
+
+@app.get("/api/tracking/account-balances")
+def account_balances_endpoint(asOf: str | None = None, includeArchived: bool = False,
+                              request: Request = None) -> dict:
+    """S2.1 (DEC-038, docs/reports-accounts-design.md §6) -- per-account flow-driven
+    running balance. Additive, new-surface-only: does NOT touch `/accounts`,
+    `/snapshots`, `/card-rollup`, or anything `aggregate_actuals` reads (the Overview
+    cone / Invest registry / today's net worth stay snapshot-only and byte-identical,
+    per the user-confirmed 2026-07-28 decision). `asOf` defaults to today; 422 for a
+    malformed date (mirrors export_txns_csv_endpoint's `strptime` validation).
+    `includeArchived` mirrors GET /accounts' own flag (default False, unchanged
+    behavior) so S2.2 can opt an archived account's history back into view."""
+    scope = resolve_user(request)["scopeId"]
+    as_of = asOf or _date.today().isoformat()
+    try:
+        _datetime.strptime(as_of, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"asOf must be a valid ISO date (YYYY-MM-DD), got {as_of!r}")
+    with closing(tracking_store.connect()) as c:
+        accounts = tracking_store.list_accounts(c, scope, include_archived=includeArchived)
+        snapshots = tracking_store.list_snapshots(c, scope, date_to=as_of)
+        txns = tracking_store.list_txns(c, scope, date_to=as_of)
+    return tracking.account_balances(txns, snapshots, accounts, as_of)
 
 
 @app.get("/api/tracking/open-pending")

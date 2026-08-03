@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.0
+
+- **Refunds now subtract instead of adding.** Marking a transaction as a refund
+  showed the money coming back on the ledger row, but every category total still
+  counted it as spending — so a category you'd been refunded could read wildly
+  over budget. Golf, for example, showed $296.93 against a $200 budget (148%)
+  when the truth was a net refund of $149.93. Category totals, the recurring
+  matcher, and partner shares all handle refunds correctly now, and a category
+  that ends the month net-negative renders properly instead of drawing a full bar.
+- **Your accounts have real balances.** Each account now carries a running
+  balance driven by the money you actually log, anchored to a balance you enter
+  once. Credit cards gained a credit-limit field, and the app reconciles what it
+  computed against what you tell it, to the cent.
+- **Cards show how much of your limit you're using.** The "Pay off your cards"
+  section now draws a utilization meter for any card with a limit set — calm
+  under 30%, warning above 70% — and it updates the moment you save a limit.
+- **A one-tap fix for miscategorised debts.** Cards and loans created before
+  balances existed were recorded as assets, which made them count the wrong way
+  in your net worth (an Amex reading −$2,588 rather than money owed). Any
+  affected account now shows "Recorded as an asset — Fix"; tapping it corrects
+  the stored record, not just the display.
+- **The Manage panel is no longer a wall of live forms.** Categories and accounts
+  share one aligned layout with their actions anchored to the right edge instead
+  of landing somewhere different on every row. Accounts are readable rows you
+  edit one at a time, rather than six always-on controls each. Deleting an
+  account now warns you first — and says plainly that it also deletes that
+  account's transactions and snapshots.
+- **Accounts without a balance stop guessing.** Instead of showing a meaningless
+  lifetime sum of everything ever logged, they invite you to set a starting
+  balance.
+- **The category, payee and tag suggestion lists are readable again.** The
+  browser's built-in dropdown couldn't be styled — its highlighted row was
+  effectively invisible in the light theme — so it's been replaced with our own,
+  with full keyboard support and proper contrast in both themes.
+- Polish: the payment Amount box no longer renders twice the width of the Date
+  field next to it.
+- Under the hood: refunds can no longer be applied to a split transaction
+  through the edit path (creating one was already blocked), and the app's
+  account-balance maths gained a full test matrix covering every combination of
+  account type, debt flag and balance anchor.
+
 ## 0.3.9
 
 - **"Am I on track?" now understands your sinking funds.** Spending drawn
