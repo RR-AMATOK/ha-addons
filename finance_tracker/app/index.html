@@ -531,6 +531,12 @@
 
   /* Results */
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  /* Two tile groups in a row are two separate statements -- Car renders the recommendation as one
+     group and lease/finance/cash as the next -- and with only their own internal `gap` between
+     them they sat ~3px apart and read as one block with a stray full-width row on top. The rule
+     is on the ADJACENCY, not on .tiles itself, so a single group still contributes no stray
+     margin to whatever follows it. */
+  .tiles + .tiles { margin-top: var(--space-3); }
   .tile {
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   }
@@ -558,8 +564,17 @@
   details.card { padding: 0; }
   details.card > .body { padding: 14px 16px 16px; }
 
-  .bracket-row { display: grid; grid-template-columns: 110px 90px 1fr; gap: 8px; margin: 4px 0; align-items: center; }
-  .bracket-row input { width: 100%; }
+  /* One grid for every line in the tax tables, so the $ fields form a single scannable column
+     instead of each row placing its control wherever its label ran out. The old
+     `110px 90px 1fr` gave the bracket ceiling 90px -- about 40px once the `$` unit and the
+     number spinner took their share -- so "124,000" rendered as "124(", while the rate got the
+     entire remaining width for five characters. Both columns are now sized for their content
+     and the row stops stretching. */
+  .bracket-row, .tt-body .row { display: grid; grid-template-columns: 300px 190px 150px;
+    gap: 8px; margin: 4px 0; align-items: center; justify-content: start; }
+  .bracket-row > :first-child { text-align: right; }
+  .bracket-row input, .tt-body .row input { width: 100%; }
+  .tt-body .input-pair { width: 100%; }
 
   .bar {
     display: flex; height: 18px; border-radius: 4px; overflow: hidden;
@@ -610,7 +625,7 @@
   /* Page inset for the plain-div tab panels (match Tax's main: 1400/24px).
      Tax (#tab-tax = main) and Overview (#tab-overview, inline-padded children)
      are deliberately excluded so neither double-pads. */
-  #tab-budget, #tab-invest, #tab-auto, #tab-actuals {
+  #tab-budget, #tab-invest, #tab-decisions, #tab-actuals {
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
   }
   .panel-inner { display:grid; grid-template-columns: minmax(300px,380px) 1fr; gap:16px; }
@@ -719,8 +734,256 @@
      tall menus at desktop widths where none of this is needed. */
   @media (max-width: 1024px) {
     #bg_out, #iv_out, #au_out, #ov_out, #nw_chart, #bgb_catsummary,
-    #ac_ledger, #ac_pva, #ac_recurring, #bgBuilder { overflow-x: auto; }
+    #ac_ledger, #ac_pva, #ac_recurring, #bgBuilder,
+    /* The two containers this batch moved into Decisions. Every sibling results table has this
+       safety net; these two did not, which is the allow-list trap the comment above warns about
+       reappearing the moment something new arrives. */
+    #hp_out, #vn_list { overflow-x: auto; }
   }
+  /* Invest account rows. The date used to break mid-value ("as of 2026-07-" / "26") because it
+     shared a narrow right-aligned cell with the amount, and the update control wrapped under its
+     own input for the same reason. Neither is a wrapping problem worth solving with more width —
+     they are values that must never break. */
+  .iv-upd { white-space:nowrap; }
+  .iv-acct-head { display:flex; justify-content:space-between; max-width:940px; }
+  /* One grid across the WHOLE registry, not one per group. Each group renders its own <table>,
+     and an auto-layout table sizes its columns from its own content -- so "Vanguard 401K" made
+     one group's name column wide and "HSA" made the next one narrow, and the balances they were
+     supposed to line up in landed at a different x in every group. Scanning for the smallest
+     balance meant re-finding the column four times. Fixed layout with shared percentages is what
+     actually makes them one column. */
+  .iv-acct-tbl { table-layout:fixed; width:100%; max-width:940px; }
+  .iv-acct-tbl .iv-nm   { width:26%; }
+  .iv-acct-tbl .iv-bal  { width:13%; }
+  .iv-acct-tbl .iv-when { width:13%; }
+  .iv-acct-tbl .iv-upd  { width:22%; }
+  /* Widest of the five: the longest group name ("Current employer — 401(k)") was rendering
+     under its own chevron, which reads as a broken control rather than a truncated label. */
+  .iv-acct-tbl .iv-grp  { width:26%; }
+  .iv-acct-tbl .iv-grp select { width:100%; }
+  /* Account rows share ONE grid, so balances line up in a column you can scan rather than landing
+     wherever each row's text happened to end. */
+  /* Fixed columns mean a long account name can no longer widen its own cell, so it has to be
+     told what to do instead of silently overlapping the balance beside it. */
+  .iv-nm  { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .iv-nm small { display:block; color:var(--muted); font-size:var(--fs-2xs); }
+  .iv-bal { white-space:nowrap; }
+  .iv-when { white-space:nowrap; text-align:right; }
+  /* The age, not the raw date. "4 months ago" is a judgment you can act on; "2026-07-26" is a
+     lookup you have to perform. Stale is the WARNING colour, never the error one -- old data is
+     not wrong, it is unverified, and overstating that teaches people to ignore it.
+     Shared: account balances wear it (Invest) and so do ventures (Actuals). Both are figures
+     that stay true only while someone keeps feeding them, so both have to say how long it's been. */
+  .age-tag { font-size:var(--fs-2xs); color:var(--muted); }
+  .age-tag.is-stale { color:var(--warn-text-strong, var(--warn)); font-weight:var(--fw-semibold); }
+  /* Same warning surface the disclaimer uses, deliberately: this is the one thing on the screen
+     that says the numbers below it may be lying, and it should look like the app's other "check
+     this" bar rather than invent a third alert style. */
+  .stale-banner { background:var(--warn-surface); border:1px solid var(--warn-border); color:var(--warn-text);
+                  border-radius:8px; padding:10px 14px; margin:0 0 10px; font-size:var(--fs-sm);
+                  line-height:var(--lh-base); max-width:780px; }
+  .stale-banner[hidden] { display:none !important; }
+  .stale-banner b { color:var(--warn-text-strong); }
+  .stale-banner .sb-sub { display:block; margin-top:2px; font-size:var(--fs-xs); }
+
+  /* Setup — a destination for configuration. Two columns so a section can be plainly VISIBLE
+     rather than behind a lid; that is the entire reason this page exists, and a stack of
+     collapsibles here would just have moved the problem and added a click. */
+  /* `.panel-inner` is a two-column grid (minmax(300px,380px) 1fr) built for tabs that pair a
+     form with a result. Setup has no such pairing, so it was landing in the NARROW first column
+     with two thirds of the window empty beside it. It gets the whole panel. */
+  /* Decisions and Setup are lists of peer sections, not a form paired with its result, so
+     neither wants `.panel-inner`'s two-column grid. Without this House rendered at 380px
+     while Car took 841px beside it, and the car Result wrapped to a second row under House. */
+  #tab-setup .panel-inner, #tab-decisions .panel-inner { display:block; }
+  .setup { display:grid; grid-template-columns:190px minmax(0,1fr); gap:0;
+           border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--panel); }
+  .setup-nav { border-right:1px solid var(--line); background:var(--panel-2); padding:var(--space-2) 0; }
+  .setup-nav a { display:block; padding:7px var(--space-4); color:var(--muted); text-decoration:none;
+                 font-size:var(--fs-sm); }
+  .setup-nav a:hover { background:var(--accent-tint); color:var(--text); }
+  .setup-nav a:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+  .setup-nav a.on { background:var(--selected-bg, var(--accent-tint)); color:var(--selected-ink, var(--text));
+                    font-weight:var(--fw-semibold); box-shadow:inset 2px 0 0 var(--accent); }
+  /* Capped, not full-bleed. `.mng-row` right-anchors its actions, which reads well at the
+     width these rows had inside a Budget lid and badly at 1200px, where the ✎ ends up a
+     screen away from the label it edits. The rail is fixed, so this caps the CONTENT rather
+     than the page. */
+  .setup-pane { padding:var(--space-4) var(--space-5) var(--space-5); min-width:0; }
+  .setup-pane > section { max-width:860px; }
+  .setup-pane > section > h2 { margin-top:0; }
+  .setup-pane > section[hidden] { display:none; }
+  /* Below the two-column breakpoint the rail becomes a scrollable row of chips -- the same
+     shape the tab index already uses, so there is one narrow-screen idiom rather than two. */
+  @media (max-width: 720px) {
+    .setup { grid-template-columns:1fr; }
+    .setup-nav { display:flex; gap:2px; overflow-x:auto; border-right:none;
+                 border-bottom:1px solid var(--line); padding:var(--space-2); }
+    .setup-nav a { white-space:nowrap; border-radius:var(--radius-sm, 6px); padding:5px 10px; }
+    .setup-nav a.on { box-shadow:none; }
+  }
+  /* A divider and a quieter label mark Setup as somewhere you put things away, not a place you
+     work. Same distinction the mockups drew. */
+  /* align-self is load-bearing: .tabbar sets no align-items, so the default `stretch` pinned
+     this fixed-height rule to the TOP of the row rather than centring it on the labels. And it
+     carries no margin — #tabbar already has a gap, and adding one doubled the space on both
+     sides so the divider read as belonging to neither neighbour. */
+  .tabbar-sep { width:1px; height:20px; align-self:center; background:var(--line); flex-shrink:0; }
+  #tabbar .tab-btn.tab-btn-quiet:not(.active) { color:var(--muted); }
+
+  /* A solo screen collapses its tab to one column: a single card rendered in half the width
+     with an empty column beside it looks broken, not focused. Covers both panel shapes — Tax is
+     a grid `main` with bare column divs, the others wrap content in .panel-inner. */
+  .tab-panel.screen-solo, main.screen-solo { grid-template-columns: 1fr !important; }
+  .screen-solo .panel-inner { display:block !important; }
+  /* `hidden` must win over a card's own display. Screens rely on it, and a card that ignored it
+     would appear on every screen at once. */
+  .tab-panel [hidden], main.tab-panel [hidden] { display:none !important; }
+
+  /* MEASURE. Giving a card the whole screen fixed the squeeze but created the opposite defect:
+     the content inside was written for a ~430px column. `.row` is `1fr auto`, so at 1350px a
+     label and its own field end up ~1100px apart and stop reading as one control; `.tiles`
+     stretch each tile to 430px of mostly empty space; a bar gets long enough that comparing two
+     of them means moving your eyes across the entire window. Width is for the SCREEN, not for
+     every line on it -- so a full-width card holds its content to a measure and lets genuinely
+     wide things (tables, charts, the net-worth cone) opt out by simply not carrying the class. */
+  .measure { max-width: 780px; }
+  .measure-wide { max-width: 1060px; }
+  /* Decisions cards span the whole screen by design (#tab-decisions .panel-inner is display:block
+     above). That is right for a verdict, a bar chart or a table, and wrong for a form: `.row`
+     binds a label to its field with `1fr auto`, so at 1350px the two ends of that binding sat
+     ~1200px apart and stopped reading as one control. Cap the ROW, not the card, so the things
+     that earn the width keep it. Prose takes the same measure for the same reason -- nobody
+     finishes a 1300px line. */
+  #tab-decisions .card p,
+  #tab-decisions .card .mini.muted,
+  #tab-decisions .card > .body > details { max-width: 780px; }
+  /* Capping the row at 780px was not enough on its own: `1fr auto` still spent every spare pixel
+     on the label column, so "Sticker price (MSRP)" sat ~600px from the field it names. Give the
+     label a column and let the field sit immediately after it, the same shape the tax tables use.
+     `minmax(0,...)` so a long label wraps inside its column instead of pushing the field right. */
+  #tab-decisions .card .row,
+  #iv_plan_card .row { display:grid; grid-template-columns: minmax(0,380px) auto;
+    justify-content:start; gap:8px 12px; align-items:center; max-width:780px; }
+  #tab-decisions .card .row > label,
+  #iv_plan_card .row > label { text-align:left; }
+
+  /* House: the assumptions flow ACROSS under the verdict rather than down a sidebar beside it.
+     A 400px aside held ten short fields in a column far taller than the verdict it accompanied,
+     so the card carried ~340px of empty space at bottom-left -- worst in the "nothing left for
+     housing" state where the verdict is a single tile. The column count follows the available
+     width, so the block stays balanced instead of being right at exactly one size.
+     auto-FILL, not auto-fit: auto-fit collapses the empty tracks and stretches whatever is left
+     to fill the row, so "Your situation" -- one visible field in solo/payment-last mode -- put
+     its label and its input ~1150px apart, which is the exact defect this whole pass has been
+     closing. auto-fill keeps the tracks, so one field occupies one column. */
+  .hp-assume { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr));
+               gap:2px 32px; align-items:center; }
+  /* Overrides the tab-wide 380px label column: inside a ~300px cell that leaves the field
+     nowhere to sit. Label and field share the cell, fields landing on the cell's right edge so
+     they still form scannable columns down the grid. */
+  #tab-decisions .hp-assume .row { grid-template-columns:minmax(0,1fr) auto; max-width:none; gap:4px 10px; }
+  #tab-decisions .hp-assume .row .input-pair { width:132px; }
+  /* The PMI caveat belongs to the whole loan block, not to whichever cell it lands in. */
+  .hp-assume-note { grid-column:1/-1; margin-top:6px; }
+  #tab-decisions .hp-assume .mini.muted { max-width:none; }
+  /* The verdict is the card's hero band and takes the full width; hpAssumes' explanatory
+     sentence under it is prose and keeps the readable measure the global rule gives it. */
+  #hp_out .tiles { max-width:none; }
+  /* Car's Result was capped at 1060px while the inputs card under it filled 1352, so the two
+     stacked cards on the same screen disagreed about their own width by ~290px. They fill
+     equally now: three tiles at ~440px still carry their content comfortably, and comparison
+     bars are easier to read against each other the longer they are. The explanatory lines
+     inside are prose and keep the global measure. */
+  #au_out .tiles { max-width:none; }
+
+  /* Car: the same move as House, one level up. House had bare rows to flow; Car's fields each
+     carry their own explanatory line, so the unit that flows is the GROUP, not the field. Its
+     four .subhead groups become four columns and the grouping starts doing visible work instead
+     of only labelling. auto-fill for the same reason as House -- auto-fit would stretch a lone
+     group across the row. */
+  .au-cols { column-width:290px; column-gap:32px; }
+  .au-col { break-inside:avoid; }
+  .au-col > .subhead:first-child { margin-top:0; }
+  #tab-decisions .au-cols .row { grid-template-columns:minmax(0,1fr) auto; max-width:none; gap:4px 10px; }
+  #tab-decisions .au-cols .row .input-pair { width:120px; }
+  /* Each field's note belongs to the field above it inside a ~290px column, so it takes the
+     column's width rather than the global 780px prose measure. */
+  #tab-decisions .au-cols .mini.muted { max-width:none; }
+
+  /* The "Keep it" horizon control. Wraps as one row on desktop and folds cleanly on a phone. */
+  .au-keep { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:0 0 12px; }
+  .au-yr-add { display:inline-flex; align-items:center; gap:6px; }
+  .au-yr-add .input-pair { width:92px; }
+  .au-yr-add .input-pair input { text-align:right; }
+  /* The remove affordance rides inside its chip, so it inherits the chip's colour in both the
+     resting and the active state -- an ✕ that stayed dark on the selected (filled) chip would
+     disappear into it. */
+  .chip-x { margin-left:5px; opacity:.55; text-decoration:none; color:inherit; font-size:var(--fs-2xs); }
+  .chip-x:hover, .chip-x:focus-visible { opacity:1; }
+  #au_yr_err { max-width:420px; margin:0 0 10px; }
+  /* The next-dollar inputs are nineteen short rows that used to live in a 380px rail. At full
+     width a single 780px column would be a very tall, very narrow list with the whole right of
+     the screen empty, so they flow into columns instead -- the card is a settings sheet, not a
+     sequence, and nothing here has to be read in order. */
+  #iv_plan_card { column-width: 380px; column-gap: 32px; }
+  #iv_plan_card > h2, #iv_plan_card > p { column-span: all; }
+  #iv_plan_card .row { break-inside: avoid; max-width: 380px; }
+  #iv_plan_card .row { grid-template-columns: minmax(0,1fr) auto; }
+  #iv_plan_card .calc-btn { column-span: all; margin-top: 10px; }
+  /* The Plan output moved from a 950px column to the full 1350px. The waterfall table earns that
+     width; its prose does not -- the step explanations are the longest text in the app and at
+     full bleed they ran ~190 characters a line. Two tiers: the table and tiles keep a wide
+     measure, the paragraphs take a readable one. */
+  #iv_out { max-width: 1060px; }
+  /* Prose takes a readable measure EVERYWHERE, not only where someone happened to notice it.
+     The QA sweep found eighteen paragraphs over 900px, the worst at 1318px and 280 characters --
+     about 190 characters a line, far past the point where the eye reliably finds the start of the
+     next one. Tables, charts, bars and form rows are not prose and keep whatever width they had.
+     Depth-agnostic on purpose: the stragglers after a direct-child-only first pass were a
+     flex-item span, a div nested under a chart, and a disclaimer block, and chasing each with its
+     own selector is how this defect got scattered across the app in the first place. It reaches
+     inline spans harmlessly -- max-width does nothing to an inline box -- and reaches the one
+     span that IS a flex item, which is exactly the straggler worth catching. */
+  .card .note-box, .card .warn-box, .card p.mini, .card p.muted,
+  .card .mini.muted { max-width: 780px; }
+
+  /* The tab index (Direction A). Uses ONLY tokens the tab pills already use -- --muted at rest,
+     --accent-tint on hover, --selected-bg/--selected-ink for the current section, --line for the
+     hairline -- so all three themes are correct by construction with no theme-specific selector
+     and no hardcoded colour. */
+  .tab-index { display:flex; align-items:center; gap:var(--space-3); flex-wrap:nowrap;
+               overflow-x:auto; -webkit-overflow-scrolling:touch;
+               padding:7px var(--space-4); min-height:36px;
+               border-bottom:1px solid var(--line); background:var(--panel); }
+  .tab-index[hidden] { display:none !important; }
+  .tix { color:var(--muted); text-decoration:none; font-size:var(--fs-xs); white-space:nowrap;
+         padding:3px 8px; border-radius:var(--radius-sm, 6px); }
+  .tix b { color:var(--text); font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; }
+  .tix:hover { background:var(--accent-tint); color:var(--text); }
+  .tix:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .tix.is-here { background:var(--selected-bg, var(--accent-tint)); color:var(--selected-ink, var(--text)); }
+  .tix.is-here b { color:inherit; }
+  /* The second mount point: a value on the section's own heading, so a CLOSED lid still says what
+     it is worth. Right-aligned via margin so it works in both an <h2> and a <summary>. */
+  /* BUG-0022 states. `is-edited` is deliberately the WARNING colour, not the error colour: the
+     numbers are not wrong, they are just no longer the ones the app shipped with, and overstating
+     that would teach the user to ignore it. */
+  .sec-val.is-shipped { color:var(--muted); }
+  .sec-val.is-edited  { color:var(--warn-text-strong, var(--warn)); font-weight:var(--fw-semibold); }
+  .tax-reset { margin-left:var(--space-2); white-space:nowrap; background:transparent; border:1px solid var(--line);
+               border-radius:var(--radius-sm, 6px); color:var(--accent); cursor:pointer;
+               font-size:var(--fs-2xs); padding:2px 8px; font-family:inherit; }
+  .tax-reset:hover { border-color:var(--accent); background:var(--accent-tint); }
+  .tax-reset:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .sec-val { margin-left:auto; padding-left:var(--space-3); color:var(--muted);
+             font-size:var(--fs-xs); font-weight:var(--fw-normal);
+             font-variant-numeric:tabular-nums; white-space:nowrap;
+             /* h2 headings are uppercased; a value is not a label and "$2,150.14 LEFT" reads as
+                shouting. Letter-spacing goes too -- it is set for caps, and it loosens digits. */
+             text-transform:none; letter-spacing:normal; }
+  section.card > h2:has(.sec-val), details > summary:has(.sec-val) { display:flex; align-items:baseline; }
+  @media (max-width: 480px) { .tab-index { padding-left:var(--space-3); padding-right:var(--space-3); } }
   #ov_out a { color:var(--accent); text-decoration:none; }
   #ov_out a:hover { text-decoration:underline; }
   /* These nine `data-go=` links ARE the Overview's primary navigation and had no focus
@@ -938,7 +1201,7 @@
      are byte-for-byte unaffected by construction. */
   @media (max-width: 480px) {
     /* gutters: reclaim ~40px width (tokens only, no new ad-hoc px) */
-    header, main, #tab-budget, #tab-invest, #tab-auto, #tab-actuals, footer,
+    header, main, #tab-budget, #tab-invest, #tab-decisions, #tab-actuals, footer,
     section.card { padding-left: var(--space-3); padding-right: var(--space-3); }
     #ov_out { padding-left: var(--space-3) !important; padding-right: var(--space-3) !important; }
 
@@ -988,7 +1251,15 @@
     .ac-row > .ac-field { flex: 1 1 140px; }
     .sc-grid { flex-direction: column; align-items: stretch; }
     .borrower-grid { grid-template-columns: repeat(2, 1fr); }
-    .bracket-row { grid-template-columns: 1fr; }
+    /* Fixed label columns cannot survive a phone; stack instead. Decisions comes along for the
+       same reason -- a 380px column at 360px of viewport leaves the field nowhere to go. */
+    .bracket-row, .tt-body .row, #tab-decisions .card .row {
+      grid-template-columns: 1fr; justify-content: stretch; }
+    .bracket-row > :first-child { text-align: left; }
+    /* The account registry's fixed percentages assume desktop width; at phone size the five
+       columns would each be ~70px. Let the table size to its content and scroll. */
+    .iv-acct-tbl { table-layout:auto; width:auto; min-width:640px; }
+    #iv_acct_groups { overflow-x:auto; }
 
     /* tiles: guarantee 2-up down to ~264px */
     .tiles { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
@@ -1031,7 +1302,7 @@
     footer { color:#555; }
     body { background: white; color: black; }
     header, .actions, .no-print, details { display: none !important; }
-    main, #tab-budget, #tab-invest, #tab-auto, #tab-actuals { grid-template-columns: 1fr; padding: 0; max-width: none; }
+    main, #tab-budget, #tab-invest, #tab-decisions, #tab-actuals, #tab-overview, #tab-fire, #tab-tax { grid-template-columns: 1fr; padding: 0; max-width: none; }
     section.card { border: 1px solid #ccc; background: white; color: black; page-break-inside: avoid; }
     .tile { background: white; border: 1px solid #ccc; color: black; }
     .tile .k, th, .muted { color: #555; }
@@ -1055,7 +1326,9 @@
     <button class="tab-btn" data-tab="budget">Budget</button>
     <button class="tab-btn" data-tab="actuals">Actuals</button>
     <button class="tab-btn" data-tab="invest">Invest</button>
-    <button class="tab-btn" data-tab="auto">Car</button>
+    <button class="tab-btn" data-tab="decisions">Decisions</button>
+    <span class="tabbar-sep" aria-hidden="true"></span>
+    <button class="tab-btn tab-btn-quiet" data-tab="setup">Setup</button>
   </nav>
   <div class="actions no-print">
     <span class="backup-split">
@@ -1151,6 +1424,10 @@
     <input type="file" id="fileImport" accept="application/json" style="display:none" />
   </div>
 </header>
+  <!-- Direction A, "The Index": a one-line contents list for the CURRENT tab, each entry carrying
+       the same live number its section shows. A tab says what it holds and what it is worth
+       before you scroll. In flow rather than sticky (that is a separate call), and .no-print. -->
+  <nav class="tab-index no-print" id="tabIndex" aria-label="Sections on this tab" hidden></nav>
 
 <div id="wi_resume_banner" class="wi-banner" hidden>
   <span class="wi-banner-icon" aria-hidden="true">&#9670;</span>
@@ -1342,7 +1619,7 @@
     </div>
 
     <!-- 3. Assumptions block -->
-    <section class="card" style="margin-bottom:14px">
+    <section class="card" id="fire_assumptions_card" style="margin-bottom:14px">
       <h2>Assumptions</h2>
       <div id="fire-resolved" style="font-size:var(--fs-md);margin-bottom:10px;line-height:1.5;color:var(--muted)">Open the Tax and Budget tabs to seed values.</div>
       <details id="fire-assumptions-details">
@@ -1405,7 +1682,7 @@
     </section>
 
     <!-- 4. FI window chart -->
-    <section class="card" style="margin-bottom:14px">
+    <section class="card" id="fire_traj_card" style="margin-bottom:14px">
       <h2>Net worth trajectory</h2>
       <div id="fire-fi-warning" class="warn-box" style="display:none;margin-bottom:10px"></div>
       <div id="fire-chart" class="mini">Loading&#8230;</div>
@@ -1414,7 +1691,7 @@
     </section>
 
     <!-- 5. Savings lever -->
-    <section class="card" style="margin-bottom:14px">
+    <section class="card" id="fire_lever_card" style="margin-bottom:14px">
       <h2>Savings lever</h2>
       <div id="fire-lever-current" class="mini muted" style="margin-bottom:8px">&mdash;</div>
       <div class="row">
@@ -1450,7 +1727,7 @@
 <main id="tab-tax" class="tab-panel">
   <div>
     <!-- Compensation -->
-    <section class="card">
+    <section class="card" id="tax_comp_card">
       <h2>Compensation</h2>
 
       <label class="muted" style="font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:var(--ls-caps);font-weight:var(--fw-semibold)">Your gross salary (cash) — fill any one</label>
@@ -1517,8 +1794,8 @@
     </section>
 
     <!-- Investment income (taxed at filing) + §415(c) -->
-    <section class="card">
-      <details>
+    <section class="card" id="tax_invest_card">
+      <details id="tax_invest_wrap">
         <summary>Investment income &amp; §415(c) <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(taxed at filing — not withheld)</span></summary>
         <div class="body">
           <div class="row"><label class="mini">Long-term capital gains</label><span class="input-pair"><input id="inv_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
@@ -1533,8 +1810,8 @@
     </section>
 
     <!-- Equity sales (ESPP/RSU) + estimated tax -->
-    <section class="card">
-      <details>
+    <section class="card" id="tax_equity_card">
+      <details id="tax_equity_wrap">
         <summary>Equity sales &amp; estimated tax <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(only if you sold shares or want a safe-harbor check)</span></summary>
         <div class="body">
           <div class="subhead">ESPP shares sold</div>
@@ -1561,7 +1838,7 @@
     </section>
 
     <!-- Pre-tax -->
-    <section class="card">
+    <section class="card" id="tax_pretax_card">
       <h2>Pre-tax deductions</h2>
       <div class="row">
         <label>401(k) Traditional <span class="hint">(Fed ✓ · FICA ✗ · CA ✓)</span></label>
@@ -1617,7 +1894,7 @@
     </section>
 
     <!-- Post-tax / Roth -->
-    <section class="card">
+    <section class="card" id="tax_posttax_card">
       <h2>Post-tax deductions</h2>
       <div class="row">
         <label>401(k) Roth <span class="hint">(no current tax benefit)</span></label>
@@ -1653,7 +1930,7 @@
     </section>
 
     <!-- Taxable additions (non-cash) -->
-    <section class="card">
+    <section class="card" id="tax_additions_card">
       <h2>Taxable additions (non-cash)</h2>
       <div class="row">
         <label>ER Stock Match <span class="hint">(added to taxable wages)</span></label>
@@ -1671,11 +1948,15 @@
       </div>
     </section>
 
-    <!-- Advanced -->
-    <details>
-      <summary>Advanced: tax tables & rates (editable)</summary>
-      <div class="body">
-        <p class="muted" style="margin-top:0">Defaults come from the Python backend (<code>/api/defaults</code>) — 2026 federal IRS projections. Brackets always stay in annual dollars regardless of entry cadence.</p>
+    <!-- Tax tables. Was a <details> labelled "Advanced:", which stopped making sense the moment
+         it became its own screen: a lid is a promise that something is hidden, and nothing here
+         is. Now a plain card, always open, no toggle to mis-click. setLidValue() already falls
+         back to `:scope > h2` when the container is not a DETAILS, so the edited/shipped scent
+         in the header keeps working unchanged. -->
+    <section class="card" id="tax_tables_wrap">
+      <h2>Tax tables &amp; rates</h2>
+      <div class="body tt-body measure">
+        <p class="muted" style="margin-top:0">Editable. Defaults come from the Python backend (<code>/api/defaults</code>) — 2026 federal IRS projections. Brackets always stay in annual dollars regardless of entry cadence.</p>
 
         <h3 style="font-size:var(--fs-sm);margin:10px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">Federal — Single 2026</h3>
         <div class="row">
@@ -1709,12 +1990,12 @@
         <!-- California removed from the tool -->
         <div id="caBrackets" style="display:none"></div>
       </div>
-    </details>
+    </section>
   </div>
 
   <div>
     <!-- Summary -->
-    <section class="card">
+    <section class="card" id="tax_summary_card">
       <h2>Summary</h2>
       <div class="subhead">What you make</div>
       <div class="tiles">
@@ -1799,7 +2080,7 @@
     </section>
 
     <!-- Wages -->
-    <section class="card">
+    <section class="card" id="tax_wagebase_card">
       <h2>Taxable wage bases</h2>
       <table>
         <thead><tr><th>Wage base</th><th class="num">Amount</th><th>Notes</th></tr></thead>
@@ -1808,22 +2089,27 @@
     </section>
 
     <!-- Tax breakdown -->
-    <section class="card">
+    <section class="card" id="tax_breakdown_card">
       <h2>Tax breakdown</h2>
-      <table>
-        <thead><tr>
-          <th>Tax</th>
-          <th class="num">Annual</th>
-          <th class="num">Per month</th>
-          <th class="num">Per paycheck</th>
-          <th class="num">% of comp</th>
-        </tr></thead>
-        <tbody id="taxTable"></tbody>
-      </table>
+      <!-- Five money columns cannot fit 375px, and without a scroll container the 2px they
+           overflow by makes the whole PAGE scroll sideways -- every other tab inherits the
+           horizontal jitter from this one table. Same treatment as #ac_ledger. -->
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Tax</th>
+            <th class="num">Annual</th>
+            <th class="num">Per month</th>
+            <th class="num">Per paycheck</th>
+            <th class="num">% of comp</th>
+          </tr></thead>
+          <tbody id="taxTable"></tbody>
+        </table>
+      </div>
     </section>
 
     <!-- Cash flow -->
-    <section class="card">
+    <section class="card" id="tax_cashflow_card">
       <h2>Cash flow</h2>
       <table>
         <thead><tr>
@@ -1856,7 +2142,7 @@
 </main>
 
 <div class="tab-panel" id="tab-budget"><div class="panel-inner">
-  <section class="card">
+  <section class="card" id="bgb_inputs_card">
     <h2>Budget</h2>
     <p class="mini">Frameworks computed on your <b>after-tax</b> base (net take-home + pre-tax 401k/HSA/premiums). <button class="seed-btn" id="bg_seed" type="button">Use Tax take-home</button></p>
     <div class="row"><label class="mini">Net take-home</label><span class="input-pair"><input id="bg_net" type="text" inputmode="decimal" data-fmt="usd" value="120000"/><span class="unit">$/yr</span></span></div>
@@ -1872,47 +2158,16 @@
     <button class="calc-btn" id="bg_go" type="button">Calculate budget</button>
   </section>
   <div>
-    <section class="card">
+    <section class="card" id="bgb_summary_card">
       <h2>Budget summary</h2>
       <div class="row" style="margin:0 0 8px"><label class="mini">Compare to strategy</label><select id="bgb_strategy" aria-label="Compare to strategy"></select></div>
-      <details id="bgb_strat_manage_wrap" class="mini" style="margin:0 0 8px">
-        <summary class="muted">Manage strategies — add your own named split</summary>
-        <div id="bgb_strat_manage" class="body" style="margin-top:8px"></div>
-      </details>
       <div id="bgb_catsummary"><span class="mini muted">Edit your budget below to see the split.</span></div>
     </section>
     <!-- House affordability (TODO-225, DEC-019) -->
-    <details class="card" style="margin-top:16px" id="hp_card">
-      <summary>How much house can we afford?</summary>
-      <div class="body">
-        <p class="mini">Price a house payment against your real budget. Pin the payment you want and watch the rest flex — or fund everything else first and see what's left.</p>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-          <span class="chips" id="hp_mode_chips"><span class="chip active" data-hpmode="payment_last" title="what's left after everything">Payment last</span><span class="chip" data-hpmode="payment_first" title="I know my payment, flex the rest">Payment first</span></span>
-          <span class="chips" id="hp_house_chips"><span class="chip active" data-hphouse="solo">Just me</span><span class="chip" data-hphouse="household">Us (household)</span></span>
-          <input type="hidden" id="hp_mode" value="payment_last"><input type="hidden" id="hp_household" value="solo">
-        </div>
-        <div class="mini muted" id="hp_takehome_line" style="margin:8px 0 4px"></div>
-        <div class="row" id="hp_pay_row" style="display:none"><label class="mini">Desired payment</label><span class="input-pair"><input id="hp_pay" type="text" inputmode="decimal" data-fmt="usd2" value="2,000"/><span class="unit">$/mo</span></span></div>
-        <div class="row"><label class="mini">Current rent/housing you'll replace <span class="hint">(detected from your budget — freed when you buy)</span></label><span class="input-pair"><input id="hp_curhousing" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
-        <div class="row hp-partner" style="display:none"><label class="mini">Partner take-home <span class="hint">(after-tax, monthly)</span></label><span class="input-pair"><input id="hp_ptake" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
-        <div class="row hp-partner" style="display:none"><label class="mini">Partner debt payments <span class="hint">(loans, cards — theirs)</span></label><span class="input-pair"><input id="hp_pdebt" type="text" inputmode="decimal" data-fmt="usd2" value="0"/><span class="unit">$/mo</span></span></div>
-        <details class="mini" style="margin:8px 0"><summary class="muted">Loan assumptions</summary><div class="body">
-          <div class="row"><label class="mini">Down payment</label><span class="input-pair"><input id="hp_down" type="number" step="1" min="0" max="99" value="20"/><span class="unit">%</span></span></div>
-          <div class="row"><label class="mini">Rate</label><span class="input-pair"><input id="hp_rate" type="number" step="0.125" min="0" value="6.5"/><span class="unit">%/yr</span></span></div>
-          <div class="row"><label class="mini">Term</label><span class="input-pair"><input id="hp_term" type="number" step="5" min="1" value="30"/><span class="unit">yr</span></span></div>
-          <div class="row"><label class="mini">Property tax</label><span class="input-pair"><input id="hp_ptax" type="number" step="0.05" min="0" value="1.65"/><span class="unit">%/yr</span></span></div>
-          <div class="row"><label class="mini">Insurance</label><span class="input-pair"><input id="hp_ins" type="text" inputmode="decimal" data-fmt="usd" value="2,400"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">HOA</label><span class="input-pair"><input id="hp_hoa" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/mo</span></span></div>
-          <div class="mini muted">PMI is automatic: 0.5%/yr of the loan while the down payment is under 20%.</div>
-        </div></details>
-        <div id="hp_out" class="mini" style="margin-top:6px"><span class="muted">Build your budget below first — then we'll price a house against it.</span></div>
-        <button class="seed-btn" id="hp_tobudget" type="button" style="margin-top:8px">→ Send payment to Needs › Housing</button>
-      </div>
-    </details>
-    <details class="card" style="margin-top:16px"><summary>Framework targets <span class="mini" style="font-weight:var(--fw-normal)">(50/30/20 etc. — just a guide)</span></summary><div class="body"><div id="bg_out" class="mini">Enter your numbers and calculate.</div></div></details>
+    <details class="card" style="margin-top:16px" id="bgb_targets_card"><summary>Framework targets <span class="mini" style="font-weight:var(--fw-normal)">(50/30/20 etc. — just a guide)</span></summary><div class="body"><div id="bg_out" class="mini">Enter your numbers and calculate.</div></div></details>
   </div>
 </div>
-<section class="card" style="margin-top:16px">
+<section class="card" style="margin-top:16px" id="bgb_plan_card">
   <h2>Dynamic budget — buckets &amp; line items</h2>
   <p class="mini">Allocate your monthly take-home into buckets and services. Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups. <button class="seed-btn" id="bgb_seed" type="button">Use Tax take-home</button></p>
   <p class="mini" style="margin-top:-4px;color:var(--muted)">Your base auto-tracks <b>net take-home</b> — all 401k/Roth/HSA/ESPP contributions are already taken out, so this is only your spendable cash.</p>
@@ -1928,24 +2183,6 @@
     </label>
   </div>
   <div id="bgb_presets" class="mini" style="margin:8px 0"></div>
-  <details class="mini" style="margin:4px 0 8px"><summary class="muted">Category aliases — count alternate spellings toward a budget line</summary>
-    <div id="bgb_alias_ui" class="bgb-alias-ui">
-      <div class="bgb-alias-add">
-        <select id="bgb_alias_target" class="bgb-alias-target" aria-label="Count toward budget line"></select>
-        <span class="bgb-alias-arrow" aria-hidden="true">←</span>
-        <input id="bgb_alias_new" type="text" class="bgb-alias-spell"
-               placeholder="alternate spelling…" autocomplete="off" spellcheck="false">
-        <button type="button" class="seed-btn" id="bgb_alias_merge">+ Merge</button>
-        <span id="bgb_alias_hint" class="mini muted" aria-live="polite"></span>
-      </div>
-      <div class="mini muted" style="margin-top:4px">Maps an alternate spelling to a budget line so it counts there in Actuals. <span class="mono">line ← alias</span></div>
-      <div id="bgb_alias_groups" class="bgb-alias-groups"></div>
-    </div>
-  </details>
-  <details id="bgb_cat_manage_wrap" class="mini" style="margin:4px 0 8px">
-    <summary class="muted">Manage categories — add custom spend buckets</summary>
-    <div id="bgb_cat_manage" class="body" style="margin-top:8px"></div>
-  </details>
   <details id="hb_share_wrap" class="mini" style="margin:4px 0 8px">
     <summary class="muted">Share expenses with your partner — tick the categories they should see</summary>
     <div id="hb_share_panel" class="body" style="margin-top:8px"></div>
@@ -1996,7 +2233,13 @@
 </div>
 
 <div class="tab-panel" id="tab-invest"><div class="panel-inner">
-  <section class="card">
+  <!-- Answer before arithmetic, same as Decisions/Car. The mockup proposed folding these
+       nineteen inputs behind a "What this is based on" lid; reordering gets the same result
+       without reintroducing a disclosure, which is the thing this whole pass has been
+       removing. The screen is solo so both cards get the full width -- the inputs were
+       previously crammed into the 380px rail while the one-line verdict had 950px. -->
+  <section class="card" id="iv_out_card"><h2>Plan</h2><div id="iv_out" class="mini">Enter your numbers and build the plan.</div><p class="mini muted" id="iv_election" style="display:none;margin-top:8px"></p></section>
+  <section class="card" id="iv_plan_card">
     <h2>Invest — next-dollar plan</h2>
     <p class="mini">Waterfall: match → high-interest debt → HSA → IRA → 401(k) → mega-backdoor → taxable. <button class="seed-btn" id="iv_seed" type="button" title="Gross income &amp; state ← the Tax tab · Monthly essential expenses ← your Budget's raw Need-kind budget-line total (before any counts-toward folding) · Amount to allocate ← your planned annual investing (Budget's Investments bucket + Tax-tab contributions) × 12 · Emergency fund balance ← your registered cash-savings accounts, if any · Match %s ← the Budget tab's employer-match fields, if set. Everything here stays editable after — this only fills, it never locks. Contribution rooms are set to the FULL annual limits (the plan decides what fills them — your Tax-tab contributions are part of the amount being planned); balances/eligibility stay untouched.">Pull from Tax + Budget</button></p>
     <div class="row"><label class="mini">Waterfall strategy</label><select id="iv_strategy"><option value="default">Default</option><option value="henry-v2">HENRY Playbook v2 (community)</option></select></div>
@@ -2021,11 +2264,15 @@
     <div class="row"><label class="mini">Expected retirement income <span class="hint">(annual; for Trad-vs-Roth)</span></label><span class="input-pair"><input id="iv_retinc" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
     <button class="calc-btn" id="iv_go" type="button">Build plan</button>
   </section>
-  <section class="card"><h2>Plan</h2><div id="iv_out" class="mini">Enter your numbers and build the plan.</div><p class="mini muted" id="iv_election" style="display:none;margin-top:8px"></p></section>
 </div>
-<section class="card" style="margin-top:16px">
+<section class="card" id="iv_accounts_card" style="margin-top:16px">
   <h2>Your investment accounts</h2>
   <p class="mini">Group every account — cash savings, your current employer's 401(k), past-employer rollovers, IRAs, HSA, brokerage. Updating a balance writes a dated snapshot, so the Overview net-worth trajectory and FIRE progress stay honest too.</p>
+  <!-- The staleness call-out. Per-row ages tell you which balance is old only once you are
+       already reading the rows; this says it before you start, because the cost of stale balances
+       is paid on OTHER screens -- net worth and FIRE progress quote these figures with no hint of
+       their age. Rendered by ivAcctRender, hidden entirely when nothing is stale. -->
+  <div id="iv_stale_banner" class="stale-banner" hidden></div>
   <div id="iv_acct_summary" class="mini" style="margin-bottom:8px"></div>
   <div id="iv_acct_groups"><span class="mini muted">Loading accounts…</span></div>
   <div class="sc-grid" style="margin-top:12px;align-items:flex-end">
@@ -2036,7 +2283,7 @@
     <div class="row" style="margin:0"><label class="mini">Balance</label><span class="input-pair"><input id="iv_acct_bal" type="text" inputmode="decimal" data-fmt="usd" value="" style="width:110px"/><span class="unit">$</span></span></div>
     <button class="seed-btn" id="iv_acct_add" type="button">+ Add account</button>
   </div>
-  <details class="mini" style="margin-top:8px"><summary class="muted">Include an existing account (from your Actuals) in this registry…</summary>
+  <details id="iv_include_wrap" class="mini" style="margin-top:8px"><summary class="muted">Include an existing account (from your Actuals) in this registry…</summary>
     <div class="sc-grid" style="align-items:flex-end;margin-top:6px">
       <div class="row" style="margin:0"><label class="mini">Account</label><select id="iv_acct_existing" style="min-width:220px"></select></div>
       <div class="row" style="margin:0"><label class="mini">Group</label><select id="iv_acct_exgroup" style="min-width:190px"></select></div>
@@ -2047,32 +2294,13 @@
   </details>
   <div id="iv_acct_suggest" class="mini" style="margin-top:8px"></div>
 </section>
-<section class="card" style="margin-top:16px">
+<section class="card" id="iv_nw_card" style="margin-top:16px">
   <h2>Net worth — actual vs forecast</h2>
   <p class="mini">Your logged account balances (green) tracked against the Overview forecast cone — are you keeping pace?</p>
   <div id="iv_nw_chart" class="mini muted">Update a balance in <b>Your investment accounts</b> above to plot your real net worth on the forecast cone.</div>
 </section>
 <!-- Venture ROI tracker (TODO-228, DEC-020) -->
-<section class="card" style="margin-top:16px" id="vn_card">
-  <h2>Ventures — earning back what you invest in yourself</h2>
-  <p class="mini">Track a side venture — a course, a certification, equipment — against the money it earns. List what you put in, link its money (a tag you use in Actuals, or a dedicated account), and watch how long until it pays for itself.</p>
-  <div id="vn_list" class="mini muted">No ventures yet — track a course, cert, or gear against what it earns back.</div>
-  <div class="sc-grid" style="margin-top:12px;align-items:flex-end">
-    <div class="row" style="margin:0"><label class="mini">Venture</label><input id="vn_name" type="text" placeholder="e.g. Botox practice" style="min-width:170px"/></div>
-    <div class="row" style="margin:0"><label class="mini">Money source</label><select id="vn_link" style="min-width:200px"></select></div>
-    <div class="row" style="margin:0;display:none" id="vn_newtag_wrap"><label class="mini">New tag</label><input id="vn_newtag" type="text" placeholder="botox" style="width:130px"/></div>
-    <div class="row" style="margin:0"><label class="mini">Started</label><input id="vn_date" type="date"/></div>
-  </div>
-  <div class="mini" style="margin-top:8px">Investments to earn back <span class="muted">(the course, the gear — typed here, <b>not</b> tagged in Actuals)</span>:</div>
-  <div id="vn_inv_rows"></div>
-  <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
-    <button class="seed-btn" id="vn_additem" type="button">＋ add investment</button>
-    <span class="mini muted" id="vn_inv_sum"></span>
-    <button class="seed-btn" id="vn_add" type="button" style="margin-left:auto">+ Add venture</button>
-  </div>
-  <div class="note-box" style="margin-top:10px"><b>Two rules keep this honest.</b> (1) List the course and equipment here as investments — the money you want back. (2) In Actuals, tag every dollar the venture earns <i>and</i> spends (client payments, vials, room rent, insurance) — or link a dedicated account so everything on it counts automatically. <b>Don't tag the course or equipment purchase</b> — it's already counted here. Miss a running cost and your return will look better than it really is. All figures are <b>pre-tax cash payback</b> — venture profit is self-employment income (SE + income tax owed at filing, plus WA B&amp;O if you move) — talk to a professional before acting on "paid back".</div>
-</section>
-<section class="card" style="margin-top:16px">
+<section class="card" id="iv_proj_card" style="margin-top:16px">
   <h2>Projection — standard growth</h2>
   <p class="mini">Project your savings forward at a standard annual return (compounded, contributions yearly). <button class="seed-btn" id="pj_seed" type="button">Pull from Tax + Budget</button></p>
   <!-- pjTouched (#pj_touched, ~L1784) freezes auto-sync silently forever after one hand-edit — the
@@ -2111,48 +2339,217 @@
 </section>
 </div>
 
-<div class="tab-panel" id="tab-auto"><div class="panel-inner">
-  <section class="card">
+
+<div class="tab-panel" id="tab-decisions"><div class="panel-inner">
+  <!-- Decisions: the once-every-few-years choices, together where they can be compared.
+       House came out of a <details> inside Budget (12 inputs is a tool, not a detail),
+       Ventures out of Invest, and Car had a whole tab to itself. None of them belongs in a
+       tab you use to do monthly work. -->
+  <section class="card" id="hp_card">
+    <h2>How much house can we afford?</h2>
+      <div class="body">
+        <p class="mini">Price a house payment against your real budget. Pin the payment you want and watch the rest flex — or fund everything else first and see what's left.</p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <span class="chips" id="hp_mode_chips"><span class="chip active" data-hpmode="payment_last" title="what's left after everything">Payment last</span><span class="chip" data-hpmode="payment_first" title="I know my payment, flex the rest">Payment first</span></span>
+          <span class="chips" id="hp_house_chips"><span class="chip active" data-hphouse="solo">Just me</span><span class="chip" data-hphouse="household">Us (household)</span></span>
+          <input type="hidden" id="hp_mode" value="payment_last"><input type="hidden" id="hp_household" value="solo">
+        </div>
+        <div class="mini muted" id="hp_takehome_line" style="margin:8px 0 4px"></div>
+        <!-- Verdict as a band, assumptions flowing ACROSS beneath it. The first attempt put the
+             assumptions in a 400px aside, which fixed the horizontal void and created a vertical
+             one: ten short fields make a column far taller than the verdict beside it, so the
+             card ran ~340px of empty space at bottom-left -- worst in the "nothing left for
+             housing" state, where the left column is one tile. A tall skinny column is the wrong
+             shape for short labelled fields; a flowing grid is the right one, and it balances at
+             every width because the number of columns follows the space. -->
+        <div id="hp_out" class="mini"><span class="muted">Build your budget below first — then we'll price a house against it.</span></div>
+
+        <div class="subhead">Your situation</div>
+        <div class="hp-assume">
+          <div class="row" id="hp_pay_row" style="display:none"><label class="mini">Desired payment</label><span class="input-pair"><input id="hp_pay" type="text" inputmode="decimal" data-fmt="usd2" value="2,000"/><span class="unit">$/mo</span></span></div>
+          <div class="row"><label class="mini">Current rent/housing you'll replace <span class="hint">(detected from your budget — freed when you buy)</span></label><span class="input-pair"><input id="hp_curhousing" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
+          <div class="row hp-partner" style="display:none"><label class="mini">Partner take-home <span class="hint">(after-tax, monthly)</span></label><span class="input-pair"><input id="hp_ptake" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
+          <div class="row hp-partner" style="display:none"><label class="mini">Partner debt payments <span class="hint">(loans, cards — theirs)</span></label><span class="input-pair"><input id="hp_pdebt" type="text" inputmode="decimal" data-fmt="usd2" value="0"/><span class="unit">$/mo</span></span></div>
+        </div>
+
+        <div class="subhead">The loan</div>
+        <div class="hp-assume">
+          <div class="row"><label class="mini">Down payment</label><span class="input-pair"><input id="hp_down" type="number" step="1" min="0" max="99" value="20"/><span class="unit">%</span></span></div>
+          <div class="row"><label class="mini">Rate</label><span class="input-pair"><input id="hp_rate" type="number" step="0.125" min="0" value="6.5"/><span class="unit">%/yr</span></span></div>
+          <div class="row"><label class="mini">Term</label><span class="input-pair"><input id="hp_term" type="number" step="5" min="1" value="30"/><span class="unit">yr</span></span></div>
+          <div class="row"><label class="mini">Property tax</label><span class="input-pair"><input id="hp_ptax" type="number" step="0.05" min="0" value="1.65"/><span class="unit">%/yr</span></span></div>
+          <div class="row"><label class="mini">Insurance</label><span class="input-pair"><input id="hp_ins" type="text" inputmode="decimal" data-fmt="usd" value="2,400"/><span class="unit">$/yr</span></span></div>
+          <div class="row"><label class="mini">HOA</label><span class="input-pair"><input id="hp_hoa" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/mo</span></span></div>
+          <div class="mini muted hp-assume-note">PMI is automatic: 0.5%/yr of the loan while the down payment is under 20%.</div>
+        </div>
+
+        <button class="seed-btn" id="hp_tobudget" type="button" style="margin-top:14px">→ Send payment to Needs › Housing</button>
+      </div>
+  </section>
+  <!-- Verdict first. #tab-decisions .panel-inner is display:block, so cards stack in DOM order --
+       which makes DOM order the whole of "answer before arithmetic". You return to this screen for
+       the recommendation, not for the twelve fields that produced it, and calcAuto() runs on the
+       tab's first open so there is a real verdict here before you touch anything. -->
+  <section class="card" id="au_out_card"><h2>Result</h2>
+    <!-- The horizon selector is a CONTROL, so it lives in the markup rather than being rebuilt
+         inside #au_out on every render. That is what lets you type a custom year without the
+         input being destroyed under the cursor mid-keystroke. -->
+    <div class="au-keep">
+      <span class="mini muted">Keep it:</span>
+      <span class="chips" id="au_yr_chips"></span>
+      <span class="au-yr-add">
+        <span class="input-pair"><input id="au_yr_new" type="number" min="1" max="40" step="1" placeholder="add" aria-label="Add a custom number of years"><span class="unit">yrs</span></span>
+        <button type="button" class="ac-tool" id="au_yr_go">Add</button>
+      </span>
+      <span class="mini muted">How long you keep the car changes the math.</span>
+    </div>
+    <div id="au_yr_err" class="mini" style="display:none"></div>
+    <div id="au_out" class="mini">Enter your numbers and compare.</div>
+  </section>
+  <section class="card" id="au_card">
     <h2>Car — lease vs finance vs cash</h2>
 
-    <div class="subhead">The car</div>
-    <div class="row"><label class="mini">Sticker price (MSRP)</label><span class="input-pair"><input id="au_msrp" type="text" inputmode="decimal" data-fmt="usd" value="45000"/><span class="unit">$</span></span></div>
-    <div class="row"><label class="mini">Price you negotiated</label><span class="input-pair"><input id="au_cap" type="text" inputmode="decimal" data-fmt="usd" value="43000"/><span class="unit">$</span></span></div>
-    <div class="mini muted" style="margin:2px 0 8px">What you'll actually pay before tax — a lease contract calls this the <i>cap cost</i>.</div>
-    <div class="row"><label class="mini" style="display:flex;align-items:center;gap:6px;cursor:pointer"><input id="au_ev" type="checkbox"> EV / luxury vehicle</label></div>
-    <div class="mini muted" style="margin:2px 0 8px">Uses a steeper resale-value curve — EVs &amp; luxury cars lose value faster in the early years, which raises the true cost of buying and holding.</div>
+    <!-- The four .subhead groups ARE the column structure -- "The car" / "If you lease" / "If you
+         finance" / "Can you afford it?" was already the clearest form grouping in the app, it was
+         just stacked in one narrow column down the left of a 1352px card. As columns the grouping
+         does visible work instead of only labelling. Multi-column rather than a grid: a grid puts
+         one group per track and leaves ~230px of void under the short ones, where a column layout
+         balances five blocks of different heights across the available columns by itself.
+         "Fine print" is the fifth block -- it was a lid, and there is room for it now. -->
+    <div class="au-cols">
+      <div class="au-col">
+        <div class="subhead">The car</div>
+        <div class="row"><label class="mini">Sticker price (MSRP)</label><span class="input-pair"><input id="au_msrp" type="text" inputmode="decimal" data-fmt="usd" value="45000"/><span class="unit">$</span></span></div>
+        <div class="row"><label class="mini">Price you negotiated</label><span class="input-pair"><input id="au_cap" type="text" inputmode="decimal" data-fmt="usd" value="43000"/><span class="unit">$</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">What you'll actually pay before tax — a lease contract calls this the <i>cap cost</i>.</div>
+        <div class="row"><label class="mini" style="display:flex;align-items:center;gap:6px;cursor:pointer"><input id="au_ev" type="checkbox"> EV / luxury vehicle</label></div>
+        <div class="mini muted" style="margin:2px 0 8px">Uses a steeper resale-value curve — EVs &amp; luxury cars lose value faster in the early years, which raises the true cost of buying and holding.</div>
+      </div>
 
-    <div class="subhead">If you lease</div>
-    <div class="row"><label class="mini">Up-front down payment</label><span class="input-pair"><input id="au_capred" type="text" inputmode="decimal" data-fmt="usd" value="3000"/><span class="unit">$</span></span></div>
-    <div class="mini muted" style="margin:2px 0 8px">Cash at signing (a lease calls it <i>cap-cost reduction</i>). $0 down is often the smart move on a lease.</div>
-    <div class="row"><label class="mini">Lease length</label><span class="input-pair"><input id="au_term" type="number" value="36"/><span class="unit">mo</span></span></div>
+      <div class="au-col">
+        <div class="subhead">If you lease</div>
+        <div class="row"><label class="mini">Up-front down payment</label><span class="input-pair"><input id="au_capred" type="text" inputmode="decimal" data-fmt="usd" value="3000"/><span class="unit">$</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">Cash at signing (a lease calls it <i>cap-cost reduction</i>). $0 down is often the smart move on a lease.</div>
+        <div class="row"><label class="mini">Lease length</label><span class="input-pair"><input id="au_term" type="number" value="36"/><span class="unit">mo</span></span></div>
+      </div>
 
-    <div class="subhead">If you finance</div>
-    <div class="row"><label class="mini">Loan APR</label><span class="input-pair"><input id="au_fapr" type="number" step="0.1" value="6.5"/><span class="unit">%</span></span></div>
-    <div class="row"><label class="mini">Loan length</label><span class="input-pair"><input id="au_fterm" type="number" value="60"/><span class="unit">mo</span></span></div>
-    <div class="mini muted" style="margin:2px 0 8px">20/4/10 wants this at <b>48 months or less</b>.</div>
-    <div class="row"><label class="mini">Loan down payment</label><span class="input-pair"><input id="au_fdown" type="text" inputmode="decimal" data-fmt="usd" value="5000"/><span class="unit">$</span></span></div>
-    <div class="mini muted" style="margin:2px 0 8px">20/4/10 wants <b>at least 20% down</b>.</div>
+      <div class="au-col">
+        <div class="subhead">If you finance</div>
+        <div class="row"><label class="mini">Loan APR</label><span class="input-pair"><input id="au_fapr" type="number" step="0.1" value="6.5"/><span class="unit">%</span></span></div>
+        <div class="row"><label class="mini">Loan length</label><span class="input-pair"><input id="au_fterm" type="number" value="60"/><span class="unit">mo</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">20/4/10 wants this at <b>48 months or less</b>.</div>
+        <div class="row"><label class="mini">Loan down payment</label><span class="input-pair"><input id="au_fdown" type="text" inputmode="decimal" data-fmt="usd" value="5000"/><span class="unit">$</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">20/4/10 wants <b>at least 20% down</b>.</div>
+      </div>
 
-    <div class="subhead">Can you afford it?</div>
-    <div class="row"><label class="mini">Your gross monthly income</label><span class="input-pair"><input id="au_gmi" type="text" inputmode="decimal" data-fmt="usd" value="12000"/><span class="unit">$/mo</span></span></div>
-    <div class="mini muted" style="margin:2px 0 8px">Before tax. The 20/4/10 rule caps <b>all</b> car costs at 10% of this.</div>
+      <div class="au-col">
+        <div class="subhead">Can you afford it?</div>
+        <div class="row"><label class="mini">Your gross monthly income</label><span class="input-pair"><input id="au_gmi" type="text" inputmode="decimal" data-fmt="usd" value="12000"/><span class="unit">$/mo</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">Before tax. The 20/4/10 rule caps <b>all</b> car costs at 10% of this.</div>
 
-    <details><summary>Assumptions &amp; fine print</summary><div class="body">
-      <div class="mini muted" style="margin-bottom:8px">Pre-filled with typical values. Open only if you have exact figures from the dealer.</div>
-      <div class="row"><label class="mini">Sales tax</label><span class="input-pair"><input id="au_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span></div>
-      <div class="row"><label class="mini">Residual value</label><span class="input-pair"><input id="au_res" type="number" step="1" value="58"/><span class="unit">% MSRP</span></span></div>
-      <div class="mini muted" style="margin:2px 0 8px">What the car is predicted to be worth at lease-end. Higher = lower lease payment. A 3-yr lease is typically 55–62%.</div>
-      <div class="row"><label class="mini">Lease rate (APR)</label><span class="input-pair"><input id="au_apr" type="number" step="0.1" value="6"/><span class="unit">%</span></span></div>
-      <div class="mini muted" style="margin:2px 0 0">The lease's interest cost. Dealers quote a tiny <i>money factor</i> instead — APR ≈ money factor × 2400.</div>
-    </div></details>
+      </div>
+
+      <div class="au-col">
+        <div class="subhead">Fine print</div>
+        <div class="mini muted" style="margin:2px 0 8px">Pre-filled with typical values. Change these only if you have exact figures from the dealer.</div>
+        <div class="row"><label class="mini">Sales tax</label><span class="input-pair"><input id="au_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span></div>
+        <div class="row"><label class="mini">Residual value <span class="hint">(% of MSRP)</span></label><span class="input-pair"><input id="au_res" type="number" step="1" value="58"/><span class="unit">%</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">What the car is predicted to be worth at lease-end. Higher = lower lease payment. A 3-yr lease is typically 55–62%.</div>
+        <div class="row"><label class="mini">Lease rate (APR)</label><span class="input-pair"><input id="au_apr" type="number" step="0.1" value="6"/><span class="unit">%</span></span></div>
+        <div class="mini muted" style="margin:2px 0 8px">The lease's interest cost. Dealers quote a tiny <i>money factor</i> instead — APR ≈ money factor × 2400.</div>
+      </div>
+    </div>
 
     <button class="calc-btn" id="au_go" type="button" style="margin-top:12px">Compare</button>
     <button class="seed-btn" id="au_tobudget" type="button" style="margin-top:8px">→ Send car payment to Budget</button>
   </section>
-  <section class="card"><h2>Result</h2><div id="au_out" class="mini">Enter your numbers and compare.</div></section>
 </div></div>
+<div class="tab-panel" id="tab-setup"><div class="panel-inner">
+  <!-- Setup: configuration that was living inside working tabs behind five lids. The point is
+       that these are SECTIONS on a page, not lids on a page -- a section can simply be visible
+       here because it is no longer competing with your budget for the space. Category
+       management was previously rendered TWICE (Budget and Actuals, same catManageRender);
+       Setup is the one place it needs to exist. -->
+  <div class="setup">
+    <nav class="setup-nav" id="setup_nav" aria-label="Setup sections">
+      <a href="#" data-setup="categories" class="on">Categories</a>
+      <a href="#" data-setup="aliases">Spelling aliases</a>
+      <a href="#" data-setup="strategies">Budget strategies</a>
+      <a href="#" data-setup="accounts">Accounts</a>
+      <a href="#" data-setup="import">Import &amp; snapshots</a>
+    </nav>
+    <div class="setup-pane">
+      <section id="setup_categories" data-setup-pane="categories"><h2>Categories</h2>
+        <p class="mini muted">The buckets your spending is sorted into. Used by Budget and Actuals.</p>
+    <div id="bgb_cat_manage" class="body" style="margin-top:8px"></div>
+      </section>
+      <section id="setup_aliases" data-setup-pane="aliases" hidden><h2>Spelling aliases</h2>
+        <p class="mini muted">Count alternate spellings toward a budget line.</p>
+    <div id="bgb_alias_ui" class="bgb-alias-ui">
+      <div class="bgb-alias-add">
+        <select id="bgb_alias_target" class="bgb-alias-target" aria-label="Count toward budget line"></select>
+        <span class="bgb-alias-arrow" aria-hidden="true">←</span>
+        <input id="bgb_alias_new" type="text" class="bgb-alias-spell"
+               placeholder="alternate spelling…" autocomplete="off" spellcheck="false">
+        <button type="button" class="seed-btn" id="bgb_alias_merge">+ Merge</button>
+        <span id="bgb_alias_hint" class="mini muted" aria-live="polite"></span>
+      </div>
+      <div class="mini muted" style="margin-top:4px">Maps an alternate spelling to a budget line so it counts there in Actuals. <span class="mono">line ← alias</span></div>
+      <div id="bgb_alias_groups" class="bgb-alias-groups"></div>
+    </div>
+      </section>
+      <section id="setup_strategies" data-setup-pane="strategies" hidden><h2>Budget strategies</h2>
+        <p class="mini muted">Named splits to compare your budget against.</p>
+        <div id="bgb_strat_manage" class="body" style="margin-top:8px"></div>
+      </section>
+      <section id="setup_accounts" data-setup-pane="accounts" hidden><h2>Accounts</h2>
+          <div class="subhead">Accounts</div>
+          <!-- manage-panel-redesign.md §2d: .ac-row/.ac-field replaces the old flex-wrap;align-items:
+               flex-end form (5 baselines, a padding-bottom shim to fake-align Liability). Shown/hidden
+               and the Liability lock state are driven by acAcctFormTypeChanged() (mirrors
+               tracking_store._normalize_liability so the form never shows a value the server would
+               silently overrule); forced types show a locked .mng-flag chip instead of a disabled
+               checkbox (readonly-state-legibility -- a fill, never a subtle disabled edge). -->
+          <div class="ac-row" style="flex-wrap:wrap">
+            <label class="ac-field"><span class="ac-lbl">Name</span><input id="ac_acct_name" type="text" placeholder="Checking"></label>
+            <label class="ac-field"><span class="ac-lbl">Type</span><select id="ac_acct_type"><option>checking</option><option>savings</option><option>brokerage</option><option>retirement</option><option>hsa</option><option>credit</option><option>loan</option><option>cash</option><option>other</option></select></label>
+            <span class="ac-field">
+              <span class="ac-lbl">Liability</span>
+              <span class="mng-flag" id="ac_acct_liab_flag" style="display:none">Auto: liability</span>
+              <label id="ac_acct_liab_wrap" style="display:flex;align-items:center;gap:5px;min-height:32px">
+                <input id="ac_acct_liab" type="checkbox"> Liability
+              </label>
+            </span>
+            <label class="ac-field" id="ac_acct_limit_wrap" style="display:none"><span class="ac-lbl">Credit limit</span><span class="input-pair"><span class="unit">$</span><input id="ac_acct_limit" type="text" inputmode="decimal" data-fmt="usd" placeholder="5,000"></span></label>
+            <button class="seed-btn" id="ac_acct_add" type="button">+ Add account</button>
+          </div>
+          <div id="ac_accts" style="margin-top:8px"></div>
 
+      </section>
+      <section id="setup_import" data-setup-pane="import" hidden><h2>Import &amp; snapshots</h2>
+          <div class="subhead" style="margin-top:14px">Paste from Excel / import CSV</div>
+          <div class="mini muted" style="margin:4px 0">Paste rows straight from <b>Excel / Google Sheets</b> (tab-separated) or CSV. Header row required, columns: <span class="mono">date,account,direction,amount,bucket,category,description</span></div>
+          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--field-border);color:var(--text);border-radius:6px;padding:6px;font-size:var(--fs-sm);font-family:var(--font-mono)" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
+          <button class="seed-btn" id="ac_csv_go" type="button" style="margin-top:6px">Preview & import</button>
+          <div id="ac_csv_out" class="mini" style="margin-top:6px"></div>
+
+          <div class="subhead" style="margin-top:14px">Net-worth snapshot</div>
+          <!-- manage-panel-redesign.md §2e: identical .ac-row/.ac-field treatment as §2d. -->
+          <div class="ac-row" style="flex-wrap:wrap">
+            <label class="ac-field"><span class="ac-lbl">Account</span><select id="ac_snap_acct"></select></label>
+            <label class="ac-field"><span class="ac-lbl">Balance</span><span class="input-pair"><input id="ac_snap_bal" type="text" inputmode="decimal" data-fmt="usd"><span class="unit">$</span></span></label>
+            <label class="ac-field"><span class="ac-lbl">As of</span><input id="ac_snap_date" type="date"></label>
+            <button class="seed-btn" id="ac_snap_save" type="button">Save balance</button>
+          </div>
+          <div class="mini muted" style="margin-top:5px">Record each account's balance (liabilities subtract). Net worth = sum of the latest balances → plotted on the cone.</div>
+          <!-- S2.1 Phase B (§3.2, §8, §13-Q3): the computed reconciliation plug for the balance just
+               saved -- never stored, re-derived from GET /account-balances each time (acRenderReconcileNote). -->
+          <div id="ac_snap_recon" class="mini" style="margin-top:6px"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div></div>
 <div class="tab-panel" id="tab-actuals">
   <!-- Zone A: month context -->
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -2165,7 +2562,7 @@
 
   <div class="panel-inner">
     <!-- LEFT: entry -->
-    <section class="card">
+    <section class="card" id="ac_log_card">
       <h2>Log it</h2>
       <div class="mini muted" style="margin:-4px 0 8px">Money in / out / invested. Stored in your <b>own private database</b> — it never leaves your network.</div>
 
@@ -2283,58 +2680,10 @@
       </div>
 
       <!-- Tier 3: Manage (collapsed) — rare admin, out of the daily path -->
-      <details class="ac-manage" style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
-        <summary>Manage — categories · accounts · import · balance snapshots</summary>
-        <div style="margin-top:12px">
-          <div class="subhead" style="margin-top:0">Categories</div>
-          <div id="ac_cat_manage" style="margin-bottom:4px"></div>
-          <div style="border-top:1px solid var(--line);margin:12px 0 10px"></div>
-          <div class="subhead">Accounts</div>
-          <!-- manage-panel-redesign.md §2d: .ac-row/.ac-field replaces the old flex-wrap;align-items:
-               flex-end form (5 baselines, a padding-bottom shim to fake-align Liability). Shown/hidden
-               and the Liability lock state are driven by acAcctFormTypeChanged() (mirrors
-               tracking_store._normalize_liability so the form never shows a value the server would
-               silently overrule); forced types show a locked .mng-flag chip instead of a disabled
-               checkbox (readonly-state-legibility -- a fill, never a subtle disabled edge). -->
-          <div class="ac-row" style="flex-wrap:wrap">
-            <label class="ac-field"><span class="ac-lbl">Name</span><input id="ac_acct_name" type="text" placeholder="Checking"></label>
-            <label class="ac-field"><span class="ac-lbl">Type</span><select id="ac_acct_type"><option>checking</option><option>savings</option><option>brokerage</option><option>retirement</option><option>hsa</option><option>credit</option><option>loan</option><option>cash</option><option>other</option></select></label>
-            <span class="ac-field">
-              <span class="ac-lbl">Liability</span>
-              <span class="mng-flag" id="ac_acct_liab_flag" style="display:none">Auto: liability</span>
-              <label id="ac_acct_liab_wrap" style="display:flex;align-items:center;gap:5px;min-height:32px">
-                <input id="ac_acct_liab" type="checkbox"> Liability
-              </label>
-            </span>
-            <label class="ac-field" id="ac_acct_limit_wrap" style="display:none"><span class="ac-lbl">Credit limit</span><span class="input-pair"><span class="unit">$</span><input id="ac_acct_limit" type="text" inputmode="decimal" data-fmt="usd" placeholder="5,000"></span></label>
-            <button class="seed-btn" id="ac_acct_add" type="button">+ Add account</button>
-          </div>
-          <div id="ac_accts" style="margin-top:8px"></div>
-
-          <div class="subhead" style="margin-top:14px">Paste from Excel / import CSV</div>
-          <div class="mini muted" style="margin:4px 0">Paste rows straight from <b>Excel / Google Sheets</b> (tab-separated) or CSV. Header row required, columns: <span class="mono">date,account,direction,amount,bucket,category,description</span></div>
-          <textarea id="ac_csv" rows="4" style="width:100%;background:var(--field);border:1px solid var(--field-border);color:var(--text);border-radius:6px;padding:6px;font-size:var(--fs-sm);font-family:var(--font-mono)" placeholder="date	account	direction	amount	bucket	category&#10;2026-06-01	Checking	out	2000	need	Rent"></textarea>
-          <button class="seed-btn" id="ac_csv_go" type="button" style="margin-top:6px">Preview & import</button>
-          <div id="ac_csv_out" class="mini" style="margin-top:6px"></div>
-
-          <div class="subhead" style="margin-top:14px">Net-worth snapshot</div>
-          <!-- manage-panel-redesign.md §2e: identical .ac-row/.ac-field treatment as §2d. -->
-          <div class="ac-row" style="flex-wrap:wrap">
-            <label class="ac-field"><span class="ac-lbl">Account</span><select id="ac_snap_acct"></select></label>
-            <label class="ac-field"><span class="ac-lbl">Balance</span><span class="input-pair"><input id="ac_snap_bal" type="text" inputmode="decimal" data-fmt="usd"><span class="unit">$</span></span></label>
-            <label class="ac-field"><span class="ac-lbl">As of</span><input id="ac_snap_date" type="date"></label>
-            <button class="seed-btn" id="ac_snap_save" type="button">Save balance</button>
-          </div>
-          <div class="mini muted" style="margin-top:5px">Record each account's balance (liabilities subtract). Net worth = sum of the latest balances → plotted on the cone.</div>
-          <!-- S2.1 Phase B (§3.2, §8, §13-Q3): the computed reconciliation plug for the balance just
-               saved -- never stored, re-derived from GET /account-balances each time (acRenderReconcileNote). -->
-          <div id="ac_snap_recon" class="mini" style="margin-top:6px"></div>
-        </div>
-      </details>
     </section>
 
     <!-- RIGHT: plan vs actual -->
-    <section class="card">
+    <section class="card" id="ac_pva_card">
       <h2>Plan vs actual <span class="mini muted" id="ac_pva_month"></span></h2>
       <div id="ac_pva"><div class="note-box">Log a few transactions, then <b>Sync plan from Budget</b> to see this month against your plan.</div></div>
 
@@ -2357,8 +2706,37 @@
     <div id="ac_funds"><div class="mini" style="color:var(--muted)">Loading funds…</div></div>
   </section>
 
-  <section class="card"><h2>This month's transactions</h2>
-    <div id="ac_ledger" class="mini muted" style="overflow-x:auto">No transactions logged yet.</div>
+  <!-- Ventures lives here, not on Decisions (ux-element-audit.md, Decisions table). Decisions is
+       the once-every-few-years tab -- house, car -- and Ventures is a MONTHLY tracker, the only
+       thing on that tab you touched more than once a year. It reads entirely from transactions
+       tagged in this tab, so its own note-box was pointing users back here; putting the tracker
+       next to the log that feeds it is what makes the upkeep stick. Above the ledger, because
+       the ledger grows without bound and nothing should sit below it. -->
+  <section class="card" id="vn_card">
+    <h2>Ventures — earning back what you invest in yourself</h2>
+    <p class="mini">Track a side venture — a course, a certification, equipment — against the money it earns. List what you put in, link its money (a tag you use below, or a dedicated account), and watch how long until it pays for itself.</p>
+    <div id="vn_list" class="mini muted">No ventures yet — track a course, cert, or gear against what it earns back.</div>
+    <div class="sc-grid" style="margin-top:12px;align-items:flex-end">
+      <div class="row" style="margin:0"><label class="mini">Venture</label><input id="vn_name" type="text" placeholder="e.g. Botox practice" style="min-width:170px"/></div>
+      <div class="row" style="margin:0"><label class="mini">Money source</label><select id="vn_link" style="min-width:200px"></select></div>
+      <div class="row" style="margin:0;display:none" id="vn_newtag_wrap"><label class="mini">New tag</label><input id="vn_newtag" type="text" placeholder="botox" style="width:130px"/></div>
+      <div class="row" style="margin:0"><label class="mini">Started</label><input id="vn_date" type="date"/></div>
+    </div>
+    <div class="mini" style="margin-top:8px">Investments to earn back <span class="muted">(the course, the gear — typed here, <b>not</b> tagged as transactions)</span>:</div>
+    <div id="vn_inv_rows"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+      <button class="seed-btn" id="vn_additem" type="button">＋ add investment</button>
+      <span class="mini muted" id="vn_inv_sum"></span>
+      <button class="seed-btn" id="vn_add" type="button" style="margin-left:auto">+ Add venture</button>
+    </div>
+    <div class="note-box" style="margin-top:10px"><b>Two rules keep this honest.</b> (1) List the course and equipment here as investments — the money you want back. (2) Tag every dollar the venture earns <i>and</i> spends (client payments, vials, room rent, insurance) in the ledger below — or link a dedicated account so everything on it counts automatically. <b>Don't tag the course or equipment purchase</b> — it's already counted here. Miss a running cost and your return will look better than it really is. All figures are <b>pre-tax cash payback</b> — venture profit is self-employment income (SE + income tax owed at filing, plus WA B&amp;O if you move) — talk to a professional before acting on "paid back".</div>
+  </section>
+
+  <section class="card" id="ac_tx_card"><h2>This month's transactions</h2>
+    <!-- `muted` belongs to the empty-state SENTENCE, not to the ledger: keeping it on the
+         container greyed out every transaction the app ever rendered here. The class now travels
+         with the message it describes. -->
+    <div id="ac_ledger" class="mini" style="overflow-x:auto"><span class="muted">No transactions logged yet.</span></div>
   </section>
 </div>
 
@@ -2666,10 +3044,365 @@ const STORAGE_KEY = 'itc.v3';
 // Keeps aria-selected in step with the `.active` class. Called from BOTH activation paths (the
 // tab click handler and showTab) because either one alone leaves the other lying to a screen
 // reader -- the class and the state must never be able to disagree.
+// ---------------------------------------------------------------------------
+// Direction A — "The Index" (docs/navigation-ia-design.md §4.1)
+//
+// ONE model, TWO mount points: the strip under the tab bar and each section's own heading read
+// the same computed string. That is what keeps the index honest -- a contents list whose numbers
+// can drift from the sections they describe is worse than no contents list.
+//
+// Values come from the summaries each subsystem already publishes to `window` (the convention
+// `window.__budgetSummary` established), NOT from scraping the DOM and not by recomputing the
+// math a second time here. A section with no meaningful number carries none, rather than an
+// invented one.
+// ---------------------------------------------------------------------------
+
+// A LOCAL escaper. The file's `esc` is declared inside an inner scope (~7777) and is not
+// reachable from here -- referencing it threw, and because `el.hidden = false` runs before
+// `innerHTML`, the failure rendered as a visible but permanently empty bar rather than an error.
+function tixEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// ---------------------------------------------------------------------------
+// Screens within a tab
+//
+// A tab holds several jobs. The Tax tab computes your taxes AND plans contributions AND prices
+// moving to Washington AND edits bracket tables -- four jobs in one scroll. A screen is a GROUP
+// of cards sharing a job, and the strip under the tab bar switches between them.
+//
+// Grouping, not one-screen-per-card, and that is the load-bearing constraint. On Tax you watch
+// take-home move as you type a deduction, so the inputs and the summary MUST stay co-visible;
+// splitting them would break the feedback loop that makes the tab worth using. Every boundary
+// below falls where a card has its own submit button and its own result -- Max out has
+// "Calculate plan", WA vs TX has "Compare" -- which is the evidence that it does not feed the
+// page around it and is therefore safe to isolate.
+//
+// Membership is DATA, so a boundary that turns out wrong is one line here rather than a
+// re-migration. And a section listed in NO screen stays visible on every screen: forgetting to
+// list something must never make it disappear.
+// ---------------------------------------------------------------------------
+const TAB_SCREENS = {
+  tax: [
+    { key: 'taxes', label: 'Your taxes', sections: [
+        'tax_comp_card', 'tax_invest_card', 'tax_equity_card',
+        'tax_pretax_card', 'tax_posttax_card', 'tax_additions_card',
+        'tax_summary_card', 'bonusCard', 'filingCard',
+        'tax_wagebase_card', 'tax_breakdown_card', 'tax_cashflow_card'] },
+    { key: 'maxout', label: 'Max out',    sections: ['maxoutCard'],     solo: true },
+    { key: 'wavtx',  label: 'WA vs TX',   sections: ['sx_card'],        solo: true },
+    // The coupling traced in `docs/ux-screen-boundaries.md` §8 is real -- editing a bracket moves
+    // take-home live -- but carrying the whole Summary card to satisfy it was the wrong answer:
+    // the screen named "Tax tables" rendered a small collapsed lid beside a Summary that dwarfed
+    // it. The strip entry ALREADY shows take-home ("Tax tables $51,104"), so the feedback lives
+    // there instead, in one line rather than a column. `refreshTaxScent()` keeps it live.
+    { key: 'tables', label: 'Tax tables', sections: ['tax_tables_wrap'], solo: true },
+  ],
+  // Invest, by CADENCE rather than by feature: a monthly chore, an occasional decision, a rare
+  // what-if. Accounts and Net worth stay together because the chart exists to prove the balances
+  // and cannot render before one exists -- a traced coupling, not a preference.
+  invest: [
+    { key: 'accounts',   label: 'Accounts',    sections: ['iv_accounts_card', 'iv_nw_card'] },
+    // solo, so both cards stack full-width in DOM order (Plan first). The two-column shape gave
+    // the nineteen inputs a 380px rail and the one-line verdict 950px, which is backwards.
+    { key: 'nextdollar', label: 'Next dollar', sections: ['iv_out_card', 'iv_plan_card'], solo: true },
+    { key: 'projection', label: 'Projection',  sections: ['iv_proj_card'], solo: true },
+  ],
+  // Three self-contained tools that were sharing one scroll. Each has its own inputs and its own
+  // result, so each is safely a screen. Ventures stays here pending the user's decision about
+  // whether a backwards-looking tracker belongs beside two forwards-looking choices.
+  decisions: [
+    { key: 'house',    label: 'House',    sections: ['hp_card'], solo: true },
+    { key: 'car',      label: 'Car',      sections: ['au_card', 'au_out_card'] },
+    // Ventures used to be a third screen here; it moved to Actuals, where the transactions that
+    // feed it are tagged. Decisions is now exactly the two once-in-years choices it claims to be.
+  ],
+  budget: [
+    { key: 'plan',  label: 'Plan',  sections: ['bgb_plan_card', 'bgb_summary_card', 'bgb_targets_card'] },
+    { key: 'basis', label: 'Basis', sections: ['bgb_inputs_card'], solo: true },
+    { key: 'goals', label: 'Goals & funds', sections: ['gl_card', 'sf_card'], solo: true },
+  ],
+};
+
+function tabScreens(tab) { return TAB_SCREENS[tab] || []; }
+
+// Remembered per tab, in memory only. Which screen you were last on is not worth a storage key,
+// and persisting it would mean a tab could open somewhere surprising after a reload.
+const _screenState = {};
+function activeScreenKey(tab) {
+  const list = tabScreens(tab);
+  if (!list.length) return null;
+  const k = _screenState[tab];
+  return list.some(s => s.key === k) ? k : list[0].key;   // first screen is the default
+}
+function setActiveScreen(tab, key) {
+  if (!tabScreens(tab).some(s => s.key === key)) return;
+  _screenState[tab] = key;
+  applyScreens(tab);
+  renderTabIndex();
+}
+
+function applyScreens(tab) {
+  const list = tabScreens(tab);
+  if (!list.length) return;
+  const active = list.find(s => s.key === activeScreenKey(tab)) || list[0];
+  const managed = new Set();
+  list.forEach(s => s.sections.forEach(id => managed.add(id)));
+  const show = new Set(active.sections);
+  managed.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = !show.has(id);
+    // A <details> that IS a screen is no longer a disclosure — it was promoted. Navigating to a
+    // screen named "Tax tables" and then being asked to click "Tax tables" open is the lid
+    // outliving its reason to exist: you already made the choice it exists to offer. Any section
+    // that becomes a screen opens with it, and this generalises to whatever gets promoted next.
+    if (el.tagName === 'DETAILS' && show.has(id)) el.open = true;
+  });
+  // A one-card screen in a two-column tab would render in half the width with an empty column
+  // beside it, so a solo screen collapses the panel to a single column.
+  const panel = document.getElementById('tab-' + tab);
+  if (panel) {
+    // `solo` is the declared intent; this is the measured reality. The two-column grid pairs a
+    // form with its result, so ANY screen that leaves a single child in it renders that child at
+    // 380px with half the window empty -- which is what Budget's Plan screen did, because hiding
+    // the inputs card left only the summary column. Counting what is actually visible catches
+    // every case, including ones nobody remembered to flag.
+    const grid = panel.querySelector(':scope > .panel-inner') || panel;
+    const visibleChildren = Array.from(grid.children).filter(c => {
+      if (c.hidden || c.nodeType !== 1) return false;
+      // an empty column wrapper is not a visible child
+      return c.offsetParent !== null || c.querySelector('section:not([hidden]), details:not([hidden])');
+    }).length;
+    panel.classList.toggle('screen-solo', !!active.solo || visibleChildren <= 1);
+  }
+}
+
+function tabIndexModel(tab) {
+  const bs = window.__budgetSummary || {};
+  const gl = window.__glSummary || {};
+  const sf = window.__sfSummary || {};
+  const hb = window.__hbSummary || {};
+  const tx = window.__taxResult || null;
+  const money = v => (typeof fmtUSD2val === 'function' && v != null) ? '$' + fmtUSD2val(v) : null;
+  const m0 = v => (v == null) ? null : '$' + Math.round(v).toLocaleString();   // whole dollars where cents are noise
+  const g = (o, path) => { try { return path.split('.').reduce((a, k) => a[k], o); } catch (e) { return null; } };
+
+  let rows;
+  switch (tab) {
+    // Setup is deliberately absent: it already has a left rail. Two navigations for one page
+    // would be worse than none, and the rail is the better of the two here.
+    case 'setup': return [];
+    // Overview is one continuous picture, not a set of sections. A contents list of one entry
+    // is furniture.
+    case 'overview': return [];
+
+    case 'budget': rows = [
+      { id: 'bgb_plan_card',    label: 'Plan',    value: bs.allocated != null ? money(bs.allocated) + '/mo' : null },
+      { id: 'bgb_summary_card', label: 'Summary', value: bs.leftover != null
+          ? (bs.leftover >= 0 ? money(bs.leftover) + ' left' : money(Math.abs(bs.leftover)) + ' over') : null },
+      { id: 'gl_card',          label: 'Goals',   value: gl.count ? (gl.funded + ' of ' + gl.count + ' funded') : null },
+      { id: 'sf_card',          label: 'Funds',   value: sf.count ? (sf.count + (sf.total ? ' · ' + money(sf.total) : '')) : null },
+      { id: 'hb_share_wrap',    label: 'Shared',  value: hb.count ? (hb.count + (hb.partner ? ' with ' + hb.partner : '')) : null },
+      { id: 'bgb_targets_card', label: 'Targets', value: null },
+    ]; break;
+
+    // The tab the whole direction was chosen for: fourteen sections, and the entry burden lives
+    // here. The index names the six that carry a number and skips the rest -- a contents list
+    // that lists everything is just the page again.
+    case 'tax': rows = [
+      { id: 'tax_comp_card',      label: 'Compensation', value: m0(g(tx, 'cash.totalComp')) },
+      // Running totals for the two biggest input groups on the densest tab. Sourced from the
+      // fields themselves via lidSum, which returns null when NOTHING has been entered -- so an
+      // untouched section stays silent instead of announcing "$0".
+      { id: 'tax_pretax_card',    label: 'Pre-tax',      value: (() => {
+          const t = lidSum(['trad401k', 'hsa', 'employerHsa', 'medical', 'dental', 'vision']);
+          return t ? m0(t) : null;
+        })() },
+      { id: 'tax_posttax_card',   label: 'Post-tax',     value: (() => {
+          const t = lidSum(['roth401k', 'rothIra', 'afterTax401k', 'eeStock']);
+          return t ? m0(t) : null;
+        })() },
+      { id: 'tax_summary_card',   label: 'Take-home',    value: m0(g(tx, 'cash.takeHome')) },
+      { id: 'tax_breakdown_card', label: 'Tax',          value: (() => {
+          const t = g(tx, 'taxes.totalTax'), e = g(tx, 'rates.effRate');
+          if (t == null) return null;
+          return m0(t) + (e != null ? ' · ' + (e * 100).toFixed(1) + '%' : '');
+        })() },
+      { id: 'tax_cashflow_card',  label: 'Cash flow',    value: null },
+      { id: 'maxoutCard',         label: 'Max out',      value: null },
+      { id: 'sx_card',            label: 'WA vs TX',     value: null },
+    ]; break;
+
+    case 'fire': rows = [
+      { id: 'fire_assumptions_card', label: 'Assumptions', value: null },
+      { id: 'fire_traj_card',        label: 'Trajectory',  value: null },
+      { id: 'fire_lever_card',       label: 'Savings lever', value: null },
+    ]; break;
+
+    case 'invest': {
+      const iv = window.__ivSummary || {};
+      const nw = window.__nwForecast || null;
+      rows = [
+        { id: 'iv_plan_card',     label: 'Next dollar', value: null },
+        { id: 'iv_accounts_card', label: 'Accounts',    value: iv.count
+            ? iv.count + (iv.total != null ? ' · ' + m0(iv.total) : ' · no balances yet')
+              + (iv.stale ? ' · ' + iv.stale + ' stale' : '') : null },
+        { id: 'iv_nw_card',       label: 'Net worth',   value: g(nw, 'anchorValue') != null ? m0(g(nw, 'anchorValue')) : null },
+        { id: 'iv_proj_card',     label: 'Projection',  value: null },
+      ]; break;
+    }
+
+    case 'decisions': rows = [
+      { id: 'hp_card',  label: 'House',    value: (() => {
+          const r = window.__hpResult;
+          // "Nothing left for housing" is a real verdict, and its payment is 0 -- but "$0/mo" in a
+          // chip reads as a computed affordability of zero rather than as "your plan is already
+          // fully committed". A scent that can be misread is worse than no scent, so this says
+          // nothing and lets the card say it properly.
+          if (g(r, 'verdict') === 'nothing_left') return null;
+          const p = g(r, 'payment');
+          // m0, not money(): "$5,603/mo" is the figure, "$5,603.14/mo" is fourteen cents of noise
+          // in a chip you read at a glance. Same call as Car's below.
+          return p ? m0(p) + '/mo' : null;
+        })() },
+      { id: 'au_card',  label: 'Car',      value: (() => {
+          const a = window.__autoResult;
+          return g(a, 'finance.monthlyPayment') != null ? m0(g(a, 'finance.monthlyPayment')) + '/mo' : null;
+        })() },
+      { id: 'au_out_card', label: 'Result', value: null },
+    ]; break;
+
+    case 'actuals': {
+      const vn = window.__vnSummary || {};
+      rows = [
+        { id: 'ac_log_card',      label: 'Log it',       value: null },
+        { id: 'ac_pva_card',      label: 'Plan vs actual', value: null },
+        { id: 'ac_cards_section', label: 'Cards',        value: null },
+        { id: 'ac_funds_section', label: 'Funds',        value: sf.count ? String(sf.count) : null },
+        // The stale count earns its place: "2 · 41% recovered" on its own is the reassuring
+        // half-truth the per-row age exists to break, so the strip carries both or neither.
+        { id: 'vn_card',          label: 'Ventures',     value: vn.count
+            ? vn.count + (vn.pct != null ? ' · ' + vn.pct + '% recovered' : '')
+              + (vn.stale ? ' · ' + vn.stale + ' stale' : '') : null },
+        { id: 'ac_tx_card',       label: 'Transactions', value: null },
+      ]; break;
+    }
+
+    default: return [];
+  }
+  // A section that is not on the page cannot be indexed -- this is what keeps the model honest
+  // when a tab's markup changes without the model being updated.
+  return rows.filter(e => document.getElementById(e.id));
+}
+
+// The value a SCREEN entry carries. Reuses the section model rather than a second source: a
+// screen's number is the number of the section it is named for, so the two cannot disagree.
+function screenValue(tab, screen) {
+  const model = tabIndexModel(tab);
+  const byId = Object.fromEntries(model.map(e => [e.id, e.value]));
+  // `tables` maps to the Summary deliberately: that screen no longer CONTAINS the Summary card,
+  // and this strip value is the whole reason it can afford not to. Editing a bracket moves
+  // take-home live (traced in ux-screen-boundaries.md §8), so the figure has to stay on screen
+  // somewhere — one line in the strip instead of a column that dwarfed the tables themselves.
+  const named = { taxes: 'tax_summary_card', tables: 'tax_summary_card',
+                  basis: 'bgb_inputs_card', plan: 'bgb_plan_card',
+                  accounts: 'iv_accounts_card', nextdollar: 'iv_plan_card', projection: 'iv_proj_card',
+                  house: 'hp_card', car: 'au_card' };
+  if (named[screen.key] && byId[named[screen.key]] != null) return byId[named[screen.key]];
+  // Otherwise the first of its sections that has one. A screen with nothing to say says nothing.
+  for (const id of screen.sections) if (byId[id] != null) return byId[id];
+  return null;
+}
+
+function renderTabIndex() {
+  const el = document.getElementById('tabIndex');
+  if (!el) return;
+  const active = document.querySelector('#tabbar .tab-btn.active');
+  const tab = active ? active.dataset.tab : null;
+
+  // A tab with screens lists SCREENS and switches; a tab without lists its sections and scrolls.
+  // Both are "how you move around this tab", which is why one control can do both.
+  const screens = tabScreens(tab);
+  if (screens.length) {
+    applyScreens(tab);
+    const cur = activeScreenKey(tab);
+    el.innerHTML = screens.map(sc => {
+      const v = screenValue(tab, sc);
+      return '<a href="#" class="tix' + (sc.key === cur ? ' is-here' : '') + '" data-screen="' + tixEsc(sc.key) + '">'
+        + tixEsc(sc.label) + (v ? ' <b>' + tixEsc(v) + '</b>' : '') + '</a>';
+    }).join('');
+    el.hidden = false;
+    paintSectionValues(tabIndexModel(tab));
+    return;                       // no scroll-spy: on a switcher there is nothing to spy on
+  }
+
+  const model = tabIndexModel(tab);
+  if (!model.length) { el.hidden = true; el.innerHTML = ''; return; }
+  const html = model.map(e =>
+    '<a href="#" class="tix" data-tix="' + tixEsc(e.id) + '">' + tixEsc(e.label)
+    + (e.value ? ' <b>' + tixEsc(e.value) + '</b>' : '') + '</a>').join('');
+  el.innerHTML = html;
+  el.hidden = false;          // unhide only AFTER the content exists -- see tixEsc's note
+  paintSectionValues(model);
+  observeTabIndex();
+}
+
+// The SECOND mount point. A collapsed section that shows its total is following progressive
+// disclosure; one that shows only a heading is just a lid. These are the same strings the strip
+// above renders, so the two cannot disagree.
+function paintSectionValues(model) {
+  (model || tabIndexModel((document.querySelector('#tabbar .tab-btn.active') || {}).dataset ?
+    document.querySelector('#tabbar .tab-btn.active').dataset.tab : null)).forEach(e => {
+    const sec = document.getElementById(e.id);
+    if (!sec) return;
+    const head = sec.tagName === 'DETAILS' ? sec.querySelector(':scope > summary') : sec.querySelector(':scope > h2');
+    if (!head) return;
+    let slot = head.querySelector(':scope > .sec-val');
+    if (!e.value) { if (slot) slot.remove(); return; }
+    if (!slot) { slot = document.createElement('span'); slot.className = 'sec-val'; head.appendChild(slot); }
+    slot.textContent = e.value;
+  });
+}
+
+// Jump to a section. If it is a closed <details>, open it first: an index entry that scrolls you
+// to a shut lid is worse than no entry at all.
+function tabIndexGo(id) {
+  const sec = document.getElementById(id);
+  if (!sec) return;
+  if (sec.tagName === 'DETAILS' && !sec.open) sec.open = true;
+  const closed = sec.closest('details:not([open])');
+  if (closed) closed.open = true;
+  sec.scrollIntoView({ block: 'start', behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth' });
+  // Move focus, not just the viewport -- a keyboard user who activates a link must land there.
+  const head = sec.querySelector(':scope > summary, :scope > h2') || sec;
+  if (head) { head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); }
+}
+
+// "You are here." Observed rather than computed on scroll, so it costs nothing while idle.
+let _tixObserver = null;
+function observeTabIndex() {
+  if (!('IntersectionObserver' in window)) return;     // highlight is an enhancement, not a need
+  if (_tixObserver) _tixObserver.disconnect();
+  const ids = Array.from(document.querySelectorAll('#tabIndex .tix')).map(a => a.dataset.tix);
+  if (!ids.length) return;
+  _tixObserver = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      document.querySelectorAll('#tabIndex .tix').forEach(a =>
+        a.classList.toggle('is-here', a.dataset.tix === en.target.id));
+    });
+  }, { rootMargin: '-70px 0px -65% 0px', threshold: 0 });
+  ids.forEach(id => { const el = document.getElementById(id); if (el) _tixObserver.observe(el); });
+}
+
 function syncTabAria() {
   document.querySelectorAll('#tabbar .tab-btn').forEach(b => {
     b.setAttribute('aria-selected', b.classList.contains('active') ? 'true' : 'false');
   });
+  // The index is per-tab, so it rebuilds wherever the selected tab changes. Both activation
+  // paths already funnel through here, which is why this is the right hook and not a third one.
+  if (typeof renderTabIndex === 'function') renderTabIndex();
 }
 
 // The money fields the app ships pre-filled with a worked example. Deliberately an explicit list,
@@ -3514,6 +4247,9 @@ function setStatus(msg, isErr = false) {
 // ---------- Render ----------
 function render(r) {
   window.__taxResult = r;   // stash for the Budget tab's "Use Tax take-home" seed + the Overview
+  // The Tax strip carries take-home, and on the Tax-tables screen it is the ONLY place the
+  // live figure appears -- so it has to move when the numbers move, not only on tab switch.
+  try { if (typeof renderTabIndex === 'function') renderTabIndex(); } catch (e) {}
   // Refresh the Roth IRA limit-hint from THIS fresh result (plan §2, TODO-244) — must happen
   // here, not only from checkAllLimits()'s pre-fetch pass, or the warning would always be one
   // recompute cycle stale relative to whatever just changed MAGI.
@@ -3783,6 +4519,250 @@ async function recompute() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Lid scent — the general case (docs/ux-disclosure-analysis.md)
+//
+// A closed section that shows its total is doing progressive disclosure; one that shows only a
+// heading is a lid. The decision a lid has to support is "is opening this worth it", and a bare
+// label carries almost nothing to decide with. Fourteen of the app's twenty-two needed this; the
+// tax-tables one is separate below because its answer is a correctness signal, not a convenience.
+//
+// Rules this registry follows, and they are the whole design:
+//   - a value must be TRUE or absent. An invented or stale number is worse than a bare label,
+//     because the lid now looks informative;
+//   - "nothing in here" is a legitimate and useful value -- it is the one that saves a click;
+//   - null means "say nothing", so a section whose data has not loaded stays quiet rather than
+//     claiming zero.
+// ---------------------------------------------------------------------------
+
+// Sum a set of inputs; null when every one of them is empty or absent, so an untouched section
+// reads "none" rather than "$0.00" -- a zero someone entered deliberately is different from a
+// field nobody has ever filled, and only the first deserves a number.
+function lidSum(ids) {
+  let total = 0, any = false;
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || String(el.value).trim() === '') return;
+    any = true; total += rn(el.value);
+  });
+  return any ? total : null;
+}
+function lidMoney(v) { return '$' + (typeof fmtUSD2val === 'function' ? fmtUSD2val(v) : v); }
+
+const LID_SCENT = [
+  // --- Tax -------------------------------------------------------------------------------
+  { id: 'tax_invest_wrap', value: () => {
+      const t = lidSum(['inv_ltg', 'inv_stg', 'inv_odiv', 'inv_qdiv', 'inv_int']);
+      return t == null || t === 0 ? 'none entered' : lidMoney(t) + ' entered';
+    } },
+  { id: 'tax_equity_wrap', value: () => {
+      const sh = lidSum(['espp_shares', 'rsu_shares']);
+      if (sh == null || sh === 0) return 'no sales entered';
+      return sh + (sh === 1 ? ' share' : ' shares') + ' entered';
+    } },
+  { id: 'mo_catchup', value: () => {
+      const t = lidSum(['mo_ytd_401k', 'mo_ytd_hsa', 'mo_ytd_ira', 'mo_ytd_mega']);
+      return t == null || t === 0 ? 'nothing recorded yet' : lidMoney(t) + ' already in';
+    } },
+
+  // --- Budget ----------------------------------------------------------------------------
+  { id: 'setup_strategies', value: () => {
+      // `bgb.customStrategies` is the real store (TODO-250). An earlier draft of this guessed at a
+      // `stratAllNames()` helper that does not exist; the guard made it fall back silently to
+      // "zero custom", which is the failure mode this whole registry is supposed to avoid --
+      // a lid that looks informative and is quietly wrong.
+      try {
+        const custom = Object.keys(bgb.customStrategies || {}).length;
+        return (bgb.strategy || '') + (custom ? ' · ' + custom + (custom === 1 ? ' custom' : ' custom') : '');
+      } catch (e) { return null; }
+    } },
+  { id: 'hp_card', value: () => {
+      const el = document.getElementById('hp_out');
+      // Only speak once the section has actually produced a result; its placeholder text is not one.
+      const has = el && el.textContent && /\$/.test(el.textContent);
+      return has ? null : 'not worked out yet';
+    } },
+  // hp_loan_wrap's entry is gone with the lid: the six loan fields are visible in House's
+  // assumptions panel now, so a summary of them would be scent for something already on screen.
+  // setLidValue would have no-opped on the missing element, which is exactly why it is deleted
+  // rather than left -- a registry entry that silently does nothing is the kind of thing that
+  // gets read as working.
+  { id: 'bgb_targets_card', value: () => { try { return bgb.strategy ? 'vs ' + bgb.strategy : null; } catch (e) { return null; } } },
+  { id: 'setup_aliases', value: () => {
+      try {
+        const n = Object.keys(bgb.catAliases || {}).length;
+        return n ? n + (n === 1 ? ' spelling mapped' : ' spellings mapped') : 'none mapped';
+      } catch (e) { return null; }
+    } },
+  { id: 'setup_categories', value: () => {
+      try {
+        const n = (typeof getCategories === 'function') ? getCategories().length : 0;
+        return n ? n + ' buckets' : null;
+      } catch (e) { return null; }
+    } },
+
+  // --- Actuals / FIRE / Invest -----------------------------------------------------------
+  { id: 'ac_rec_setup_wrap', value: () => {
+      const el = document.getElementById('ac_rec_setup');
+      if (!el) return null;
+      const n = el.querySelectorAll('input[type="checkbox"]').length;
+      return n ? n + ' from your budget' : null;
+    } },
+  { id: 'fire-assumptions-details', value: () => {
+      const r = document.getElementById('fire-real-return'), w = document.getElementById('fire-swr');
+      if (!r && !w) return null;
+      const bits = [];
+      if (r && String(r.value).trim() !== '') bits.push(rn(r.value) + '% real');
+      if (w && String(w.value).trim() !== '') bits.push(rn(w.value) + '% withdrawal');
+      return bits.length ? bits.join(' · ') : null;
+    } },
+  { id: 'iv_include_wrap', value: () => {
+      const el = document.getElementById('iv_acct_summary');
+      const t = el && el.textContent ? el.textContent.trim() : '';
+      return t ? null : 'nothing to include yet';
+    } },
+  // The Actuals "Manage" drawer is gone -- its four unrelated jobs became Setup sections. No
+  // entry replaces it here: "N buckets · accounts · import" described the DRAWER, and there is
+  // no drawer now. An accounts count would need a source I have not verified, and an unsourced
+  // number on a heading is precisely what this registry forbids.
+
+];
+
+// `const LID_SCENT` is not a property of the global object, so tests reach it through here --
+// same seam as taxGetShipped and hbSetRosterForTest, for the same reason.
+function lidScentRegistry() { return LID_SCENT; }
+
+// Writes (or clears) the value on one lid. Shared with paintTaxTablesScent so there is exactly one
+// place that knows how a lid carries its value.
+function setLidValue(id, text, cls) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return;
+  const head = wrap.tagName === 'DETAILS' ? wrap.querySelector(':scope > summary')
+                                          : wrap.querySelector(':scope > h2');
+  if (!head) return;
+  let slot = head.querySelector(':scope > .sec-val');
+  if (text == null || text === '') { if (slot) slot.remove(); return; }
+  if (!slot) { slot = document.createElement('span'); slot.className = 'sec-val'; head.appendChild(slot); }
+  slot.className = 'sec-val' + (cls ? ' ' + cls : '');
+  slot.textContent = text;
+}
+
+// One value function throwing must not take the other twelve with it.
+function paintAllLidScent() {
+  LID_SCENT.forEach(e => {
+    let v = null;
+    try { v = e.value(); } catch (_) { v = null; }
+    setLidValue(e.id, v);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// BUG-0022 — is the app still using the SHIPPED tax figures?
+//
+// The federal standard deduction, the FICA scalars and both bracket tables are editable, and
+// every one of them is persisted by collectState() and restored on load. So an edit survives a
+// reload, every figure in the app derives from it -- take-home, effective rate, budget base,
+// FIRE -- and until now nothing said so. The control sits behind a closed <details> labelled
+// "Advanced", which is the worst possible place for state you cannot see from outside.
+//
+// The snapshot is taken at boot in the window AFTER /api/defaults (or the baked-in fallback) has
+// been applied and BEFORE restoreState() runs. That ordering is load-bearing: it is the only
+// moment the DOM holds shipped values for BOTH the backend-supplied brackets and the scalars
+// that default from the HTML.
+// ---------------------------------------------------------------------------
+const TAX_TABLE_SCALARS = ['fedStd', 'ssBase', 'ssRate', 'medRate', 'addlMedThresh', 'addlMedRate'];
+let SHIPPED_TAX = null;
+
+// Accessors rather than the bare binding: `SHIPPED_TAX` is a `let`, and a `let` at top level is
+// NOT a property of the global object, so a test cannot reach it the way it reaches a function
+// declaration. Same seam as hbSetRosterForTest, for the same reason.
+function taxGetShipped() { return SHIPPED_TAX; }
+function taxSetShippedForTest(v) { SHIPPED_TAX = v; }
+
+function captureShippedTax() {
+  try {
+    const scalars = {};
+    TAX_TABLE_SCALARS.forEach(id => { const el = $(id); if (el) scalars[id] = rn(el.value); });
+    SHIPPED_TAX = {
+      scalars: scalars,
+      fedBrackets: readBrackets('fedBrackets', 'fed'),
+      caBrackets: readBrackets('caBrackets', 'ca'),
+    };
+  } catch (e) { SHIPPED_TAX = null; }
+}
+
+// Counts how many editable values differ from what shipped. Returns null when there is nothing
+// to compare against -- an UNKNOWN state must never be reported as "shipped figures", because
+// that is the reassuring answer and it would be the one lie this feature exists to prevent.
+function taxTablesEditedCount() {
+  if (!SHIPPED_TAX) return null;
+  let n = 0;
+  try {
+    TAX_TABLE_SCALARS.forEach(id => {
+      const el = $(id); if (!el || !(id in SHIPPED_TAX.scalars)) return;
+      if (Math.abs(rn(el.value) - SHIPPED_TAX.scalars[id]) > 0.005) n += 1;
+    });
+    [['fedBrackets', 'fed'], ['caBrackets', 'ca']].forEach(([key, prefix]) => {
+      const now = readBrackets(key, prefix), was = SHIPPED_TAX[key] || [];
+      // A row added or removed is itself a difference, not just the values inside it.
+      n += Math.abs(now.length - was.length);
+      for (let i = 0; i < Math.min(now.length, was.length); i++) {
+        const a = now[i] || {}, b = was[i] || {};
+        if (Math.abs((a.rate || 0) - (b.rate || 0)) > 1e-9) n += 1;
+        // `upper` is null on the top bracket (open-ended) -- null vs a number is a real change.
+        if ((a.upper == null) !== (b.upper == null)) n += 1;
+        else if (a.upper != null && Math.abs(a.upper - b.upper) > 0.005) n += 1;
+      }
+    });
+  } catch (e) { return null; }
+  return n;
+}
+
+function resetTaxTablesToShipped() {
+  if (!SHIPPED_TAX) return;
+  if (!confirm('Reset the tax tables and rates to the figures the app shipped with?\n\nAnything you changed here will be replaced, and every number in the app will be recalculated.')) return;
+  try {
+    TAX_TABLE_SCALARS.forEach(id => {
+      const el = $(id); if (!el || !(id in SHIPPED_TAX.scalars)) return;
+      el.value = (typeof fmtUSDval === 'function' && (id === 'fedStd' || id === 'ssBase' || id === 'addlMedThresh'))
+        ? fmtUSDval(SHIPPED_TAX.scalars[id]) : SHIPPED_TAX.scalars[id];
+    });
+    renderBrackets('fedBrackets', SHIPPED_TAX.fedBrackets, 'fed');
+    renderBrackets('caBrackets', SHIPPED_TAX.caBrackets, 'ca');
+    paintTaxTablesScent();
+    if (typeof scheduleCalc === 'function') scheduleCalc();
+    else if (typeof fetchCalc === 'function') fetchCalc();
+    showToast('Tax tables reset to the shipped figures');
+  } catch (e) { showToast('Could not reset the tax tables'); }
+}
+
+// The scent itself, on the lid, where it can be read without opening anything.
+function paintTaxTablesScent() {
+  const wrap = document.getElementById('tax_tables_wrap');
+  if (!wrap) return;
+  // The header is a <summary> while this is a lid and an <h2> once it is a plain card. Resolving
+  // BOTH is what keeps this working across that change: the old `:scope > summary` guard returned
+  // early the moment the section stopped being a <details>, which silently took the "Reset to
+  // shipped" button with it -- and that button is the only way back from an edited bracket.
+  const sum = wrap.querySelector(':scope > summary') || wrap.querySelector(':scope > h2');
+  if (!sum) return;
+  const n = taxTablesEditedCount();
+  // Shares setLidValue with the other thirteen, so there is exactly one place that knows how a
+  // lid carries its value. Only the CLASSES differ here, because only this one is a correctness
+  // signal rather than a convenience.
+  if (n == null) { setLidValue('tax_tables_wrap', null); return; }
+  if (n === 0) { setLidValue('tax_tables_wrap', 'shipped 2026 figures', 'is-shipped'); return; }
+  setLidValue('tax_tables_wrap', n + (n === 1 ? ' value edited' : ' values edited'), 'is-edited');
+  if (!sum.querySelector('.tax-reset')) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tax-reset'; b.textContent = 'Reset to shipped';
+    // Kept from when this header was a <summary> that toggled on click: harmless on an <h2>, and
+    // still correct if the header ever goes back to being a lid.
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); resetTaxTablesToShipped(); });
+    sum.appendChild(b);
+  }
+}
+
 // ---------- Persistence ----------
 function collectState() {
   const ids = ['salary_yr','salary_mo','salary_pp','spouseSalary',
@@ -3815,7 +4795,7 @@ function save() {
 // NOTE: the [id^="bg_"] selector intentionally matches bg_* (framework) but NOT bgb_*
 // (builder), which the budget state owns — so restore never clobbers the builder.
 const TABS_KEY = 'itc.tabs.v1';
-const TABS_SEL = '#tab-overview input, #tab-invest input:not([id^="vn_"]), #tab-invest select:not([id^="vn_"]), #tab-auto input, #tab-auto select, #tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"], #tab-budget input[id^="hp_"], #tab-tax input[id^="sx_"], #tab-tax select[id^="sx_"]';
+const TABS_SEL = '#tab-overview input, #tab-invest input:not([id^="vn_"]), #tab-invest select:not([id^="vn_"]), #tab-decisions input, #tab-decisions select, #tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"], #tab-budget input[id^="hp_"], #tab-tax input[id^="sx_"], #tab-tax select[id^="sx_"]';
 function collectTabs() {
   const o = {};
   document.querySelectorAll(TABS_SEL).forEach(el => { if (el.id) o[el.id] = (el.type === 'checkbox') ? el.checked : el.value; });
@@ -5407,6 +6387,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderBrackets('caBrackets',  FALLBACK_CA,  'ca');
   }
 
+  // BUG-0022: the ONE moment the DOM holds shipped values for both the backend brackets and the
+  // HTML-defaulted scalars -- after the block above, before restoreState() below can overwrite
+  // them with anything the user edited. Moving this line either way breaks the comparison.
+  captureShippedTax();
+
   // Restore local UI state if present. Boot always resolves live (What-If Mode never
   // auto-enters — DEC-018 M2); load()/persist() are no-ops-to-real-storage-only at this
   // point since WhatIf.active is still false, so this is byte-identical to a plain
@@ -5420,18 +6405,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     // user's own and the notice must never reappear.
     try { showDemoBanner(); } catch (e) {}
   }
+  try { paintTaxTablesScent(); } catch (e) {}
+  try { paintAllLidScent(); } catch (e) {}
   try { const t = load(TABS_KEY); if (t) restoreTabs(JSON.parse(t)); } catch (e) {}
   lastPayFreq = payFreq();
 
   // Events — debounced recompute on any input/change anywhere
   document.addEventListener('input', recompute);
+  // BUG-0022: repaint the tax-tables lid whenever one of its own fields changes, so the state on
+  // the lid is true the moment it changes rather than at the next reload. Scoped to that section
+  // so a keystroke anywhere else costs nothing.
+  document.addEventListener('input', e => {
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.closest('#tax_tables_wrap')) { try { paintTaxTablesScent(); } catch (_) {} }
+  });
+  // Every lid's value is derived from something the user can change, so repaint on any edit or
+  // change anywhere. Debounced onto the same idle tick the recompute already uses, so thirteen
+  // cheap reads never run per keystroke.
+  { let _lidT = null;
+    const repaint = () => { clearTimeout(_lidT); _lidT = setTimeout(() => { try { paintAllLidScent(); } catch (_) {} }, 200); };
+    document.addEventListener('input', repaint);
+    document.addEventListener('change', repaint);
+    // A <details> opening or closing does not change any value, but it is the moment a user is
+    // most likely to be looking at the lid -- and it is when a freshly-rendered section first has
+    // contents to count.
+    document.addEventListener('toggle', repaint, true);
+  }
   document.addEventListener('change', (e) => {
     if (e.target && e.target.id === 'payFreq') return; // handled below
     recompute();
   });
 
   // Persist Overview-forecast / Invest / Car / Projection / budget-framework inputs whenever they change.
-  ['tab-overview', 'tab-invest', 'tab-auto', 'tab-budget'].forEach(pid => {
+  ['tab-overview', 'tab-invest', 'tab-decisions', 'tab-budget'].forEach(pid => {
     const p = $(pid);
     if (p) { p.addEventListener('input', saveTabs); p.addEventListener('change', saveTabs); }
   });
@@ -5596,6 +6602,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     const subBtn = $('link_code_submit_btn'); if (subBtn) subBtn.onclick = submitLinkCode;
   }
   applyMemberGating();
+  // Setup's left nav. Panes rather than lids: exactly one section is shown, and switching is
+  // navigation within a destination rather than opening a box. `hidden` is the toggle so a
+  // screen reader is never offered five sections at once.
+  { const sn = $('setup_nav');
+    if (sn) sn.addEventListener('click', e => {
+      const a = e.target.closest('[data-setup]'); if (!a) return;
+      e.preventDefault();
+      const want = a.dataset.setup;
+      sn.querySelectorAll('[data-setup]').forEach(x => x.classList.toggle('on', x === a));
+      document.querySelectorAll('[data-setup-pane]').forEach(sec => {
+        sec.hidden = sec.getAttribute('data-setup-pane') !== want;
+      });
+    });
+  }
+
+  // Index strip: delegate, since it is re-rendered whenever any of its values change.
+  { const ti = $('tabIndex'); if (ti) ti.addEventListener('click', e => {
+      const sc = e.target.closest('[data-screen]');
+      if (sc) {
+        e.preventDefault();
+        const at = document.querySelector('#tabbar .tab-btn.active');
+        if (at) setActiveScreen(at.dataset.tab, sc.dataset.screen);
+        return;
+      }
+      const a = e.target.closest('[data-tix]'); if (!a) return;
+      e.preventDefault(); tabIndexGo(a.dataset.tix);
+    }); }
   { const x = $('btnDisclaimerX'); if (x) x.onclick = () => { setDisclaimerDismissed(true); applyDisclaimerVisibility(); }; }
   // Demo-example notice. Not persisted as dismissed: it is shown only when there is no saved
   // state at all, so the first save retires it permanently on its own.
@@ -5703,16 +6736,43 @@ document.addEventListener('DOMContentLoaded', async () => {
       try { persist('itc.activetab', t); } catch (e) {}   // remember the active tab across reloads
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
-      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); vnLoad(); pjTaxSeedRender(); pjResyncHintRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
-      if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if ($('hp_card') && $('hp_card').open) hpOnOpen(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
-      if (t === 'auto' && !window.__autoResult) calcAuto();   // first open computes the comparison
-      if (t === 'actuals') acOnOpen();
+      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); pjTaxSeedRender(); pjResyncHintRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
+      if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
+      // Decisions owns House and Car, so it owns their bootstrap. Both were once still being kicked
+      // off by the tab the section USED to live in: hpOnOpen from Budget behind an `.open` guard
+      // that is always undefined now House is a <section> and not a <details>, and vnLoad from
+      // Invest. Both were unreachable, so the House planner never auto-priced and the Ventures list
+      // stayed on its "no ventures yet" placeholder with an empty money-source picker.
+      // Moving a node moves its element listeners; it does NOT move a hook keyed by tab name --
+      // which is why vnLoad() moved to the 'actuals' arm below in the same edit as the markup.
+      if (t === 'decisions') {
+        if (!window.__autoResult) calcAuto();   // first open computes the car comparison
+        try { hpOnOpen(); } catch (e) {}
+      }
+      // Setup was a brand-new destination and never got an on-open hook at all, so its Accounts and
+      // Import panes rendered empty until the user happened to visit Actuals first.
+      if (t === 'setup') { try { acLoadAccounts(); } catch (e) {} }
+      if (t === 'actuals') { acOnOpen(); try { vnLoad(); } catch (e) {} }   // ventures moved here with its card
     });
   });
   // Restore the last-viewed tab on reload (default stays Overview). Runs on `load`, after init + the
   // first recompute have kicked off; clicking re-runs that tab's on-open logic.
   window.addEventListener('load', () => {
     let t; try { t = load('itc.activetab'); } catch (e) {}
+    // Migration: the Car tab became part of Decisions. Anyone whose last tab was 'auto' has a
+    // saved value that now matches no button, and would silently land on Overview with no
+    // explanation. Map it forward rather than dropping it. Rewritten to storage so the mapping
+    // happens once rather than on every load.
+    if (t === 'auto') {
+      t = 'decisions';
+      // persist() no-ops while WhatIf.suppress is true, which it is for the whole boot window --
+      // so this write was silently swallowed on every load and the key stayed 'auto' forever. The
+      // navigation was always right (t is remapped in memory first), but the "rewrite once" this
+      // comment used to claim was false. Same suppress-save/restore the synthetic click below uses.
+      const wasSuppressed = WhatIf.suppress;
+      try { WhatIf.suppress = false; persist('itc.activetab', t); } catch (e) {}
+      finally { WhatIf.suppress = wasSuppressed; }
+    }
     if (!t || t === 'overview') return;
     const b = document.querySelector('#tabbar .tab-btn[data-tab="' + t + '"]');
     if (b) {
@@ -5772,8 +6832,8 @@ document.addEventListener('DOMContentLoaded', async () => {
               : '<div class="tile"><div class="k">Budget</div><div class="v muted">—</div><div class="s"><a href="#" data-go="budget">Set up your budget →</a></div></div>';
     h += pj ? '<div class="tile"><div class="k">Invest</div><div class="v">' + f$(pj.totals.futureValue) + '</div><div class="s">in ' + pj.years + ' yr · <a href="#" data-go="invest">open</a></div></div>'
             : '<div class="tile"><div class="k">Invest</div><div class="v muted">—</div><div class="s"><a href="#" data-go="invest">Project your growth →</a></div></div>';
-    h += (au && au.finance) ? '<div class="tile"><div class="k">Car</div><div class="v">' + f$(au.finance.monthlyPayment) + '/mo</div><div class="s">finance · <a href="#" data-go="auto">open</a></div></div>'
-                            : '<div class="tile"><div class="k">Car</div><div class="v muted">—</div><div class="s"><a href="#" data-go="auto">Lease vs buy →</a></div></div>';
+    h += (au && au.finance) ? '<div class="tile"><div class="k">Car</div><div class="v">' + f$(au.finance.monthlyPayment) + '/mo</div><div class="s">finance · <a href="#" data-go="decisions">open</a></div></div>'
+                            : '<div class="tile"><div class="k">Car</div><div class="v muted">—</div><div class="s"><a href="#" data-go="decisions">Lease vs buy →</a></div></div>';
     h += '</div>';
 
     el.innerHTML = h;
@@ -6265,6 +7325,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (my !== hpSeq) return;
       hpLast = r;
       out.innerHTML = hpRender(r, body);
+      // The affordable payment is what the House screen is FOR, so the strip carries it and you
+      // can read the answer without opening the screen -- the same contract as Car's "$813/mo".
+      window.__hpResult = r;
+      try { if (typeof renderTabIndex === 'function') renderTabIndex(); } catch (e) {}
     } catch (e) { if (my === hpSeq) out.innerHTML = '<div class="warn-box">Could not compute: ' + esc(e.message || String(e)) + '</div>'; }
   }
   function hpAssumes(r, body) {
@@ -6314,7 +7378,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       hc.querySelectorAll('.chip').forEach(x => x.classList.toggle('active', x === c));
       document.querySelectorAll('#hp_card .hp-partner').forEach(r => r.style.display = c.dataset.hphouse === 'household' ? '' : 'none');
       saveTabs(); hpRecompute(); }); }
-  { const card = $('hp_card'); if (card) { card.addEventListener('input', hpRecompute); card.addEventListener('toggle', () => { if (card.open) hpOnOpen(); }); } }
+  // No `toggle` listener: #hp_card became a <section> when House moved to Decisions, so `toggle`
+  // never fires and `.open` is permanently undefined. Its bootstrap is the 'decisions' tab-open
+  // branch now. Leaving the dead listener would have kept implying this card still opens itself.
+  { const card = $('hp_card'); if (card) card.addEventListener('input', hpRecompute); }
   { const b = $('hp_tobudget'); if (b) b.onclick = () => {
       if (!hpLast || !(hpLast.payment > 0)) { showToast('Compute a payment first'); return; }
       addBudgetItem('Needs', 'Housing', 'House payment', hpLast.payment);
@@ -6367,9 +7434,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('vn_inv_sum').textContent = s > 0 ? 'Invested: ' + vnMoney(s) : '';
   }
   function vnAcctName(id) { const a = VN.accounts.find(x => x.id === id); return a ? a.name : ('account #' + id); }
+  function vnMonthName(m) {
+    if (!/^\d{4}-\d{2}$/.test(String(m || ''))) return String(m || '');
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return MON[+String(m).slice(5, 7) - 1] + ' ' + String(m).slice(0, 4);
+  }
+  // How long since this venture last had any linked money move. A venture is only true while
+  // you keep tagging it, and byMonth IS the record of that upkeep -- its last key is when the
+  // upkeep stopped. Without this a venture abandoned in April still reads "57% recovered,
+  // payback in 8.7 months" a year later: the pace decays on its own (elapsed months keep
+  // growing while recovered does not) but it never flips to a warning, and "$0 this month" is
+  // indistinguishable from a real month with no sales.
+  //
+  // `everTagged` separates the two ways a venture goes quiet. Nothing ever linked is the
+  // pre-revenue state the verdict already names in its own words; activity that started and
+  // then stopped is rot, and only that earns the warning colour.
+  //
+  // Three whole months is the line, measured on month boundaries: it is the smallest gap that
+  // cannot fire on a merely quiet fortnight (worst case ~62 days), and a venture with no money
+  // moving for a quarter has stopped being a live tracker whatever the reason.
+  function vnActivityAge(byMonth, startedOn, todayMs) {
+    const months = Object.keys(byMonth || {}).filter(m => /^\d{4}-\d{2}$/.test(m)).sort();
+    const everTagged = months.length > 0;
+    const ref = everTagged ? months[months.length - 1]
+      : (/^\d{4}-\d{2}/.test(String(startedOn || '')) ? String(startedOn).slice(0, 7) : null);
+    if (!ref) return null;
+    const now = new Date(todayMs == null ? Date.now() : todayMs);
+    const ago = (now.getFullYear() - +ref.slice(0, 4)) * 12 + (now.getMonth() + 1 - +ref.slice(5, 7));
+    const text = ago <= 0 ? 'this month' : ago === 1 ? 'last month' : ago + ' months ago';
+    return { month: ref, monthsAgo: ago, everTagged, text, stale: ago >= 3 };
+  }
   function vnVerdict(v) {
     const r = v.roi;
     if (!r) return '<span class="muted">progress unavailable</span>';
+    const age = vnActivityAge(v.byMonth, v.startedOn);
     if (v.status === 'stopped') {
       return '<span class="muted">Stopped at ' + Math.round(r.pct * 100) + '% recovered — '
         + (r.paidBack ? vnMoney(r.profit) + ' profit' : vnMoney(r.remaining) + ' short of the ' + vnMoney(r.invested) + ' invested') + '.</span>';
@@ -6380,18 +7478,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (r.preRevenue) {
       const hint = v.tag ? 'tag your first sale #' + esc(v.tag) : 'log income to ' + esc(vnAcctName(v.accountId));
       const hole = r.recovered < 0 ? ' · ' + vnMoney(Math.abs(r.recovered)) + ' in the hole on operations' : '';
-      return '<div class="tiles"><div class="tile"><div class="k">Invested</div><div class="v">' + vnMoney(r.invested) + '</div><div class="s">No income yet — ' + hint + hole + '</div></div></div>';
+      // Never-tagged AND months old is worth saying plainly: the venture is not pre-revenue so
+      // much as unlogged, and the fix is the same sentence either way.
+      const cold = age && !age.everTagged && age.stale
+        ? ' <b>Nothing linked since you started it in ' + esc(vnMonthName(age.month)) + '.</b>' : '';
+      return '<div class="tiles"><div class="tile"><div class="k">Invested</div><div class="v">' + vnMoney(r.invested) + '</div><div class="s">No income yet — ' + hint + hole + '.' + cold + '</div></div></div>';
     }
-    const pace = r.projectedMonthsToPayback == null
-      ? 'operations net negative so far — costs exceed revenue'
-      : r.projectedMonthsToPayback > 120
-        ? '>10 yrs at the current pace — operations barely net positive'
-        : '~' + Math.ceil(r.projectedMonthsToPayback) + ' mo to breakeven at ' + vnMoney(r.monthlyRate) + '/mo (pre-tax)';
+    // A projection off a dead window is worse than no projection: the rate falls as the calendar
+    // moves, so an abandoned venture drifts from "1.4 mo to breakeven" to "8.7 mo" and reads as
+    // slow rather than unmaintained. Say what is actually known instead.
+    const pace = age && age.stale
+      ? 'No activity since ' + esc(vnMonthName(age.month)) + ' — no pace until the log catches up'
+      : r.projectedMonthsToPayback == null
+        ? 'operations net negative so far — costs exceed revenue'
+        : r.projectedMonthsToPayback > 120
+          ? '>10 yrs at the current pace — operations barely net positive'
+          : '~' + Math.ceil(r.projectedMonthsToPayback) + ' mo to breakeven at ' + vnMoney(r.monthlyRate) + '/mo (pre-tax)';
     return '<div class="tiles"><div class="tile warn"><div class="k">Payback</div><div class="v">' + Math.round(r.pct * 100) + '% earned back</div><div class="s">' + pace + '</div></div></div>';
+  }
+  // What the tab index says about Ventures without opening it: how many are live, how far the
+  // furthest-along one has got, and how many have gone quiet. The stale count is the whole point
+  // of putting a number up there -- "2 · 41%" alone would be exactly the reassuring half-truth
+  // the per-row age exists to break.
+  function vnPublishSummary() {
+    try {
+      const live = VN.ventures.filter(v => v.status !== 'stopped');
+      const staleN = live.filter(v => { const a = vnActivityAge(v.byMonth, v.startedOn); return a && a.stale; }).length;
+      const best = live.reduce((mx, v) => Math.max(mx, ((v.roi || {}).pct || 0)), 0);
+      window.__vnSummary = { count: live.length, pct: live.length ? Math.round(best * 100) : null, stale: staleN };
+      if (typeof renderTabIndex === 'function') renderTabIndex();
+    } catch (e) {}
   }
   function vnRender() {
     const el = $('vn_list'); if (!el) return;
-    if (!VN.ventures.length) { el.innerHTML = 'No ventures yet — track a course, cert, or gear against what it earns back.'; return; }
+    if (!VN.ventures.length) {
+      el.innerHTML = 'No ventures yet — track a course, cert, or gear against what it earns back.';
+      vnPublishSummary(); return;
+    }
     const nowMonth = new Date().toISOString().slice(0, 7);
     el.innerHTML = VN.ventures.map(v => {
       const r = v.roi || {};
@@ -6403,6 +7526,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const pct = Math.round(Math.max(0, Math.min(1, r.pct || 0)) * 100);
       const tm = (v.byMonth || {})[nowMonth] || { revenue: 0, cost: 0 };
       const items = v.items.map(i => esc(i.label) + ' ' + vnMoney(i.amount)).join(' · ');
+      // Only a live venture wears an age. A stopped one is quiet on purpose, and nagging about
+      // deliberate stops is how a warning colour loses its meaning everywhere else.
+      const age = v.status === 'stopped' ? null : vnActivityAge(v.byMonth, v.startedOn);
+      const ageHtml = age && age.everTagged
+        ? '<span class="age-tag' + (age.stale ? ' is-stale' : '') + '" title="last linked transaction: ' + esc(vnMonthName(age.month)) + '">last activity ' + esc(age.text) + '</span>'
+        : '';
       const acts = v.status === 'stopped'
         ? '<a href="#" class="gl-act gl-act-del" data-vn-del="' + v.id + '" title="delete" aria-label="Delete venture: ' + esc(v.name) + '">✕</a>'
         : '<a href="#" class="gl-act gl-act-primary" data-vn-item="' + v.id + '" title="add an investment item" style="margin-right:6px">＋ investment</a>'
@@ -6411,6 +7540,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return '<div style="margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px">'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline"><b>' + esc(v.name) + '</b> ' + link
         + '<span class="muted">invested ' + vnMoney(v.invested) + ' · started ' + esc(v.startedOn) + '</span>'
+        + ageHtml
         + '<span style="margin-left:auto;white-space:nowrap">' + acts + '</span></div>'
         + '<div class="mini muted" style="margin-top:3px">' + items + '</div>'
         + '<div style="display:flex;gap:10px;align-items:center;margin-top:6px">'
@@ -6423,6 +7553,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<div style="margin-top:6px">' + vnVerdict(v) + '</div>'
         + '</div>';
     }).join('');
+    vnPublishSummary();
   }
   async function vnAdd() {
     if (acWriteGuard()) return;
@@ -6508,6 +7639,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { return 1; }
   }
   function glRender() {
+    // Published for the tab index (Direction A). Same convention as `window.__budgetSummary`:
+    // the subsystem that owns the data states its own one-line summary, so the index never has
+    // to recompute it and cannot drift from what this section renders.
+    try {
+      const gs = GL.goals || [];
+      window.__glSummary = { count: gs.length, funded: gs.filter(g => (+g.saved || 0) >= (+g.target || 0) && (+g.target || 0) > 0).length };
+      if (typeof renderTabIndex === 'function') renderTabIndex();
+    } catch (e) {}
     const el = $('gl_list'); if (!el) return;
     const wi = WhatIf.active;
     const drafts = wi ? wiDraftGoals() : [];
@@ -6663,6 +7802,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (cur && Array.from(sel.options).some(o => o.value === cur)) sel.value = cur;
   }
   function sfRender() {
+    try {
+      const fs = (SF.funds || []).filter(f => f.status !== 'archived');
+      window.__sfSummary = { count: fs.length, total: fs.reduce((t, f) => t + (+f.balance || 0), 0) };
+      if (typeof renderTabIndex === 'function') renderTabIndex();
+    } catch (e) {}
     const el = $('sf_list'); if (!el) return;
     const wi = WhatIf.active;
     const active = SF.funds.filter(f => f.status !== 'archived');
@@ -6953,7 +8097,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         h += '<div class="tiles"><div class="tile good"><div class="k">Next best dollar</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + first.bucket + ' · ' + f$(first.amount) + '</div><div class="s">' + (first.rationale || first.accountType || '') + '</div></div></div>';
         h += '<table class="res-table"><tr><th>Step</th><th>Amount</th><th>Account</th></tr>';
         r.plan.forEach((p, i) => { h += '<tr><td>' + (i + 1) + '. ' + p.bucket + '</td><td class="num">' + f$(p.amount) + '</td><td>' + p.accountType + ' (' + p.taxTreatment + ')</td></tr>'; });
-        h += '</table><div class="note-box">' + r.plan.map(p => '<b>' + p.bucket + ':</b> ' + p.rationale + (p.note ? '<br><span class="mini muted">' + p.note + '</span>' : '')).join('<br>') + '</div>';
+        // One explanation per DISTINCT thing being explained. The waterfall splits a single step
+        // across tax treatments -- k401Match becomes a Traditional row and a Roth row, k401Max the
+        // same -- and mapping the plan array printed each one's identical paragraph twice, turning
+        // four explanations into eight and burying the ones that differ. Deduping on the whole
+        // (bucket, rationale, note) triple rather than on the bucket alone is what keeps that
+        // honest: two rows that really do explain themselves differently still both appear.
+        const seenExpl = new Set();
+        const expl = r.plan.filter(p => {
+          const key = p.bucket + ' ' + (p.rationale || '') + ' ' + (p.note || '');
+          if (seenExpl.has(key)) return false;
+          seenExpl.add(key); return true;
+        });
+        h += '</table><div class="note-box">' + expl.map(p => '<b>' + p.bucket + ':</b> ' + p.rationale + (p.note ? '<br><span class="mini muted">' + p.note + '</span>' : '')).join('<br>') + '</div>';
       } else { h += '<div class="note-box">No allocation — amount is 0 or no room left.</div>'; }
       const a = r.targetAllocation; h += '<div class="subhead">Target allocation</div><div class="tiles"><div class="tile"><div class="k">Stocks</div><div class="v">' + a.stocksPct + '%</div></div><div class="tile"><div class="k">Bonds</div><div class="v">' + a.bondsPct + '%</div></div></div>';
       if (a.stocksRangeLow != null && a.stocksRangeHigh != null) {
@@ -7007,15 +8163,88 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- Car ----  (POST once, cache, then render at the selected horizon)
+  //
+  // 3/5/10 are the shipped horizons; anything else is the user's own. The server has always
+  // accepted a `horizons` list (auto.tco_compare), so a custom year is a real computed column
+  // rather than an interpolation between the three -- which matters here, because netCost at
+  // year 7 is not on a straight line between year 5 and year 10 (the loan finishes, maintenance
+  // steps up with age, and the lease re-signs on its own cycle).
+  const AUTO_BASE_HORIZONS = [3, 5, 10];
+  let autoHorizons = AUTO_BASE_HORIZONS.slice();
   let autoHorizon = '5';
+
+  function autoHorizonsRestore() {
+    try {
+      const raw = localStorage.getItem('itc.auto.horizons');
+      if (!raw) return;
+      const got = JSON.parse(raw);
+      if (!Array.isArray(got)) return;
+      const clean = got.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= 40);
+      // The three shipped horizons are always present: a stored list is an ADDITION to them,
+      // never a replacement, so a bad or truncated value can never take 3/5/10 away.
+      autoHorizons = Array.from(new Set(AUTO_BASE_HORIZONS.concat(clean))).sort((x, y) => x - y);
+    } catch (e) {}
+  }
+  function autoHorizonsSave() {
+    try {
+      const extra = autoHorizons.filter(y => AUTO_BASE_HORIZONS.indexOf(y) < 0);
+      localStorage.setItem('itc.auto.horizons', JSON.stringify(extra));
+    } catch (e) {}
+  }
+  function autoYrErr(msg) {
+    const el = $('au_yr_err'); if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.className = 'mini warn-box'; el.textContent = msg; el.style.display = '';
+  }
+  function renderHorizonChips() {
+    const el = $('au_yr_chips'); if (!el) return;
+    el.innerHTML = autoHorizons.map(y => {
+      const custom = AUTO_BASE_HORIZONS.indexOf(y) < 0;
+      return '<span class="chip' + (String(y) === autoHorizon ? ' active' : '') + '" data-yr="' + y + '">'
+        + y + ' yrs'
+        // Only a year you added can be removed; taking 3/5/10 away would leave the card with no
+        // shipped baseline to fall back to.
+        + (custom ? ' <a href="#" class="chip-x" data-yrdel="' + y + '" title="remove ' + y + ' yrs" aria-label="Remove ' + y + ' years">✕</a>' : '')
+        + '</span>';
+    }).join('');
+  }
   async function calcAuto() {
     try {
       const body = { msrp: N('au_msrp'), capCost: N('au_cap'), capCostReduction: N('au_capred'), residualPct: P('au_res'),
         termMonths: N('au_term'), apr: P('au_apr'), salesTaxRate: P('au_tax'), financeAnnualRate: P('au_fapr'),
-        financeTermMonths: N('au_fterm'), financeDown: N('au_fdown'), grossMonthlyIncome: N('au_gmi'), ev: CK('au_ev') };
+        financeTermMonths: N('au_fterm'), financeDown: N('au_fdown'), grossMonthlyIncome: N('au_gmi'), ev: CK('au_ev'),
+        horizons: autoHorizons };
       window.__autoResult = await post('/api/auto', body);
       renderAuto();
     } catch (e) { fail('au_out', e); }
+  }
+  async function autoAddHorizon() {
+    const inp = $('au_yr_new'); if (!inp) return;
+    const raw = (inp.value || '').trim();
+    const y = parseInt(raw, 10);
+    if (!raw) { autoYrErr('Type a number of years first.'); inp.focus(); return; }
+    if (!Number.isInteger(y) || String(y) !== raw.replace(/^\+/, '')) { autoYrErr('Whole years only — 7, not 7.5.'); inp.focus(); return; }
+    if (y < 1 || y > 40) { autoYrErr('Pick between 1 and 40 years.'); inp.focus(); return; }
+    if (autoHorizons.indexOf(y) >= 0) { autoYrErr(y + ' yrs is already there.'); autoHorizon = String(y); renderHorizonChips(); renderAuto(); return; }
+    autoYrErr('');
+    autoHorizons = autoHorizons.concat([y]).sort((a2, b2) => a2 - b2);
+    autoHorizonsSave();
+    autoHorizon = String(y);
+    inp.value = '';
+    // A new horizon is a column the server has not computed yet, so this re-POSTs rather than
+    // re-rendering from cache the way switching between existing horizons does.
+    await calcAuto();
+    renderHorizonChips();
+  }
+  function autoRemoveHorizon(y) {
+    if (AUTO_BASE_HORIZONS.indexOf(y) >= 0) return;
+    autoHorizons = autoHorizons.filter(x => x !== y);
+    autoHorizonsSave();
+    // Removing the horizon you are looking at has to land somewhere real; 5 is the shipped default.
+    if (autoHorizon === String(y)) autoHorizon = '5';
+    autoYrErr('');
+    renderHorizonChips();
+    renderAuto();
   }
 
   function renderAuto() {
@@ -7024,10 +8253,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const cap = N('au_cap'), tax = P('au_tax');
     const has = !!(t && t.lease && t.lease[Y]);
 
-    // Horizon selector — drives the verdict + bars below (re-renders from cache, no re-POST)
-    let h = '<div class="row" style="align-items:center;gap:10px;margin:0"><span class="mini muted">Keep it:</span><span class="chips">'
-      + ['3', '5', '10'].map(y => '<span class="chip' + (y === Y ? ' active' : '') + '" data-yr="' + y + '">' + y + ' yrs</span>').join('') + '</span></div>'
-      + '<div class="mini muted" style="margin:3px 0 10px">How long you keep the car changes the math.</div>';
+    // The horizon selector lives in the card's markup (.au-keep) so a half-typed custom year
+    // survives this render; only its active state is repainted.
+    renderHorizonChips();
+    let h = '';
 
     if (has) {
       const cost = { lease: t.lease[Y].netCost, finance: t.finance[Y].netCost, cash: t.cash[Y].netCost };
@@ -7041,7 +8270,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (winner === 'lease' && +Y < cx) s += 'Lease wins now, but buying overtakes it at year ' + cx + '. ';
         else if (+Y >= cx) s += 'Buying wins because you hold past year ' + cx + '. ';
       }
-      s += a.passes ? '· ✓ fits 20/4/10' : '· ✕ above the 20/4/10 limit';
+      // The separator belongs BETWEEN clauses, not welded to the front of one. With no crossover
+      // year there is no first clause, and this line used to open with a bare "· ".
+      const sep = s ? ' · ' : '';
+      s = s.trim() + sep + (a.passes ? '✓ fits 20/4/10' : '✕ above the 20/4/10 limit');
       if (winner === 'cash') s += ' · assumes you can pay cash without raiding emergency savings';
       h += '<div class="tiles"><div class="tile ' + (a.passes ? 'good' : 'warn') + '"><div class="k">Recommendation</div><div class="v">'
         + verb + ' Over ' + Y + ' yrs it costs about ' + f$(cost[runner] - cost[winner]) + ' less than ' + nameOf[runner] + '.</div><div class="s">' + s + '</div></div></div>';
@@ -7059,7 +8291,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const gross = k => t[k][Y].totalPaid + t[k][Y].opportunityCost;
       const scaleMax = Math.max(gross('lease'), gross('finance'), gross('cash')) || 1;
       const bar = (k, label) => { const o = t[k][Y], nc = Math.max(0, o.netCost), eq = Math.max(0, o.carEquity);
-        return '<div class="row" style="margin:6px 0 2px"><span class="mini">' + label + '</span><span class="mini mono">' + f$(o.netCost) + ' net</span></div>'
+        // Flex, not `.row`: a bar's caption is not a form row, and borrowing `.row` meant the
+        // measure cap that keeps labels beside their fields would also shrink these captions to
+        // 780px while the bar under them stayed 1060px wide.
+        return '<div style="display:flex;justify-content:space-between;gap:10px;margin:6px 0 2px"><span class="mini">' + label + '</span><span class="mini mono">' + f$(o.netCost) + ' net</span></div>'
           + '<div class="bar"><div style="width:' + (nc / scaleMax * 100) + '%;background:var(--accent)"></div><div style="width:' + (eq / scaleMax * 100) + '%;background:var(--good)"></div></div>'; };
       h += '<div class="subhead">Where your money goes (' + Y + '-yr)</div>' + bar('lease', 'Lease') + bar('finance', 'Finance') + bar('cash', 'Pay cash')
         + '<div class="legend" style="margin-top:8px"><span><span class="sw" style="background:var(--accent)"></span>Net cost after resale</span><span><span class="sw" style="background:var(--good)"></span>Resale value you keep</span></div>'
@@ -7097,8 +8332,29 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     $('au_out').innerHTML = h;
   }
-  // One delegated listener for the horizon chips (content is re-rendered, so don't re-bind)
-  $('au_out').addEventListener('click', e => { const c = e.target.closest('.chip[data-yr]'); if (c) { autoHorizon = c.dataset.yr; renderAuto(); } });
+  // Delegated on the chip STRIP, not on #au_out: the chips moved out of the rendered output so a
+  // half-typed custom year survives a re-render, which also means #au_out no longer contains them.
+  { const strip = $('au_yr_chips');
+    if (strip) strip.addEventListener('click', e => {
+      // The remove affordance sits INSIDE its chip, so it has to be checked first or clicking ✕
+      // would also select the horizon it is deleting.
+      const del = e.target.closest('[data-yrdel]');
+      if (del) { e.preventDefault(); e.stopPropagation(); autoRemoveHorizon(parseInt(del.dataset.yrdel, 10)); return; }
+      const c = e.target.closest('.chip[data-yr]');
+      if (c) { autoHorizon = c.dataset.yr; renderHorizonChips(); renderAuto(); }
+    });
+  }
+  { const b2 = $('au_yr_go'); if (b2) b2.onclick = autoAddHorizon; }
+  { const inp = $('au_yr_new');
+    if (inp) {
+      // Enter inside a number field otherwise does nothing here; typing a year and pressing
+      // Enter is the obvious gesture and should not need the button.
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); autoAddHorizon(); } });
+      inp.addEventListener('input', () => autoYrErr(''));
+    }
+  }
+  autoHorizonsRestore();
+  renderHorizonChips();
 
   // ---- Wire buttons ----
   const wire = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
@@ -7221,6 +8477,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     return sel.value;
   }
+  // How old a balance is, in the words you would use out loud. A registry that shows only
+  // amounts looks equally trustworthy whether it was updated yesterday or in April -- and net
+  // worth and FIRE progress inherit that staleness silently, which is the real cost. Returns
+  // null when there is no snapshot at all, because "never updated" is a different and louder
+  // state than "updated a while ago".
+  function ivBalanceAge(asOf) {
+    if (!asOf) return null;
+    const then = new Date(asOf + 'T00:00:00');
+    if (isNaN(then.getTime())) return null;
+    const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+    if (days < 0) return { days, text: 'dated ahead', stale: false };
+    if (days <= 1) return { days, text: days === 0 ? 'today' : 'yesterday', stale: false };
+    if (days < 14) return { days, text: days + ' days ago', stale: false };
+    if (days < 60) return { days, text: Math.round(days / 7) + ' weeks ago', stale: false };
+    const months = Math.round(days / 30);
+    // 90 days is the line: a quarter is long enough that a balance has plausibly moved a lot,
+    // and short enough that flagging it is not nagging.
+    return { days, text: months + ' months ago', stale: days >= 90 };
+  }
+
   function ivAcctRender() {
     const el = $('iv_acct_groups'); if (!el) return;
     ivFillGroupSelect($('iv_acct_group_sel'), true);
@@ -7232,7 +8508,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         ? candidates.map(a => '<option value="' + a.id + '">' + esc(a.name) + ' (' + esc(a.type) + ')</option>').join('')
         : '<option value="">— all accounts are already included —</option>';
     }
-    if (!ivAcct.accounts.length) { el.innerHTML = '<span class="mini muted">No investment accounts yet — add one below, or include an existing account.</span>'; $('iv_acct_summary').innerHTML = ''; ivAcctSuggest(); pjAcctRender(); return; }
+    if (!ivAcct.accounts.length) {
+      el.innerHTML = '<span class="mini muted">No investment accounts yet — add one below, or include an existing account.</span>';
+      $('iv_acct_summary').innerHTML = '';
+      // The empty path has to clear the derived readouts too. Returning early without touching
+      // them left __ivSummary holding the PREVIOUS render's figures, so removing your last
+      // registered account kept its count and its "N stale" on the tab strip indefinitely, and
+      // the banner went on warning about balances that no longer existed.
+      window.__ivSummary = { count: 0, total: null, stale: 0 };
+      ivStaleBanner([]);
+      try { if (typeof renderTabIndex === 'function') renderTabIndex(); } catch (e) {}
+      ivAcctSuggest(); pjAcctRender(); return;
+    }
     const groups = {};
     ivAcct.accounts.forEach(a => { const g = ivGroupOf(a); (groups[g] = groups[g] || []).push(a); });
     const names = Object.keys(groups).sort((x, y) => {
@@ -7247,21 +8534,67 @@ document.addEventListener('DOMContentLoaded', async () => {
       // the isLiability sign here first. (The real net-worth cone already handles it server-side.)
       const tot = rows.reduce((s, a) => s + (ivBal(a) || 0), 0);
       grand += tot; if (rows.some(a => ivBal(a) != null)) anyBal = true;
-      h += '<div class="subhead" style="display:flex;justify-content:space-between"><span>' + esc(g) + '</span><span class="mono">' + fmt$(tot) + '</span></div>';
-      h += '<table class="res-table sc-tbl" style="max-width:680px;margin-bottom:6px">';
+      // Capped to the same width as the table below it. The header used to span the whole card
+      // while the table stopped short, so a group's total sat ~700px right of the rows it was
+      // totalling, with nothing between them.
+      h += '<div class="subhead iv-acct-head"><span>' + esc(g) + '</span><span class="mono">' + fmt$(tot) + '</span></div>';
+      h += '<table class="res-table sc-tbl iv-acct-tbl" style="margin-bottom:6px">';
       rows.sort((a, b) => a.name.localeCompare(b.name)).forEach(a => {
         const bal = ivBal(a), snap = ivAcct.latest[a.id];
-        h += '<tr><td>' + esc(a.name) + ' <span class="muted mini">' + esc(a.type) + '</span></td>'
-          + '<td class="num mono">' + (bal != null ? fmt$(bal) : '<span class="muted">no balance yet</span>') + (snap ? ' <span class="muted mini">as of ' + esc(snap.asOf) + '</span>' : '') + '</td>'
-          + '<td class="num"><input type="number" min="0" step="100" data-ivbal="' + a.id + '" placeholder="new balance" style="max-width:110px"/> <button type="button" class="seed-btn" data-ivupd="' + a.id + '">update</button></td>'
-          + '<td><select data-ivgrp="' + a.id + '" title="move to another group">' + ivGroupNames().map(x => '<option value="' + esc(x) + '"' + (x === a.investGroup ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '<option value="">— remove from registry —</option>' + '</select></td></tr>';
+        const age = ivBalanceAge(snap && snap.asOf);
+        const ageHtml = bal == null ? ''
+          : (age ? '<span class="age-tag' + (age.stale ? ' is-stale' : '') + '" title="last updated ' + esc((snap && snap.asOf) || '') + '">' + esc(age.text) + '</span>'
+                 : '<span class="age-tag is-stale">never updated</span>');
+        h += '<tr class="iv-row"><td class="iv-nm" title="' + esc(a.name) + '">' + esc(a.name) + '<small>' + esc(a.type) + '</small></td>'
+          + '<td class="num mono iv-bal">' + (bal != null ? fmt$(bal) : '<span class="muted">no balance yet</span>') + '</td>'
+          + '<td class="iv-when">' + ageHtml + '</td>'
+          + '<td class="num iv-upd"><input type="number" min="0" step="100" data-ivbal="' + a.id + '" placeholder="new balance" style="max-width:110px"/> <button type="button" class="ac-tool" data-ivsave="' + a.id + '">update</button></td>'
+          + '<td class="iv-grp"><select data-ivgrp="' + a.id + '" title="move to another group">' + ivGroupNames().map(x => '<option value="' + esc(x) + '"' + (x === a.investGroup ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
       });
       h += '</table>';
     });
     el.innerHTML = h;
+    try {
+      const staleAccts = ivAcct.accounts.filter(a => {
+        const sn = ivAcct.latest[a.id]; const ag = ivBalanceAge(sn && sn.asOf);
+        return ivBal(a) != null && (!ag || ag.stale);
+      });
+      const staleN = staleAccts.length;
+      window.__ivSummary = { count: ivAcct.accounts.length, total: anyBal ? grand : null, stale: staleN };
+      ivStaleBanner(staleAccts);
+    } catch (e) {}
+    try { if (typeof renderTabIndex === 'function') renderTabIndex(); } catch (e) {}
     $('iv_acct_summary').innerHTML = '<b>Total across ' + ivAcct.accounts.length + ' accounts: <span class="mono">' + fmt$(grand) + '</span></b>' + (anyBal ? '' : ' <span class="muted">(add balances to see totals)</span>');
     ivAcctSuggest();
     pjAcctRender();   // the Projection section's account-picker shares this state
+  }
+  // The banner names the OLDEST gap rather than averaging the stale ones: "since April" is a date
+  // you can check a statement against, where "on average 3.4 months old" is not a fact about any
+  // account. Accounts that were never updated at all are counted but cannot contribute a date, so
+  // they get their own clause instead of being folded into a month they have no claim to.
+  function ivStaleBanner(staleAccts) {
+    const el = $('iv_stale_banner'); if (!el) return;
+    const n = (staleAccts || []).length;
+    if (!n) { el.hidden = true; el.innerHTML = ''; return; }
+    let oldest = null, never = 0;
+    staleAccts.forEach(a => {
+      const sn = ivAcct.latest[a.id];
+      const asOf = sn && sn.asOf;
+      if (!asOf || !ivBalanceAge(asOf)) { never += 1; return; }
+      if (oldest == null || asOf < oldest) oldest = asOf;
+    });
+    const noun = n === 1 ? 'account has' : 'accounts have';
+    let head = '<b>' + n + ' ' + noun + ' a balance too old to trust.</b>';
+    if (oldest) {
+      const d = new Date(oldest + 'T00:00:00');
+      const MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      head = '<b>' + n + ' ' + noun + " not been updated since " + MON[d.getMonth()] + ' ' + d.getFullYear() + '.</b>';
+    }
+    const neverClause = never ? (never === n ? ' None of them has ever had a balance recorded.'
+                                             : ' ' + never + ' of them never had one recorded at all.') : '';
+    el.innerHTML = head + neverClause
+      + '<span class="sb-sub">Your net worth and FIRE progress are quoting these figures with no hint of their age. Updating them takes about a minute — the rows below show which.</span>';
+    el.hidden = false;
   }
   function ivAcctSuggest() {
     const el = $('iv_acct_suggest'); if (!el) return;
@@ -7606,7 +8939,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   liveBind('#tab-invest input, #tab-invest select', calcInvest);
   { const sel = $('iv_strategy'); if (sel) sel.addEventListener('change', ivStrategyToggle); }   // instant show/hide, ahead of the debounced recalc
-  liveBind('#tab-auto input, #tab-auto select', calcAuto);
+  liveBind('#tab-decisions input, #tab-decisions select', calcAuto);
   liveBind('#tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"]', calcBudget);
   // Pure seed-value computation for the "Gross income" field (TODO-247 final round, J11
   // mutant close): factored out of the bg_seed click handler so tests/test_client_math.js
@@ -7857,9 +9190,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   function categoryColor(key) { return KINDS[key] ? KINDS[key].color : 'var(--muted)'; }
 
   function catManageRender() {
-    // docs/manage-panel-redesign.md §2b — shared by Budget (#bgb_cat_manage) AND Actuals
-    // (#ac_cat_manage): the .mng-row grid + .gl-act* action family replace the old
-    // flex+.bgb-x rows (ragged right edge, hardcoded-red icons) identically on both tabs.
+    // docs/manage-panel-redesign.md §2b — the .mng-row grid + .gl-act* action family.
+    // Category management used to render into BOTH #bgb_cat_manage (Budget) and #ac_cat_manage
+    // (Actuals) — one thing, drawn twice, in two tabs. It now lives once, in Setup, which is
+    // half the reason that destination exists. Both ids are still swept because the loop is
+    // element-guarded and a stale id costs nothing, while removing one would make this the
+    // second place that has to know where the panel lives.
     ['bgb_cat_manage', 'ac_cat_manage'].forEach(id => {
       const el = $(id); if (!el) return;
       const cats = getCategories();
@@ -9375,6 +10711,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     { const pf = payFreq(); s += '<br><span class="mini">Per paycheck (' + pf + '×/yr): <b>' + f2(allocated * 12 / pf) + '</b> allocated of ' + f2(base * 12 / pf) + ' · ' + (rem >= 0 ? 'left ' : 'over ') + f2(Math.abs(rem) * 12 / pf) + '</span>'; }
     $('bgb_summary').innerHTML = s;
     window.__budgetSummary = { base: base, allocated: allocated, leftover: rem };   // monthly; for the Overview
+    // Shared-line count travels with it: same tab, same render pass, one place to keep current.
+    try {
+      const hl = (hb.lines || []);
+      const other = hl.length ? (hl[0].shares || []).find(x => x.userId !== window.__scopeId) : null;
+      window.__hbSummary = { count: hl.length, partner: other ? hbShareName(other) : null };
+    } catch (e) { window.__hbSummary = { count: 0, partner: null }; }
+    if (typeof renderTabIndex === 'function') renderTabIndex();
 
     // Summary: roll up by type, FOLD IN your Tax-tab investments, graph, per-bucket — monthly + yearly.
     const cse = $('bgb_catsummary');
@@ -11318,10 +12661,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   catManageRender();   // initial render of both Manage Category panels
 
   // ===== Cross-tab link (Car → Budget) =====
-  function showTab(t) {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + t));
-    syncTabAria();
+  // Routes through the real tab button so cross-tab shortcuts get everything a click gets: the
+  // on-open bootstrap AND the screens system. This used to toggle classes only, so "send car
+  // payment to Budget" landed you on a Budget still showing whatever screen you left it on -- the
+  // new line item added to a section that was hidden, with no way to notice.
+  function showTab(t, screenKey) {
+    const btn = document.querySelector('#tabbar .tab-btn[data-tab="' + t + '"]');
+    if (btn) btn.click();
+    else {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + t));
+      syncTabAria();
+    }
+    // A shortcut that adds something must land on the screen that shows it.
+    if (screenKey) { try { setActiveScreen(t, screenKey); } catch (e) {} }
   }
   function addBudgetItem(bucketName, groupName, itemName, monthly) {
     let b = bgb.buckets.find(x => x.name.toLowerCase() === bucketName.toLowerCase());
@@ -11336,7 +12689,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   wire('au_tobudget', () => {
     const r = window.__autoResult;
     if (!r || !r.finance) { alert('Run the Car comparison first.'); return; }
-    addBudgetItem('Needs', 'Transportation', 'Car payment', r.finance.monthlyPayment); showTab('budget');
+    addBudgetItem('Needs', 'Transportation', 'Car payment', r.finance.monthlyPayment); showTab('budget', 'plan');
     showToast('Added ' + f$(r.finance.monthlyPayment) + '/mo car payment to Needs › Transportation');
   });
   // ===== Projection =====
@@ -11545,6 +12898,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // split, partner takes the remainder) and hbShareableLines is the flatten that decides
     // what is offered at all -- both worth pinning independently of the DOM around them.
     hbShareableLines, hbShareRatio, hbShareRender, hbShareGroups, hbRestoreLocalFromShared,
+    // The two staleness clocks. vnActivityAge takes an explicit "now" so month-boundary
+    // thresholds can be pinned exactly; ivBalanceAge reads the clock itself, so its tests
+    // build their `asOf` relative to today instead.
+    ivBalanceAge, vnActivityAge, vnMonthName,
     hbLinesAt, hbLinesInBucket, hbSetPlace, hbBucketKey, hbGroupKey,
     hbParticipantLabel, hbShareName,
     // BUG-0013: the two halves of the What-If budget-split round trip, exposed together so a

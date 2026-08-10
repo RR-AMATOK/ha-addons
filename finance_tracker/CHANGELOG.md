@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.6.0
+
+- **Every tab has a contents strip now.** It sits under the tab bar, tells you what
+  is on the tab, and carries the number that matters — "Accounts 7 · $190,637 ·
+  2 stale", "House $5,541/mo", "Car $813/mo" — so you can read the answer without
+  opening the screen. On the bigger tabs it is a switcher: click a name and you go
+  there instead of scrolling past everything else.
+- **The big tools got their own screen.** Tax, Budget, Invest and Decisions were
+  each one long scroll of everything at once. Now Invest is Accounts / Next dollar /
+  Projection, Decisions is House / Car, and Tax splits its tables and comparisons
+  out. One job per screen, the whole width for it.
+- **The answer comes first.** House, Car and the next-dollar plan all used to put
+  twelve or nineteen input fields above the conclusion you came back for. The
+  verdict is now at the top and the inputs sit under it.
+- **Settings moved out of the way.** Categories, spelling aliases, budget
+  strategies, accounts and import/snapshots now live on their own **Setup** tab
+  instead of hiding inside the tabs you use for daily work.
+- **Fewer things hidden behind a click.** Sections that had no reason to be
+  collapsed no longer are — the tax tables, the house loan assumptions, and the
+  car's fine print are all just visible. The ones still worth collapsing now say
+  what is inside them before you open them ("6.5% · 30 yr · 20% down", "2 values
+  edited"), so you can decide whether to bother.
+- **Your account balances now show their age.** A balance reads "2 weeks ago" or
+  "4 months ago" instead of a raw date, and anything older than about a quarter is
+  flagged. If any are stale, a line at the top of Accounts says so plainly, because
+  your net worth and FIRE progress quote those figures with no hint of how old they
+  are.
+- **Ventures moved to Actuals, and tells you when it has gone quiet.** It lives
+  next to the transactions that feed it now. A venture with no activity for three
+  months is marked, and it stops projecting a payback date off dead data — it used
+  to keep saying "a few months to breakeven" forever, slowly stretching, long after
+  you had stopped tracking it.
+- **Car: pick your own "keep it" years.** 3, 5 and 10 are still there; type any
+  number from 1 to 40 and it works the comparison out properly for that year rather
+  than guessing between the others. Years you add stick around.
+- **Numbers stopped getting cut off.** Tax bracket amounts were rendering as
+  "124(" in a box too narrow for them. Fixed, and the tables now line up in one
+  column you can scan.
+- **Wide screens are used properly.** Cards that stretched to fill a large window
+  were leaving labels a thousand pixels from the boxes they belonged to, and long
+  paragraphs running the full width of the screen. Text and form fields now hold a
+  readable width; tables and charts still get all the room they need.
+
 ## 0.5.0
 
 - **Share expenses with someone you live with.** A shared line is a real record you
