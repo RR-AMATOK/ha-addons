@@ -321,6 +321,11 @@ class BracketModel(BaseModel):
 class InputModel(BaseModel):
     # Compensation
     salary: float = 0
+    # Second-earner (spouse) wage (TODO-247, MFJ only). Server-clamped to 0.0 for any
+    # non-MFJ filing_status inside calculate_endpoint below — never trust the client's
+    # filingStatus/spouseSalary pairing (BUG-0002 precedent: MFJ correctness must be
+    # server-derived, not client-supplied).
+    spouse_salary: float = Field(0, alias="spouseSalary")
     # Pre-tax
     trad_401k: float = Field(0, alias="trad401k")
     hsa: float = 0
@@ -1154,8 +1159,27 @@ def defaults() -> dict:
 
 @app.post("/api/calculate")
 def calculate_endpoint(inp: InputModel) -> dict:
+    # TODO-247 / BUG-0002-style guard: spouse_salary is meaningless (and must never
+    # silently apply) outside MFJ. Clamped HERE, server-side, rather than trusting the
+    # client to only ever send it alongside filingStatus="mfj" — a switch-back-to-single
+    # request in the UI must not carry a stale nonzero spouseSalary into the math.
+    #
+    # NOTE (adversarial-review finding E, TODO-247 fix round 2026-08-05): this is the
+    # FIRST place calculate_endpoint reads inp.filing_status at all, which invites the
+    # (wrong) inference that filing status is honored server-side generally. It is not.
+    # Below, fed_std_deduction / fed_brackets / addl_medicare_threshold / niit_threshold
+    # / ltcg thresholds / roth_ira phase-out are all still taken verbatim from `inp`
+    # (client-supplied) — filing_status is passed into calc.Inputs() for labeling only,
+    # NOT run through calc.Inputs.for_filing_status() to derive MFJ-correct federal
+    # constants server-side. A caller that sends filingStatus="mfj" without ALSO
+    # overriding fedBrackets/fedStd/etc. silently gets single-filer federal math
+    # mislabeled as MFJ. This is BUG-0002 (open, unassigned as of this writing) —
+    # intentionally NOT fixed here (out of scope for a spouse-salary clamp; it deserves
+    # its own change). filing_status is honored HERE — for the spouse_salary clamp only.
+    spouse_salary = inp.spouse_salary if inp.filing_status == "mfj" else 0.0
     inputs = calc.Inputs(
         salary=inp.salary,
+        spouse_salary=spouse_salary,
         trad_401k=inp.trad_401k,
         roth_401k=inp.roth_401k,
         hsa=inp.hsa,
@@ -2053,6 +2077,200 @@ def fund_rollup_endpoint(month: str, includeArchived: bool = False, request: Req
             cycle = tracking.fund_cycle_summary(f["targetDate"], f["recurrence"], month, rollup["trajectory"])
             out.append({**f, **rollup, "effectiveTargetDate": effective_target_date, "cycle": cycle, "history": history})
     return {"month": month, "funds": out}
+
+
+# ----- household shared-budget layer, Slice A (TODO-232, DEC-041,
+# docs/shared-budget-design.md §4/§5/§9/§10) -----
+#
+# HOUSEHOLD-scoped, not user_id-scoped: unlike every /api/tracking/* store call above, a
+# shared line is one row potentially several household members read/write together —
+# but WHO may reach it at all is gated by an ACCESS MODEL (review finding 2026-08-06,
+# issue #3 amendment — the user's directed choice, "only people you invite"), not a
+# blanket "any household member" as §10 originally specified:
+#
+#   - OWNER: create, read (every line), edit (every line), archive, hard-delete.
+#     Names the participants when creating a line -- participation IS the invitation;
+#     no separate admission table or invite flow exists or is needed.
+#   - PARTICIPANT (has a share row on THIS line, `tracking_store.household_budget_access`):
+#     read and edit that ONE line. Cannot create, archive, or hard-delete.
+#   - EVERYONE ELSE — including an account auto-provisioned as `role='member'` on the
+#     very first request it ever makes (DEC-026/031) — sees NOTHING: `GET` returns an
+#     empty list (never a 403 that would confirm other lines exist), and `PATCH`/`DELETE`
+#     on a line they don't participate in is a 404, indistinguishable from a genuinely
+#     nonexistent id. This matches how every other surface in this app already degrades
+#     for someone with no standing (empty scope, or 404) — never a confirming 403.
+#
+# `resolve_user()` still gates identity on every call (only an already-provisioned
+# household member can reach these routes at all) and supplies the CALLER's own scope
+# for the access checks, `yourShareCents`, and the `createdBy` audit field.
+#
+# A PURE expenses layer (DEC-041): this section must NEVER read or write filing status,
+# and must NEVER auto-derive a split ratio from another member's income (§13 honesty
+# boundary — ratios are always an explicit value the caller supplies, with at most an
+# optional client-side hint that never reaches here as anything but a plain number).
+#
+# Slice A ships CRUD only under `/api/household/budget` (a new namespace, deliberately
+# distinct from `/api/tracking/*`, mirroring the spec's own route table). The actuals
+# side (the joint account, A2) and the household plan-vs-actual rollup (C) are later
+# slices — nothing here reads or writes `account`/`txn`.
+
+class HouseholdBudgetShareModel(BaseModel):
+    # strict=True on every money/bps field (review finding 2026-08-06, issue #5):
+    # cents-on-the-wire is deliberate (§10 — unlike every sibling endpoint's dollars-
+    # as-float convention), but Pydantic's default LAX coercion would silently accept a
+    # dollars-shaped or boolean value and store it as the wrong number of cents --
+    # `totalCents: 2000.0` -> 200 (stored as $20.00, a 100x understatement) or
+    # `True` -> 1 (stored as $0.01) — with the store layer's own `isinstance(x, bool)`
+    # rejections DEAD on this path (Pydantic coerces before the store ever sees it).
+    # strict=True makes ONLY a genuine JSON int valid; float/bool/numeric-string all 422.
+    user_id: str = Field(..., alias="userId")
+    ratio_bps: int | None = Field(None, alias="ratioBps", strict=True, ge=0, le=10000)
+    contribution_cents: int | None = Field(None, alias="contributionCents", strict=True, ge=0)
+    model_config = {"populate_by_name": True}
+
+
+class HouseholdBudgetModel(BaseModel):
+    name: str
+    bucket: str
+    type: Literal["split", "pooled"]
+    # strict=True — see HouseholdBudgetShareModel's comment; split only, pooled derives it.
+    total_cents: int | None = Field(None, alias="totalCents", strict=True, gt=0)
+    shares: list[HouseholdBudgetShareModel] = Field(..., min_length=1)
+    model_config = {"populate_by_name": True}
+
+
+class HouseholdBudgetUpdateModel(BaseModel):
+    name: str | None = None
+    bucket: str | None = None
+    type: Literal["split", "pooled"] | None = None
+    total_cents: int | None = Field(None, alias="totalCents", strict=True, gt=0)   # strict=True, see above
+    shares: list[HouseholdBudgetShareModel] | None = None
+    status: Literal["active", "archived"] | None = None
+    model_config = {"populate_by_name": True}
+
+
+def _hb_wire_shares(shares: list[HouseholdBudgetShareModel]) -> list[dict]:
+    return [{"userId": s.user_id, "ratioBps": s.ratio_bps, "contributionCents": s.contribution_cents}
+            for s in shares]
+
+
+@app.get("/api/household/budget")
+def list_household_budget_endpoint(includeArchived: bool = False, request: Request = None) -> dict:
+    """Access model (issue #3 amendment, "only people you invite"): the owner sees
+    every line; anyone else sees ONLY the lines they participate in (§4's day-one 100/0
+    lines still show up — participation, not `yourShareCents > 0`, is the gate). Never a
+    403 here — a filtered, possibly-empty list is the whole story for a non-owner/
+    non-participant, so their very first request (an auto-provisioned account that's
+    never been invited onto anything) sees `{"lines": []}`, not an error confirming
+    other lines exist."""
+    user = resolve_user(request)
+    scope = user["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        lines = tracking_store.list_household_budget(
+            c, scope, user["role"] == "owner", include_archived=includeArchived)
+        return {"lines": [
+            {**line, "yourShareCents": tracking_store.household_your_share_cents(line, scope)}
+            for line in lines
+        ]}
+
+
+@app.post("/api/household/budget")
+def create_household_budget_endpoint(m: HouseholdBudgetModel, request: Request = None) -> dict:
+    """OWNER-ONLY (issue #3 amendment): the owner names the line's participants at
+    creation — participation IS the invitation, so creating is inherently an
+    owner-controlled admission action, not something any pre-existing participant (who
+    doesn't exist yet for a brand-new line) or bystander could do."""
+    user = resolve_user(request)
+    if user["role"] != "owner":
+        raise HTTPException(
+            status_code=403,
+            detail="Creating a shared budget line is available to the household owner only.",
+        )
+    scope = user["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            line = tracking_store.create_household_budget(
+                c, scope, m.name, m.bucket, m.type, _hb_wire_shares(m.shares),
+                total_cents=m.total_cents)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {**line, "yourShareCents": tracking_store.household_your_share_cents(line, scope)}
+
+
+@app.patch("/api/household/budget/{line_id}")
+def update_household_budget_endpoint(line_id: int, m: HouseholdBudgetUpdateModel, request: Request = None) -> dict:
+    """Owner or participant only (issue #3 amendment) — anyone else gets 404, NEVER a
+    403 that would confirm this line exists at all. The access check runs BEFORE any
+    read of the line's current fields, so a non-participant can't even probe whether
+    line_id exists via a validation-error side channel."""
+    user = resolve_user(request)
+    scope = user["scopeId"]
+    fields: dict = {}
+    if m.name is not None:
+        fields["name"] = m.name
+    if m.bucket is not None:
+        fields["bucket"] = m.bucket
+    if m.type is not None:
+        fields["type"] = m.type
+    if m.total_cents is not None:
+        fields["total_cents"] = m.total_cents
+    if m.shares is not None:
+        fields["shares"] = _hb_wire_shares(m.shares)
+    if m.status is not None:
+        fields["status"] = m.status
+    with closing(tracking_store.connect()) as c:
+        if not tracking_store.household_budget_access(c, line_id, scope, user["role"] == "owner"):
+            raise HTTPException(status_code=404, detail="household budget line not found")
+        try:
+            line = tracking_store.update_household_budget(
+                c, line_id, caller_scope=scope, is_owner=user["role"] == "owner", **fields)
+        except PermissionError as e:
+            # 403, not 404 (BUG-0014): we only get here after the access check above
+            # already established this caller is the owner or a participant, so they can
+            # see the line via GET regardless -- 403 leaks nothing new, and matches the
+            # DELETE handler's identical reasoning for the same distinction.
+            raise HTTPException(status_code=403, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if line is None:
+            raise HTTPException(status_code=404, detail="household budget line not found")
+        return {**line, "yourShareCents": tracking_store.household_your_share_cents(line, scope)}
+
+
+@app.delete("/api/household/budget/{line_id}")
+def delete_household_budget_endpoint(line_id: int, hard: bool = False, confirm: bool = False,
+                                      request: Request = None) -> dict:
+    """OWNER-ONLY for BOTH archive and hard-delete (issue #3 amendment supersedes this
+    slice's earlier "any member may archive" interim fix): the access model's
+    participant grant is explicitly limited to read + edit, never delete in either
+    mode — line lifecycle (create/archive/hard-delete) stays with the owner who
+    controls participation. A participant who is NOT the owner gets 403 (they can see
+    this line exists, via GET, so 403 doesn't leak anything new); a total stranger with
+    no participation at all gets 404, exactly like PATCH, never confirming existence.
+
+    `resolve_user()` gates AUTHENTICATION, not membership -- every unseen HA account is
+    auto-provisioned as `role='member'` on its very first request (DEC-026/031), so
+    without this gate a brand-new, never-vetted, never-invited account's first-ever
+    request could permanently destroy a shared line (and every other household
+    member's committed-share history on it) before anyone else even knows they exist.
+    Mirrors this app's existing owner-only posture for every other irreversible/
+    destructive action (backup restore, CSV/full export -- `require_owner`)."""
+    user = resolve_user(request)
+    scope = user["scopeId"]
+    is_owner = user["role"] == "owner"
+    with closing(tracking_store.connect()) as c:
+        if not is_owner:
+            if tracking_store.household_budget_access(c, line_id, scope, is_owner=False):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Archiving or deleting a shared budget line is available to the household owner only.",
+                )
+            raise HTTPException(status_code=404, detail="household budget line not found")
+        try:
+            result = tracking_store.delete_household_budget(c, line_id, hard=hard, confirm=confirm)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+    return {"lineId": line_id, **result}
 
 
 # ----- recurring expectations (monthly bills/income seeded from the budget) -----

@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.5.0
+
+- **Share expenses with someone you live with.** A shared line is a real record you
+  both see: you each keep your own budget, and your own share of the rent folds into
+  it. Split it by percentage or by a flat amount, or pool contributions toward one
+  total. Open **Share expenses with your partner** on the Budget tab, tick the
+  categories, and share them in one go — grouped by bucket, with a select-all per
+  category, rather than one line at a time.
+- **Sharing something no longer moves it.** A subscription shared out of Basic
+  Wants › Subscriptions used to reappear at the top of Needs, because placement was
+  guessed from the bucket *type* and two buckets can share a type. Shared lines now
+  keep the bucket and sub-group they came from, and you can drag them anywhere you
+  want them — including into a sub-group.
+- **You can un-share something.** There was no way to undo it. "Remove from shared"
+  now hands the money back as your own budget line at the amount you had, instead of
+  deleting it and quietly leaving a hole in your plan.
+- **Split by income, set once.** Enter both incomes in one place and it suggests a
+  proportional split you can save as a preset — instead of retyping incomes on every
+  expense. Your own income comes from the Tax tab; your partner's is typed by you and
+  is never read from their data.
+- **The split adds up before you commit.** A split that does not total 100% now says
+  so as you type, with how far off you are, instead of accepting the form and
+  refusing at the button.
+- **Your share of a promoted line is correct.** Turning a 65/35 line into a shared one
+  recorded the *whole* bill as your contribution — $2,000 where $1,300 was true. That
+  inflated your Needs bucket, your remaining balance and your 50/30/20 verdict, and
+  the original figure could not be recovered afterwards.
+- **A shared line can no longer be taken over.** Anyone on a shared line could rewrite
+  its shares and zero out the other person, archive it, or restate the total — through
+  a path the owner-only delete check never saw. The owner now controls the line; a
+  participant can adjust what they contribute.
+- **What-If no longer restores split percentages onto the wrong line.** Budget items
+  were tracked by their position in a list, so adding, deleting or reordering anything
+  could restore a saved split onto a different line — or drop it — without a word.
+  Items now carry a permanent identity, and anything that cannot be matched is
+  reported by name instead of swallowed.
+- **First run says the numbers are an example.** The app ships with a worked example
+  so you can see it compute, but nothing said so — you could act on a tax bill and a
+  30-year forecast built from figures that were never yours. It now says so plainly,
+  with one tap to clear them.
+- **Budget feedback grades the month, not you.** The verdict now reads "Investing
+  $1,420/mo — $340 above the 20% target" rather than judging your rate, and bad news
+  carries a next step: how much a day gets you back on plan, or — when fixed bills
+  already exceed the plan — that spending less day to day cannot fix it.
+- **Nothing runs off the side of the screen.** The Budget tab pushed the page sideways
+  on narrow and half-width windows, including inside Home Assistant's own sidebar
+  layout. Wide content now scrolls inside its own panel.
+- **Easier to see and to operate by keyboard.** Field borders, the "no spend" rows and
+  several payment controls were too faint to make out; the tab bar told screen readers
+  nothing about which tab was selected; delete and edit icons announced as "cross
+  mark" with no idea which row. All fixed. The **$** beside an amount also stopped
+  looking like a button — only the **/yr** chip is clickable, and now only it looks it.
+- **Linked accounts warns you what it does.** It merges two sign-ins into one profile
+  and hands over your whole workspace, which is not partner-sharing — and it was one
+  click away from someone looking for exactly that.
+
 ## 0.4.0
 
 - **Refunds now subtract instead of adding.** Marking a transaction as a refund

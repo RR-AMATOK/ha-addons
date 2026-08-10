@@ -84,11 +84,22 @@ _BACKUP_TABLES: tuple = (
     # allow-list intersection drops them for free, so a restore rebuilds a clean
     # current-only profile (no stitched-together undo chain from before the restore).
     ("user_profile",     ("user_id", "blob", "state_version", "updated_at", "created_at")),
+    # Household shared-budget layer (Slice A, TODO-232, DEC-041, docs/shared-budget-design.md
+    # §9): HOUSEHOLD-scoped, not user_id-scoped (no `user_id` column on the parent — deliberately
+    # excluded from `user_scoped_tables` below, same as `users`/`user_alias` are excluded from
+    # this whole allow-list). Ordinary data, no write-time invariants beyond the payload's own
+    # value (unlike `user_profile` above) — a plain verbatim restore is correct, mirroring the
+    # `fund`/`fund_txn` precedent. Parent before child.
+    ("household_budget",       ("id", "name", "bucket", "type", "total_cents", "status", "created_by", "created_at")),
+    ("household_budget_share", ("line_id", "user_id", "split_ratio_bps", "contribution_cents")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
 # instead of rejecting the file. The original 9 stay strictly required (DEC-016 / DEC-017 #1).
-_BACKUP_OPTIONAL_TABLES = frozenset({"scenario", "goal", "venture", "user_profile", "fund", "fund_txn"})
+_BACKUP_OPTIONAL_TABLES = frozenset({
+    "scenario", "goal", "venture", "user_profile", "fund", "fund_txn",
+    "household_budget", "household_budget_share",
+})
 
 
 class RestoreError(Exception):
@@ -413,6 +424,45 @@ CREATE TABLE IF NOT EXISTS link_code (
   expires_at     TEXT NOT NULL,
   used           INTEGER NOT NULL DEFAULT 0
 );
+
+-- Household shared-budget layer, Slice A (TODO-232, DEC-041, docs/shared-budget-design.md
+-- §4/§9): a shared budget line -- split (rent divided 60/40) or pooled (groceries: per-
+-- member contributions summed into one envelope). HOUSEHOLD-scoped (DEC-030 implicit
+-- singleton), deliberately NOT user_id-scoped like fund/goal/venture above -- one row
+-- both members read AND write (§4's rejection of the "shared section inside each
+-- profile blob" alternative). A PURE expenses layer (DEC-041): never reads or writes
+-- filing status, never touches tax computation -- keep it that way in any future edit.
+-- `bucket` doubles as the actuals matching key (DEC-010, §6.3) -- deliberately no
+-- framework `kind` column; kind (need/want/investment) stays per-profile so each member
+-- can fold their share honestly into their own framework (§4).
+-- Placed at the very END of SCHEMA (after `link_code`, itself after the "Sinking funds"
+-- block) so the S1.1 QA harness's synthetic pre-migration schema simulations
+-- (tests/test_s1_1_qa_matrix.py's `_v6_schema`/`_v7_schema`, cut at the "Sinking funds"
+-- marker) never see these tables either -- same reasoning as `fund`/`fund_txn`'s and
+-- `user_alias`/`link_code`'s own placement notes above; they didn't exist that far back.
+CREATE TABLE IF NOT EXISTS household_budget (
+  id          INTEGER PRIMARY KEY,
+  name        TEXT    NOT NULL,                 -- "Rent", "Groceries"
+  bucket      TEXT    NOT NULL,                 -- server bucket key (DEC-010) = the actuals matching key
+  type        TEXT    NOT NULL CHECK (type IN ('split','pooled')),
+  total_cents INTEGER,                          -- split: full line ($2000). pooled: NULL (derived = sum of contributions)
+  status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_by  TEXT    NOT NULL,                 -- scopeId who created it (audit/honesty; not an owner gate)
+  created_at  TEXT    NOT NULL
+);
+
+-- Child: each member's participation. user_id = the member's DATA-SCOPE id (the same
+-- scopeId resolve_user() hands out -- '__owner__' for the owner role regardless of their
+-- real id, the real id for every other member -- see tracking_store.household_member_scopes,
+-- the join key the funding rollup will reuse in a later slice).
+CREATE TABLE IF NOT EXISTS household_budget_share (
+  line_id            INTEGER NOT NULL REFERENCES household_budget(id) ON DELETE CASCADE,
+  user_id            TEXT    NOT NULL,          -- member scopeId (join key for the funding rollup)
+  split_ratio_bps    INTEGER,                   -- split type: basis points (6000 = 60%, 0 valid for 100/0). Sum must = 10000. NULL for pooled
+  contribution_cents INTEGER,                   -- pooled type: this member's contribution; NULL for split
+  PRIMARY KEY (line_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_hbshare_user ON household_budget_share(user_id);
 """
 
 # Future migrations append to this list; each takes a conn and upgrades by one step.
@@ -827,7 +877,37 @@ def _mig_add_credit_limit(conn) -> None:
         conn.execute("ALTER TABLE account ADD COLUMN credit_limit_cents INTEGER")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit]
+def _mig_add_household_budget(conn) -> None:
+    """Migration 14 (Slice A, TODO-232, DEC-041, docs/shared-budget-design.md §9/§12):
+    additive household shared-budget-layer tables -- v14 -> v15. `CREATE TABLE IF NOT
+    EXISTS` makes it idempotent on fresh DBs that already have both tables (+ the
+    idx_hbshare_user index) from SCHEMA above (mirrors the goal/venture/user_profile/
+    fund/alias convention exactly). Pure additive `CREATE` -- no ALTER, no data rewrite,
+    no down-migration needed: an older-code boot against an already-migrated DB simply
+    never references these tables, so rollback is safe with nothing further to do.
+    HOUSEHOLD-scoped (DEC-030 implicit singleton), deliberately NOT user_id-scoped like
+    `fund`/`goal` -- see SCHEMA's comment on `household_budget` above."""
+    conn.execute("""CREATE TABLE IF NOT EXISTS household_budget (
+  id          INTEGER PRIMARY KEY,
+  name        TEXT    NOT NULL,
+  bucket      TEXT    NOT NULL,
+  type        TEXT    NOT NULL CHECK (type IN ('split','pooled')),
+  total_cents INTEGER,
+  status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_by  TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL
+)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS household_budget_share (
+  line_id            INTEGER NOT NULL REFERENCES household_budget(id) ON DELETE CASCADE,
+  user_id            TEXT    NOT NULL,
+  split_ratio_bps    INTEGER,
+  contribution_cents INTEGER,
+  PRIMARY KEY (line_id, user_id)
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_hbshare_user ON household_budget_share(user_id)")
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget]
 
 
 def _now() -> str:
@@ -889,6 +969,29 @@ def init_db(conn: sqlite3.Connection) -> None:
             if not os.path.exists(bak):                 # preserve the TRUE pre-migration snapshot on re-runs
                 with closing(sqlite3.connect(bak)) as dest:
                     conn.backup(dest)                   # OSError propagates -> abort boot before any mutation
+
+    # Household shared-budget layer (Slice A) pre-migration safety copy: the spec
+    # (docs/shared-budget-design.md §9) explicitly calls for the SAME idempotent
+    # pre-migration `.bak` discipline as S1.1/S1.2 above, even though this migration is
+    # purely additive CREATE TABLE (no ALTER, no rewrite, no data-loss risk on its own)
+    # -- this is money-adjacent household data under mandatory adversarial review
+    # (DEC-041), so it gets the belt-and-suspenders treatment those higher-risk
+    # migrations get. Same version==0 (fresh DB, nothing to protect) skip and
+    # not-exists guard (preserve the TRUE pre-migration snapshot on re-runs) as above.
+    # 14 is `_mig_add_household_budget`'s FIXED historical position in `_MIGRATIONS`
+    # (mirrors the `8` literal above, a fixed position too, not a computed one) --
+    # deliberately NOT `_MIGRATIONS.index(_mig_add_household_budget)`: several tests
+    # monkeypatch `store._MIGRATIONS` to a shorter, OLDER-app-version list to simulate
+    # upgrade scenarios (e.g. test_profile_store.py's `older_migrations =
+    # store._MIGRATIONS[:9]`), and a live `.index()` lookup would raise ValueError the
+    # moment that list no longer contains this function at all.
+    if 0 < version <= 14:
+        db_file = _main_db_file(conn)
+        if db_file:
+            bak = f"{db_file}.pre-household-budget.bak"
+            if not os.path.exists(bak):
+                with closing(sqlite3.connect(bak)) as dest:
+                    conn.backup(dest)
 
     for i in range(version, len(_MIGRATIONS)):
         _MIGRATIONS[i](conn)
@@ -1147,9 +1250,12 @@ class UnknownTransferTargetError(LookupError):
 
 
 class OwnerTransferConflictError(RuntimeError):
-    """409: a concurrent/stale transfer lost the race -- the promote collided with
-    `idx_users_one_owner` (exactly one owner survived, invariant intact). Reload and
-    retry from whoever currently holds the seat."""
+    """409: either (a) a concurrent/stale transfer lost the race -- the promote collided
+    with `idx_users_one_owner` (exactly one owner survived, invariant intact); or (b) the
+    household shared-budget layer (Slice A, TODO-232, DEC-041) found a share-remap
+    collision -- see transfer_ownership's docstring "HOUSEHOLD_BUDGET_SHARE IS
+    PERSON-SCOPED, NOT SEAT-SCOPED" section. Reload and retry from whoever currently
+    holds the seat (case a), or resolve the colliding share manually first (case b)."""
 
 
 def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_id: str) -> dict:
@@ -1157,39 +1263,72 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
     in-app owner reassignment SEV-004 explicitly deferred (0.2.1, addon/DOCS.md). Called
     ONLY from server.py's owner-only POST /api/tracking/owner-transfer.
 
-    ZERO DATA MOVEMENT (the entire point of this design): every user-owned table is
-    scoped by `resolve_user()["scopeId"]`, which is `'__owner__'` for the owner role and
-    a member's raw HA id otherwise -- NEVER by `id` (see resolve_user()'s scopeId
-    formula and DEC-033). This function is a two-row UPDATE in the `users` table alone;
-    it never reads or writes account/txn/goal/venture/fund/user_profile/etc. Once
+    ZERO DATA MOVEMENT for every EXCLUSIVELY-scoped table (the entire point of this
+    design, and still true for account/txn/goal/venture/fund/user_profile/etc.): each of
+    those tables is scoped by `resolve_user()["scopeId"]`, which is `'__owner__'` for the
+    owner role and a member's raw HA id otherwise -- NEVER by `id` (see resolve_user()'s
+    scopeId formula and DEC-033), and EACH ROW belongs to exactly one scope. Once
     *to_user_id* holds `role='owner'`, their very next request resolves `scopeId =
     '__owner__'` and they see EVERY bit of the data the old owner had -- transactions,
-    accounts, funds, their synced profile blob, all of it -- with not one row copied,
-    moved, or touched. Callers/tests should assert this by checking the `users` table
-    diff is exactly these two rows -- no other table's row count or content changes.
+    accounts, funds, their synced profile blob, all of it -- with not one such row
+    copied, moved, or touched. Callers/tests should assert this by checking the `users`
+    table diff plus the household_budget_share remap below (documented next) is the
+    COMPLETE diff -- no other table's row count or content changes.
 
-    ORPHANED MEMBER-SCOPE DATA (documented, not merged -- deliberately out of scope; see
-    addon/DOCS.md): if *to_user_id* had already logged data while still a member (their
-    own transactions, their own synced profile blob), that data lives under THEIR RAW
-    ID, which after this swap belongs to nobody's current scope (the demoted owner's new
-    member scope is their OWN raw id -- never the promoted member's). That data is not
-    deleted; it simply becomes unreachable unless *to_user_id* is later demoted back to
-    member (a reverse transfer), at which point it reappears exactly as left. No
-    automatic merge is performed, and none is planned -- flag as a follow-up if a
-    real household ever needs it.
+    HOUSEHOLD_BUDGET_SHARE IS PERSON-SCOPED, NOT SEAT-SCOPED -- the ONE exception (Slice
+    A, TODO-232, DEC-041, review finding 2026-08-06): unlike every table above,
+    `household_budget_share` puts MULTIPLE members' scopeIds as VALUES on the SAME
+    `line_id` row (Alice's 60% and Bob's 40% are sibling rows on one shared line) --
+    "the seat carries the data" is exactly WRONG here. Left alone, a transfer would
+    reattribute the outgoing owner's committed share to whoever now holds `'__owner__'`
+    (real money misattributed to the wrong person) WHILE orphaning the incoming owner's
+    own pre-existing share under their old raw id (a share they still owe becomes
+    invisible, and un-editable -- `_validate_household_shares` rejects any further edit
+    referencing an id no longer held by a current member). So money must follow the
+    PERSON here: this function SWAPS the two scope values in `household_budget_share`
+    (`'__owner__'` <-> *to_user_id*) in the SAME transaction as the role flip, so a
+    share keyed to whichever identity a person now holds still resolves to THEM,
+    not to whoever now sits in the seat. Two footnotes:
+      - If *current_owner_id* itself IS the literal `'__owner__'` sentinel (the
+        no-header/no-override fallback identity, DEC-031 §3 -- `users.user_id ==
+        '__owner__'` even though `role` is changing), their post-transfer `scopeId` is
+        STILL `'__owner__'` (scopeId is role-derived, and their raw `id` happens to
+        equal that string too) -- no half of the swap is needed for them; only
+        *to_user_id*'s shares move onto `'__owner__'`.
+      - COLLISION GUARD: if a shared line has a share row for BOTH `'__owner__'` and
+        *to_user_id* already (i.e. the outgoing and incoming owner already co-participate
+        in the same line), the swap would try to land two different amounts on the same
+        `(line_id, '__owner__')` slot. Rather than silently overwrite or merge money,
+        this is checked BEFORE any mutation and raises `OwnerTransferConflictError`
+        (409) -- warn-never-overwrite, same posture as DEC-037. Resolve the colliding
+        share manually (e.g. archive/edit one side) before retrying the transfer.
 
-    Atomicity: both UPDATEs run in ONE transaction. Python's `sqlite3` module opens an
-    implicit transaction before the first DML statement after a commit and holds it open
-    until `commit()`/`rollback()` -- so a process crash between the two UPDATEs below can
-    never be observed as a half-swapped state: either both land together (on `commit()`)
-    or neither does (nothing was durably written; the prior owner is unchanged on the
-    next connection). ORDER MATTERS: the current owner is demoted to 'member' FIRST
-    (transiently zero owners), THEN the target is promoted to 'owner' (back to exactly
-    one) -- reversing the order would collide with `idx_users_one_owner`, the partial
-    unique index that enforces at-most-one-owner on every individual statement, not just
-    at commit. That same index also stands as a concurrency backstop: if some future
-    caller bug ever left two rows claiming 'owner' mid-transaction, SQLite refuses the
-    second UPDATE outright (IntegrityError) rather than silently producing two owners.
+    ORPHANED MEMBER-SCOPE DATA on every OTHER (exclusively-scoped) table (documented,
+    not merged -- deliberately out of scope; see addon/DOCS.md): if *to_user_id* had
+    already logged data while still a member (their own transactions, their own synced
+    profile blob), that data lives under THEIR RAW ID, which after this swap belongs to
+    nobody's current scope (the demoted owner's new member scope is their OWN raw id --
+    never the promoted member's). That data is not deleted; it simply becomes
+    unreachable unless *to_user_id* is later demoted back to member (a reverse
+    transfer), at which point it reappears exactly as left. No automatic merge is
+    performed, and none is planned -- flag as a follow-up if a real household ever needs
+    it. (household_budget_share does NOT have this orphaning problem -- see above; that
+    is precisely why it needs the opposite treatment.)
+
+    Atomicity: the household_budget_share remap AND both `users` UPDATEs run in ONE
+    transaction. Python's `sqlite3` module opens an implicit transaction before the
+    first DML statement after a commit and holds it open until `commit()`/`rollback()`
+    -- so a process crash midway can never be observed as a half-swapped state: either
+    everything lands together (on `commit()`) or nothing does (nothing was durably
+    written; the prior owner and every share are unchanged on the next connection).
+    ORDER MATTERS for the `users` UPDATEs: the current owner is demoted to 'member'
+    FIRST (transiently zero owners), THEN the target is promoted to 'owner' (back to
+    exactly one) -- reversing the order would collide with `idx_users_one_owner`, the
+    partial unique index that enforces at-most-one-owner on every individual statement,
+    not just at commit. That same index also stands as a concurrency backstop: if some
+    future caller bug ever left two rows claiming 'owner' mid-transaction, SQLite
+    refuses the second UPDATE outright (IntegrityError) rather than silently producing
+    two owners.
 
     Raises
     ------
@@ -1234,7 +1373,41 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
     # NOTE: to_user_id is intentionally NOT trimmed/normalized here — the target must
     # exactly match a stored users.user_id, which the resolver already trimmed at
     # provisioning time. Normalizing here could open a resolver/transfer mismatch.
+
+    # Household shared-budget layer (Slice A, TODO-232, DEC-041) collision guard -- see
+    # this function's "HOUSEHOLD_BUDGET_SHARE IS PERSON-SCOPED" docstring section.
+    # Checked BEFORE any mutation (fail-closed, warn-never-overwrite): a shared line
+    # where BOTH the outgoing owner and the incoming owner already have a share row
+    # cannot be swapped without landing two different amounts on the same
+    # (line_id, '__owner__') slot.
+    colliding = conn.execute(
+        "SELECT a.line_id FROM household_budget_share a "
+        "JOIN household_budget_share b ON b.line_id = a.line_id "
+        "WHERE a.user_id = '__owner__' AND b.user_id = ?",
+        (to_user_id,),
+    ).fetchall()
+    if colliding:
+        raise OwnerTransferConflictError(
+            f"{to_user_id!r} already has a share on shared budget line(s) "
+            f"{[r['line_id'] for r in colliding]} that the outgoing owner also "
+            "participates in -- resolve or remove one side's share before "
+            "transferring ownership (money cannot be silently merged)."
+        )
+
     try:
+        # Household shared-budget layer: swap the two scope values so a share stays
+        # attributed to the PERSON, not the seat (the collision guard above already
+        # proved this cannot collide). Skip the '__owner__' -> current_owner_id half
+        # when current_owner_id IS the literal sentinel -- their scopeId is unchanged.
+        if current_owner_id != _SENTINEL_OWNER_ID:
+            conn.execute(
+                "UPDATE household_budget_share SET user_id = ? WHERE user_id = '__owner__'",
+                (current_owner_id,),
+            )
+        conn.execute(
+            "UPDATE household_budget_share SET user_id = '__owner__' WHERE user_id = ?",
+            (to_user_id,),
+        )
         conn.execute(
             "UPDATE users SET role = 'member' WHERE user_id = ? AND role = 'owner'",
             (current_owner_id,),
@@ -1390,6 +1563,67 @@ def create_link_code(conn: sqlite3.Connection, issuer_user_id: str) -> dict:
     return {"code": code, "expiresAt": expires_at}
 
 
+def _collapse_household_budget_shares_onto_primary(conn: sqlite3.Connection, alias_scope: str,
+                                                    primary_scope: str) -> None:
+    """Household shared-budget layer (Slice A, TODO-232, DEC-041, review finding
+    2026-08-06) counterpart to `transfer_ownership`'s share swap: `redeem_link_code`
+    collapses *alias_scope*'s IDENTITY onto *primary_scope* going forward, and every
+    OTHER exclusively-scoped table's data legitimately orphans under the alias's old raw
+    id (documented, recoverable on unlink) -- but `household_budget_share` cannot follow
+    that pattern: an orphaned share on a MULTI-person row becomes an id no current
+    member holds, which permanently blocks any further edit to that line
+    (`_validate_household_shares`' membership check) and hides money someone still
+    owes. So this table's rows are COLLAPSED (moved), not orphaned, in the same
+    transaction as the alias INSERT:
+
+      - *primary_scope* has no row on a given line yet: plain rename
+        (alias_scope -> primary_scope).
+      - *primary_scope* ALREADY has a row on that line (both HA logins had
+        independently committed as if they were two different household members,
+        before linking revealed they're the same real person): the two entries are the
+        SAME human's money counted under two identities -- SUM the type-appropriate
+        money field into *primary_scope*'s row (preserves the line's
+        Σ ratio_bps == 10000 invariant: two summands already part of the total collapse
+        into one addend of the same combined size) and drop the now-redundant alias row.
+
+    ONE-WAY, unlike every other table's orphan-then-reappear-on-unlink semantics
+    (`unlink_alias`'s docstring): once two rows are summed together there is no general
+    way to un-sum them, so a later `unlink_alias` does NOT restore *alias_scope*'s
+    separate share -- they simply have none until a household member re-adds them as a
+    participant. This is the deliberate, narrower trade-off DEC-041's review accepted
+    over the alternative (freezing the line) -- see docs/shared-budget-design.md's
+    Slice A notes and TODO-247-style follow-up "#6 stale-share repair affordance"."""
+    if alias_scope == primary_scope:
+        return
+    alias_rows = conn.execute(
+        "SELECT line_id, split_ratio_bps, contribution_cents FROM household_budget_share "
+        "WHERE user_id = ?", (alias_scope,)
+    ).fetchall()
+    for r in alias_rows:
+        existing = conn.execute(
+            "SELECT split_ratio_bps, contribution_cents FROM household_budget_share "
+            "WHERE line_id = ? AND user_id = ?", (r["line_id"], primary_scope)
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "UPDATE household_budget_share SET user_id = ? WHERE line_id = ? AND user_id = ?",
+                (primary_scope, r["line_id"], alias_scope))
+        else:
+            merged_ratio = None
+            if r["split_ratio_bps"] is not None or existing["split_ratio_bps"] is not None:
+                merged_ratio = (r["split_ratio_bps"] or 0) + (existing["split_ratio_bps"] or 0)
+            merged_contribution = None
+            if r["contribution_cents"] is not None or existing["contribution_cents"] is not None:
+                merged_contribution = (r["contribution_cents"] or 0) + (existing["contribution_cents"] or 0)
+            conn.execute(
+                "UPDATE household_budget_share SET split_ratio_bps = ?, contribution_cents = ? "
+                "WHERE line_id = ? AND user_id = ?",
+                (merged_ratio, merged_contribution, r["line_id"], primary_scope))
+            conn.execute(
+                "DELETE FROM household_budget_share WHERE line_id = ? AND user_id = ?",
+                (r["line_id"], alias_scope))
+
+
 def redeem_link_code(conn: sqlite3.Connection, joiner_user_id: str, code: str) -> dict:
     """Redeem a link code (POST /api/tracking/link) -- the second half of the two-sided
     handshake proving control of both accounts. *joiner_user_id* is the CALLER's
@@ -1403,10 +1637,20 @@ def redeem_link_code(conn: sqlite3.Connection, joiner_user_id: str, code: str) -
     role, scopeId} -- see resolve_identity(). *joiner_user_id*'s own `users` row, if one
     exists (they may have already been a provisioned member before linking), is left
     completely untouched by this function: it becomes ORPHANED, not deleted or merged --
-    identical semantics to transfer_ownership()'s orphaned member-scope data. It is
+    identical semantics to transfer_ownership()'s orphaned member-scope data, for every
+    EXCLUSIVELY-scoped table (account/txn/goal/venture/fund/user_profile/etc). It is
     recoverable via DELETE /api/tracking/link/{aliasId} (unlink()), at which point
     *joiner_user_id* reverts to resolving as its own persona and that row (and any data
     scoped to it) reappears exactly as left.
+
+    EXCEPTION -- household_budget_share (Slice A, TODO-232, DEC-041, review finding
+    2026-08-06): orphaning would block every further edit to a line the joiner
+    participated in (`_validate_household_shares` rejects a stale id) and hide money
+    they still owe. `_collapse_household_budget_shares_onto_primary` (called BEFORE the
+    alias INSERT, same transaction) moves -- and, where the primary already has a share
+    on the same line, SUMS -- the joiner's shares onto the primary's scope instead. This
+    is ONE-WAY: unlike every other table, a later unlink does NOT restore the joiner's
+    separate share (see that function's docstring).
 
     Validations, ALL fail-closed, checked in this order:
       1. *joiner_user_id* is the reserved `_SENTINEL_OWNER_ID` -- rejected outright.
@@ -1492,6 +1736,20 @@ def redeem_link_code(conn: sqlite3.Connection, joiner_user_id: str, code: str) -
         conn.rollback()
         raise LinkError("this link code is invalid, expired, or already used")
     try:
+        # Household shared-budget layer (Slice A, TODO-232, DEC-041): collapse the
+        # joiner's shares onto the issuer's primary scope BEFORE the alias insert, in
+        # the SAME transaction -- see _collapse_household_budget_shares_onto_primary's
+        # docstring for why this table cannot use the orphan-on-link pattern every other
+        # table uses. joiner_user_id is confirmed not the owner seat above (check #4),
+        # so their own scopeId IS their raw id; the issuer's current scopeId is
+        # '__owner__' if they hold the owner seat, else their own raw id (same
+        # role-derived formula resolve_user() uses).
+        issuer_role_row = conn.execute(
+            "SELECT role FROM users WHERE user_id = ?", (issuer_user_id,)
+        ).fetchone()
+        issuer_scope = _SENTINEL_OWNER_ID if (issuer_role_row and issuer_role_row["role"] == "owner") else issuer_user_id
+        _collapse_household_budget_shares_onto_primary(conn, joiner_user_id, issuer_scope)
+
         conn.execute(
             "INSERT INTO user_alias (alias_id, primary_user_id, linked_at) VALUES (?, ?, ?)",
             (joiner_user_id, issuer_user_id, _now()),
@@ -2904,6 +3162,474 @@ def delete_fund(conn, user_id, fund_id, *, hard=False, force=False) -> dict:
     return {"deleted": True, "archived": False, "hard": True}
 
 
+# ---------- household shared-budget layer, Slice A (TODO-232, DEC-041,
+# docs/shared-budget-design.md §4/§5/§9/§10) ----------
+#
+# HOUSEHOLD-scoped, not user_id-scoped (DEC-030 implicit singleton): the CRUD functions
+# below (`create_/update_/delete_/get_household_budget`) still take no `user_id`/scopeId
+# ownership filter — a shared line is one row potentially several household members
+# read/write together, not owned by a single scope the way account/txn/goal/venture/fund
+# are. WHO may reach a given line at all is a separate ACCESS MODEL, layered on top by
+# `household_budget_access`/`list_household_budget` (issue #3 amendment, review
+# 2026-08-06 — the user's directed choice, "only people you invite"): the owner may
+# access every line; a PARTICIPANT (has a share row on THIS line) may read/edit that one
+# line; everyone else gets nothing (§10's original "none use the scopeId data filter"
+# undersold this — it's not unrestricted, it's participation-gated). server.py's
+# endpoints call the access check BEFORE any mutation/read of a specific line_id; the
+# CRUD functions themselves stay access-agnostic (mirrors `get_household_budget`'s
+# existing plain "fetch by id" shape) so the access POLICY lives in exactly one place.
+#
+# A PURE expenses layer (DEC-041): this section must NEVER read or write filing status,
+# and must NEVER auto-derive a split ratio from another member's income (§13 honesty
+# boundary) — split ratios are always an explicit value the caller supplies.
+#
+# Slice A ships CRUD only. The actuals side (the joint account, A2) and the household
+# rollup (C) are later slices — this section has no txn/account awareness at all.
+
+def household_member_scopes(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every current household member's DATA-SCOPE id -> {id, role, displayName}. The
+    scope key is the SAME scopeId resolve_user() would hand that member for their own
+    data ('__owner__' for the owner role regardless of their real HA id, the real id for
+    every other member) — the join key `household_budget_share.user_id` always uses, and
+    the set a shared line's `shares[].userId` must always be drawn from.
+
+    Reused for (a) validating a shared line's per-member shares are real, CURRENT
+    household members (`_validate_household_shares` below), and (b) the roster naming
+    (`displayName`) folded into each share in the read shape (`_household_budget_dict`).
+    `displayName` here already applies the owner-transfer-picker precedence (label wins
+    over the header-captured display_name, falling back to the raw id) — mirrors
+    index.html's `label || displayName || id` convention, kept server-side here since
+    this is the one surface where a PARTNER's name is rendered inside another member's
+    own view (§6.2's "you funded $1400 · Alex funded $1100" — same naming plumbing)."""
+    out: dict[str, dict] = {}
+    for u in list_users(conn):
+        scope = _SENTINEL_OWNER_ID if u["role"] == "owner" else u["id"]
+        out[scope] = {
+            "id": u["id"], "role": u["role"],
+            "displayName": u["label"] or u["displayName"] or u["id"],
+        }
+    return out
+
+
+def _validate_household_shares(conn: sqlite3.Connection, type_: str, shares) -> list[dict]:
+    """Normalize + validate a shared line's per-member shares against *type_* ('split' or
+    'pooled') and the CURRENT household roster. Returns a list of
+    {userId, splitRatioBps, contributionCents} dicts (exactly one of the two money
+    fields populated, per the line's type) ready to persist. Raises ValueError on any
+    violation — every caller maps that to HTTP 422.
+
+    Rules (§4, §9, §10's contract notes):
+      - shares must be a non-empty list; every userId must be a CURRENT household member
+        (household_member_scopes) and appear at most once;
+      - split: every share supplies an integer ratioBps in [0, 10000] (0 valid — a 100/0
+        line, §6.5's "see a line I don't personally pay"); the ratios across ALL shares
+        must sum to EXACTLY 10000 (100%);
+      - pooled: every share supplies an integer contributionCents >= 0; no sum
+        constraint (the pool's budget is simply Σ contributions, derived at read time)."""
+    if not isinstance(shares, list) or not shares:
+        raise ValueError("shares must be a non-empty list")
+    scopes = household_member_scopes(conn)
+    seen: set = set()
+    normalized: list[dict] = []
+    for s in shares:
+        uid = str((s or {}).get("userId") or "").strip()
+        if not uid:
+            raise ValueError("every share needs a userId")
+        if uid not in scopes:
+            raise ValueError(f"userId {uid!r} is not a current household member")
+        if uid in seen:
+            raise ValueError(f"userId {uid!r} appears more than once in shares")
+        seen.add(uid)
+        ratio = (s or {}).get("ratioBps")
+        contrib = (s or {}).get("contributionCents")
+        if type_ == "split":
+            if contrib is not None:
+                raise ValueError(f"split share for {uid!r} takes ratioBps, not contributionCents")
+            if not isinstance(ratio, int) or isinstance(ratio, bool) or ratio < 0 or ratio > 10000:
+                raise ValueError(f"split share for {uid!r} needs an integer ratioBps in 0..10000")
+            normalized.append({"userId": uid, "splitRatioBps": ratio, "contributionCents": None})
+        else:
+            if ratio is not None:
+                raise ValueError(f"pooled share for {uid!r} takes contributionCents, not ratioBps")
+            if not isinstance(contrib, int) or isinstance(contrib, bool) or contrib < 0:
+                raise ValueError(f"pooled share for {uid!r} needs an integer contributionCents >= 0")
+            normalized.append({"userId": uid, "splitRatioBps": None, "contributionCents": contrib})
+    if type_ == "split":
+        total_bps = sum(n["splitRatioBps"] for n in normalized)
+        if total_bps != 10000:
+            raise ValueError(f"split ratios must sum to 10000 bps (100%), got {total_bps}")
+    return normalized
+
+
+def _household_budget_dict(conn: sqlite3.Connection, row) -> dict:
+    """Base read shape for one shared line — everything EXCEPT `yourShareCents`, which is
+    reader-relative (depends on the calling scope), not a property of the line itself;
+    server.py folds that in per caller via `household_your_share_cents` below."""
+    scopes = household_member_scopes(conn)
+    shares = []
+    for r in conn.execute(
+            "SELECT user_id, split_ratio_bps, contribution_cents FROM household_budget_share "
+            "WHERE line_id = ? ORDER BY user_id", (row["id"],)).fetchall():
+        info = scopes.get(r["user_id"])
+        shares.append({
+            "userId": r["user_id"],
+            "displayName": info["displayName"] if info else r["user_id"],
+            "ratioBps": r["split_ratio_bps"],
+            "contributionCents": r["contribution_cents"],
+        })
+    return {
+        "id": row["id"], "name": row["name"], "bucket": row["bucket"], "type": row["type"],
+        "totalCents": row["total_cents"], "status": row["status"],
+        "createdBy": row["created_by"], "createdAt": row["created_at"],
+        "shares": shares,
+    }
+
+
+def _household_split_allocation(total_cents: int, shares: list[dict]) -> dict[str, int]:
+    """Largest-remainder allocation of *total_cents* across *shares* (each a dict with
+    'userId' and 'ratioBps'), so the returned per-member cents PROVABLY SUM to exactly
+    total_cents. Independent per-share rounding does NOT have this property (review
+    finding 2026-08-06: a truncation mutant in the old `round(total * ratio / 10000)`
+    passed the full suite because every existing test used evenly-divisible ratios --
+    the flagship 50/50 case actually drifts on every odd-cent total, e.g. $100.01 split
+    50/50 -> $50.00 + $50.00 = $100.00, one cent short of the plan, and Slice C's
+    household card compares the household's `plannedCents` total against the SUM of
+    members' `yourShareCents` -- a mismatch there would be a visible, confusing bug).
+
+    Method: floor every share's ideal fractional amount (`total_cents * ratioBps /
+    10000`), then hand out the few leftover cents ONE AT A TIME to the shares with the
+    largest fractional remainder -- the standard largest-remainder / Hamilton
+    apportionment method. Ties broken by `userId` ascending for a deterministic,
+    reproducible allocation regardless of caller-supplied ordering.
+
+    Guaranteed `sum(returned.values()) == total_cents` whenever `sum(ratioBps) ==
+    10000` (already enforced by `_validate_household_shares` at write time) -- the
+    fractional parts left behind by flooring are exactly the integer number of leftover
+    cents (see the proof in this function's test coverage), so `remainder_cents` is
+    always in `[0, len(shares))` and every leftover cent is assigned to a distinct
+    share."""
+    ideal = [(s["userId"], total_cents * (s.get("ratioBps") or 0) / 10000) for s in shares]
+    floors = {uid: int(v) for uid, v in ideal}   # int() truncates toward zero == floor for v >= 0
+    remainder_cents = total_cents - sum(floors.values())
+    order = sorted(ideal, key=lambda t: (-(t[1] - int(t[1])), t[0]))
+    out = dict(floors)
+    for uid, _ in order[:remainder_cents]:
+        out[uid] += 1
+    return out
+
+
+def household_your_share_cents(line: dict, scope: str) -> int:
+    """The calling *scope*'s own share of *line* (a `_household_budget_dict` shape), in
+    cents (§4/§6.5's fold — this is the exact figure a later slice's Budget-tab overlay
+    plugs straight into `myShare`). Split: the caller's slot in
+    `_household_split_allocation` (largest-remainder — the per-member cents across ALL
+    of a line's shares are guaranteed to sum to `totalCents` exactly, never drifting by
+    a cent on an unevenly-divisible total or ratio split). Pooled: the caller's own
+    contributionCents. 0 if the caller has no participation row on this line at all
+    (e.g. a third household member on a couple's line, or a line predating them) — never
+    an error; a non-participant simply sees $0 of it, not a crash."""
+    mine = next((s for s in line["shares"] if s["userId"] == scope), None)
+    if mine is None:
+        return 0
+    if line["type"] == "split":
+        allocation = _household_split_allocation(line["totalCents"] or 0, line["shares"])
+        return allocation.get(scope, 0)
+    return mine["contributionCents"] or 0
+
+
+def create_household_budget(conn: sqlite3.Connection, created_by: str, name, bucket, type_, shares,
+                             total_cents=None) -> dict:
+    """Create a shared budget line. *created_by* is the caller's scopeId — an audit trail
+    field only (§9: "not an owner gate"); any household member may create a line, and
+    every member may edit or archive it afterward regardless of who created it."""
+    name = str(name or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    bucket = str(bucket or "").strip()
+    if not bucket:
+        raise ValueError("bucket must not be empty")
+    if type_ not in ("split", "pooled"):
+        raise ValueError(f"type must be 'split' or 'pooled', got {type_!r}")
+    if type_ == "split":
+        if not isinstance(total_cents, int) or isinstance(total_cents, bool) or total_cents <= 0:
+            raise ValueError("split lines need an integer totalCents > 0")
+    else:
+        if total_cents is not None:
+            raise ValueError("pooled lines derive totalCents from contributions -- do not pass totalCents")
+        total_cents = None
+    normalized = _validate_household_shares(conn, type_, shares)
+    cur = conn.execute(
+        "INSERT INTO household_budget (name, bucket, type, total_cents, status, created_by, created_at) "
+        "VALUES (?,?,?,?,'active',?,?)",
+        (name, bucket, type_, total_cents, created_by, _now()))
+    line_id = cur.lastrowid
+    for s in normalized:
+        conn.execute(
+            "INSERT INTO household_budget_share (line_id, user_id, split_ratio_bps, contribution_cents) "
+            "VALUES (?,?,?,?)",
+            (line_id, s["userId"], s["splitRatioBps"], s["contributionCents"]))
+    conn.commit()
+    return _household_budget_dict(conn, conn.execute(
+        "SELECT * FROM household_budget WHERE id = ?", (line_id,)).fetchone())
+
+
+def household_budget_access(conn: sqlite3.Connection, line_id, caller_scope: str, is_owner: bool) -> bool:
+    """Access model (review finding 2026-08-06, issue #3 amendment — the user's directed
+    choice, "only people you invite"): the OWNER can access any line; a PARTICIPANT (has
+    a share row on THIS line) can access that one line; everyone else — including an
+    account auto-provisioned on its very first request (DEC-026/031) — gets nothing.
+
+    Gate is "having a share row", NEVER "yourShareCents > 0" — a 0-ratio 100/0 line
+    (§6.5, "see a line I don't personally pay") is a real participant with a real $0
+    share; excluding them would silently break the one scenario the ratio exists for.
+
+    "Tie the check to current membership ∩ participation": *caller_scope* is, by
+    construction, always a CURRENT household member's scope — it can only ever be
+    the value `resolve_user()` just handed out for THIS request, and that resolver
+    never returns anything but a live, currently-provisioned identity's scope. So
+    matching `household_budget_share.user_id == caller_scope` directly already IS the
+    membership-intersected check: a share row keyed to some OTHER, no-longer-current id
+    (the exact failure mode `transfer_ownership`/`redeem_link_code` used to leave
+    behind, fixed above) can never equal a live caller's own scope, so it can never
+    confer access to anyone by accident."""
+    if is_owner:
+        return True
+    return conn.execute(
+        "SELECT 1 FROM household_budget_share WHERE line_id = ? AND user_id = ?",
+        (line_id, caller_scope),
+    ).fetchone() is not None
+
+
+def list_household_budget(conn: sqlite3.Connection, caller_scope: str, is_owner: bool,
+                          include_archived=False) -> list[dict]:
+    """The lines *caller_scope* may see (issue #3 amendment access model, see
+    `household_budget_access`): the owner sees every line, HOUSEHOLD-wide; anyone else
+    sees ONLY the lines they participate in (have a share row on) — never a 403 that
+    would confirm OTHER lines exist, just a filtered (possibly empty) list, matching how
+    every other surface in this app already degrades for a non-owner/non-participant
+    (empty scope, or 404). `caller_scope`/`is_owner` are REQUIRED positionals (mirrors
+    this codebase's "a call can never be unscoped" convention for every other
+    user_id-scoped list_* function — R3, tests/test_multiuser_scoping.py) — there is no
+    "give me everything" default a caller could reach by omission.
+
+    `yourShareCents` is NOT included here; server.py folds it in per the calling scope."""
+    q = "SELECT * FROM household_budget"
+    conds = [] if include_archived else ["status = 'active'"]
+    params: list = []
+    if not is_owner:
+        conds.append("id IN (SELECT line_id FROM household_budget_share WHERE user_id = ?)")
+        params.append(caller_scope)
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
+    q += " ORDER BY name, id"
+    return [_household_budget_dict(conn, r) for r in conn.execute(q, params).fetchall()]
+
+
+def get_household_budget(conn: sqlite3.Connection, line_id) -> dict | None:
+    row = conn.execute("SELECT * FROM household_budget WHERE id = ?", (line_id,)).fetchone()
+    return None if row is None else _household_budget_dict(conn, row)
+
+
+#: Fields on a shared line that only the OWNER may PATCH (BUG-0014). These are
+#: household-level facts about the shared bill, plus `status` — which is LIFECYCLE, the
+#: thing `delete_household_budget_endpoint`'s docstring already reserves to the owner
+#: ("the participant grant is explicitly limited to read + edit, never delete in either
+#: mode"). `PATCH status='archived'` reached exactly that archive through a different
+#: verb, which is why listing `status` here is not belt-and-braces but the actual hole.
+_HB_OWNER_ONLY_FIELDS = ("name", "bucket", "type", "total_cents", "status")
+
+
+def _authorize_household_patch(conn: sqlite3.Connection, row, fields, caller_scope: str,
+                               is_owner: bool) -> None:
+    """Enforce WHICH FIELDS a non-owner participant may PATCH (BUG-0014). Raises
+    PermissionError (server.py maps to 403) on violation; returns None when allowed.
+
+    `household_budget_access` answers "may this caller touch this line AT ALL" and is a
+    necessary gate, but it was also the ONLY one: every field was writable by anyone who
+    passed it, so a participant could rewrite `shares` to give themselves 10000 bps and
+    zero the owner out, archive the line via `status`, or restate the household's bill
+    via `total_cents`. Access is not authority — this function supplies the missing half.
+
+    The rule, derived from the model the code already documents (participants get
+    "read + edit", owner keeps lifecycle):
+      - owner: everything, unchanged;
+      - participant: may adjust ONLY THEIR OWN `contributionCents`, on a POOLED line.
+
+    Why split ratios are owner-only even though "editing your own share" sounds
+    symmetrical: split ratios must sum to exactly 10000 bps, so a participant CANNOT
+    change their own ratio without a compensating change to somebody else's row. There
+    is no such thing as a self-only ratio edit — every one of them spends another
+    member's money. Pooled contributions are genuinely independent (the line's total is
+    derived as Σ contributions), so a self-only edit is well-defined there and only there.
+
+    DENY BY DEFAULT: any supplied `shares` payload this function cannot positively prove
+    is a self-only contribution edit — different roster, unparseable rows, caller absent
+    from their own line — raises rather than falling through to the write. A malformed
+    payload must not reach the mutation path on a non-owner's authority and get its
+    verdict from validation instead."""
+    if is_owner:
+        return
+    forbidden = sorted(f for f in _HB_OWNER_ONLY_FIELDS if f in fields)
+    if forbidden:
+        raise PermissionError(
+            "Only the household owner can change " + ", ".join(forbidden)
+            + " on a shared line. You can adjust what you contribute.")
+    if "shares" not in fields:
+        return
+    if row["type"] != "pooled":
+        raise PermissionError(
+            "Only the household owner can change the split on a shared line -- split "
+            "ratios must total 100%, so changing yours would change someone else's.")
+    current = {
+        r["user_id"]: r["contribution_cents"]
+        for r in conn.execute(
+            "SELECT user_id, contribution_cents FROM household_budget_share WHERE line_id = ?",
+            (row["id"],))
+    }
+    if caller_scope not in current:
+        raise PermissionError("You are not a participant on this shared budget line.")
+    supplied: dict = {}
+    for s in fields["shares"]:
+        uid = str((s or {}).get("userId") or "").strip()
+        if not uid or uid in supplied:
+            raise PermissionError("Only the household owner can change who is on a shared line.")
+        supplied[uid] = (s or {}).get("contributionCents")
+    if set(supplied) != set(current):
+        raise PermissionError(
+            "Only the household owner can add or remove people from a shared line.")
+    for uid, contrib in supplied.items():
+        if uid == caller_scope:
+            continue
+        if contrib != current[uid]:
+            raise PermissionError(
+                "You can only change your own contribution to a shared budget line.")
+
+
+def update_household_budget(conn: sqlite3.Connection, line_id, *, caller_scope: str,
+                            is_owner: bool, **fields) -> dict | None:
+    """Patch a shared line.
+
+    `caller_scope`/`is_owner` are REQUIRED keyword-only args, mirroring
+    `list_household_budget`'s "a call can never be unscoped" convention (R3): field-level
+    authorization (`_authorize_household_patch`, BUG-0014) is not something a caller can
+    reach past by omitting an argument, and adding them as required is what makes every
+    pre-existing call site a load-bearing compile-time question rather than a silent
+    default-to-permissive.
+
+    `shares` is ONLY re-validated (and rewritten) when the caller actually supplies a
+    new `shares` list, or supplies `type` (which requires `shares` in the SAME call --
+    see below). A `total_cents`-only (or name/bucket/status-only) PATCH NEVER touches
+    `household_budget_share` at all — total_cents and the roster of who's participating
+    are independent facts (§4/§9), so there is no reason to revalidate membership for a
+    change that has nothing to do with it. This matters concretely: `transfer_ownership`
+    and `redeem_link_code` can leave a share keyed to an id no longer held by any
+    current member (see those functions' docstrings) — a household member must still be
+    able to bump the rent's totalCents while that repair is pending, not get hard-locked
+    out of the line by a 422 for a participant they didn't even touch (review finding
+    2026-08-06). Re-validating a STALE participant is still required the moment the
+    caller actually edits `shares` or flips `type` — this only relaxes the totally
+    unrelated fields.
+
+    `type` MUST be accompanied by a `shares` list in the SAME call (raises otherwise) --
+    a type flip changes what "valid" means for every share (ratioBps vs
+    contributionCents), so silently re-interpreting the OLD shares under the NEW type
+    would either misfire on a shape mismatch or, worse, silently reinterpret stale
+    numbers as the wrong kind of money. Supplying fresh shares is mandatory, not
+    inferred."""
+    allowed = {"name", "bucket", "type", "total_cents", "shares", "status"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"unknown household_budget fields: {sorted(unknown)}")
+    row = conn.execute("SELECT * FROM household_budget WHERE id = ?", (line_id,)).fetchone()
+    if row is None:
+        return None
+    # BUG-0014: field-level authorization, BEFORE any mutation and before `shares`
+    # validation -- a non-owner must never reach the write path, and must not be able to
+    # distinguish "forbidden" from "malformed" by which error comes back first.
+    _authorize_household_patch(conn, row, fields, caller_scope, is_owner)
+    effective_type = fields.get("type", row["type"])
+    if effective_type not in ("split", "pooled"):
+        raise ValueError(f"type must be 'split' or 'pooled', got {effective_type!r}")
+
+    sets, vals = [], []
+    if "name" in fields:
+        nm = str(fields["name"] or "").strip()
+        if not nm:
+            raise ValueError("name must not be empty")
+        sets.append("name = ?"); vals.append(nm)
+    if "bucket" in fields:
+        bk = str(fields["bucket"] or "").strip()
+        if not bk:
+            raise ValueError("bucket must not be empty")
+        sets.append("bucket = ?"); vals.append(bk)
+    if "status" in fields:
+        if fields["status"] not in ("active", "archived"):
+            raise ValueError(f"status must be active/archived, got {fields['status']!r}")
+        sets.append("status = ?"); vals.append(fields["status"])
+
+    type_changed = "type" in fields
+    total_supplied = "total_cents" in fields
+    shares_supplied = "shares" in fields
+    if type_changed and not shares_supplied:
+        raise ValueError("changing type requires supplying new shares in the same request")
+
+    normalized: list[dict] | None = None
+    if total_supplied or type_changed:
+        if effective_type == "split":
+            total_cents = fields["total_cents"] if total_supplied else row["total_cents"]
+            if not isinstance(total_cents, int) or isinstance(total_cents, bool) or total_cents <= 0:
+                raise ValueError("split lines need an integer totalCents > 0")
+        else:
+            if total_supplied and fields["total_cents"] is not None:
+                raise ValueError("pooled lines derive totalCents from contributions -- do not pass totalCents")
+            total_cents = None
+        sets.append("type = ?"); vals.append(effective_type)
+        sets.append("total_cents = ?"); vals.append(total_cents)
+
+    if shares_supplied:
+        # Orthogonal to the total_cents/type branch above: a shares-only PATCH (no type
+        # or total_cents change) replaces the share rows without touching the parent's
+        # type/total_cents columns at all -- they don't need touching.
+        normalized = _validate_household_shares(conn, effective_type, fields["shares"])
+
+    if sets:
+        vals.append(line_id)
+        conn.execute(f"UPDATE household_budget SET {', '.join(sets)} WHERE id = ?", vals)
+    if normalized is not None:
+        conn.execute("DELETE FROM household_budget_share WHERE line_id = ?", (line_id,))
+        for s in normalized:
+            conn.execute(
+                "INSERT INTO household_budget_share (line_id, user_id, split_ratio_bps, contribution_cents) "
+                "VALUES (?,?,?,?)",
+                (line_id, s["userId"], s["splitRatioBps"], s["contributionCents"]))
+    conn.commit()
+    return get_household_budget(conn, line_id)
+
+
+def delete_household_budget(conn: sqlite3.Connection, line_id, *, hard=False, confirm=False) -> dict:
+    """Archive-by-default deletion (§10, mirrors `delete_fund`'s convention). `hard=False`
+    (default): sets status='archived' — always allowed, idempotent, a no-op (not an
+    error) if the line doesn't exist. `hard=True`: permanently DELETEs the line
+    (`household_budget_share` cascades via ON DELETE CASCADE) and requires
+    `confirm=True` — an explicit extra flag, not a reserve/history guard like
+    `delete_fund`'s `force` (Slice A has no actuals awareness yet to compute one
+    against); a bare `hard=true` without `confirm=true` is rejected rather than silently
+    treated as an archive, so a caller's explicit intent is never downgraded quietly.
+    Returns {"deleted": bool, "archived": bool, "hard": bool}."""
+    row = conn.execute("SELECT * FROM household_budget WHERE id = ?", (line_id,)).fetchone()
+    if row is None:
+        return {"deleted": False, "archived": False, "hard": hard}
+    if not hard:
+        conn.execute("UPDATE household_budget SET status = 'archived' WHERE id = ?", (line_id,))
+        conn.commit()
+        return {"deleted": False, "archived": True, "hard": False}
+    if not confirm:
+        raise ValueError(f"hard delete of household budget line {line_id} requires confirm=true")
+    conn.execute("DELETE FROM household_budget WHERE id = ?", (line_id,))
+    conn.commit()
+    return {"deleted": True, "archived": False, "hard": True}
+
+
 # ----- recurring expectations (seeded from the budget; reconciled, never auto-created) -----
 
 def _recurring_dict(r) -> dict:
@@ -3415,6 +4141,8 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
             order_by = "fund_id, txn_id"        # PK is txn_id alone, but this reads better -- no surrogate id column
         elif tbl == "user_profile":
             order_by = "user_id"                # PK is user_id, not id -- no surrogate id column
+        elif tbl == "household_budget_share":
+            order_by = "line_id, user_id"       # PK is (line_id, user_id) -- no surrogate id column
         else:
             order_by = "id"
         rows = conn.execute(f"SELECT * FROM {tbl} ORDER BY {order_by}").fetchall()

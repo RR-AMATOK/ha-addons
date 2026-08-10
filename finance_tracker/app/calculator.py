@@ -68,6 +68,19 @@ class Inputs:
     # Compensation (annual, cash)
     salary: float = 0.0
 
+    # Second-earner (spouse) wage (TODO-247, MFJ only). "salary" above remains "you";
+    # this is the spouse's own W-2 cash wage. Server-clamped to 0.0 for any non-MFJ
+    # filing_status (see server.py calculate_endpoint) — this dataclass has no opinion
+    # on filing status itself, so a directly-constructed single-filer Inputs with a
+    # nonzero spouse_salary is the caller's responsibility, not validated here.
+    #
+    # 401(k)/HSA/MDV/employer match are NOT split per earner (this field only adds a
+    # second wage, not a second set of deductions). The true rule — corrected in the
+    # 2026-08-05 fix round; a prior version of this comment wrongly said "primary-only"
+    # — is that they reduce HOUSEHOLD fed_wages/ca_wages but only the PRIMARY's own
+    # FICA base. See the "Wage bases" comment in calculate() for the full rationale.
+    spouse_salary: float = 0.0
+
     # Pre-tax payroll deductions
     trad_401k: float = 0.0         # Fed-exempt, NOT FICA-exempt, CA-exempt
     hsa: float = 0.0               # Fed-exempt, FICA-exempt, NOT CA-exempt
@@ -257,21 +270,173 @@ def calculate(i: Inputs) -> dict:
     # §125 medical/dental/vision premiums: reduce all three wage bases.
     mdv = i.medical + i.dental + i.vision
 
+    # Second-earner (spouse) wage, clamped ONCE here and reused everywhere it flows
+    # below (fed_wages, ca_wages, fica_wages_spouse, take_home, total_comp,
+    # cash.totalGross, and the "inputs" echo) — a negative spouse_salary must not cut
+    # federal/CA tax while leaving FICA untouched, and must not be echoed back as if
+    # it had any effect (adversarial-review finding D, TODO-247 fix round 2026-08-05;
+    # `i.spouse_salary` itself is never read again below this line).
+    spouse = max(0.0, i.spouse_salary)
+
     # Wage bases (annual).
     # Employer HSA is excluded from Federal Box 1 and FICA Box 3/5 under
     # §125 + §223; California does NOT conform to §223 → it is added to CA wages.
     # MDV premiums (§125) are exempt from Federal, FICA, AND CA (CA conforms to §125).
-    fed_wages = max(0.0, i.salary + taxable_additions - i.trad_401k - i.hsa - mdv)
-    fica_wages = max(0.0, i.salary + taxable_additions - i.hsa - mdv)
-    ca_wages = max(0.0, i.salary + taxable_additions - i.trad_401k + i.employer_hsa - mdv)
+    #
+    # Fed/CA wages are HOUSEHOLD aggregates (TODO-247): the salary box has always meant
+    # "combined household wages" for a joint return (see git history: this predates
+    # TODO-247 and the spouse-salary field entirely — pre-existing single-box MFJ
+    # behavior, not a new TODO-247 choice). NOTE: `#filingNote` in index.html is NOT
+    # authority for this — its copy changed under TODO-247 (it now reads "Social
+    # Security is computed per person from the wages you each enter above" and the
+    # salary label reads "Your gross salary", not "household") to match the NEW
+    # split-entry UI; it describes the UI's current instructions to the user, not the
+    # engine's wage-aggregation contract. Do not cite it as backing for this comment —
+    # a comment's cited authority must actually say what the comment claims (adversarial-
+    # review finding, 2026-08-05 fix round: a prior version of this comment did exactly
+    # that and drifted out of sync with `#filingNote`'s copy).
+    # Adding spouse here is what keeps take-home/fed/CA math unchanged for a user who
+    # splits one household total into two per-earner numbers.
+    #
+    # 401(k)/HSA/MDV/employer match are NOT split per earner — they stay single,
+    # household-shaped inputs — but they do NOT apply symmetrically to every wage base
+    # below. They reduce these HOUSEHOLD fed_wages/ca_wages figures (this line), exactly
+    # as before TODO-247. Of the four, only hsa/mdv also reduce the PRIMARY's own FICA
+    # base (fica_wages_primary, below) — never the spouse's; trad_401k is FICA-taxable
+    # (see the field annotation at line ~85) and employer match is excluded from
+    # taxable_additions entirely, so neither one touches fica_wages_primary. That
+    # hsa/mdv reduce only the primary's FICA base is genuinely correct, not
+    # an oversight: Social Security/Medicare withholding is a per-W-2 mechanism (each
+    # employer withholds against its own employee's own wages), so a deduction elected
+    # against the primary's paycheck cannot reduce a wage base the primary never earned.
+    # The two max(0.0, ...) clamps below therefore bind at DIFFERENT granularities on
+    # purpose: fed_wages/ca_wages floor the JOINT RETURN total at $0 (correct — a joint
+    # return's combined taxable wage can't go negative), while fica_wages_primary floors
+    # the PRIMARY's OWN W-2 at $0 independently of the spouse's W-2 (also correct — one
+    # employee's payroll deductions can't spill over and reduce a different employer's
+    # wage report for a different employee).
+    #
+    # VERIFIED REACHABILITY (adversarial-review finding C, TODO-247 fix round
+    # 2026-08-05): the reviewer's repro — primary $10,000 salary with $8,750 HSA +
+    # $6,000 MDV ($14,750 of deductions against $10,000 of primary pay) — cannot arise
+    # from real payroll IF hsa/mdv are both sourced from the primary's own paycheck
+    # (payroll cannot withhold pre-tax deductions in excess of that paycheck's own gross
+    # pay). The one case where it's still reachable is a non-payroll HSA (HSA
+    # contributions have no earned-income test, unlike a Roth IRA, so a low earner can
+    # legally fund the full $8,750 family limit from savings/gift/spousal funds outside
+    # payroll) — but a non-payroll HSA is an ABOVE-THE-LINE §223 deduction taken at the
+    # JOINT-RETURN level on Form 1040, not a per-W-2 Box-1 adjustment, so subtracting it
+    # from the HOUSEHOLD total (this formula) is exactly what real math does too.
+    # Working the two orderings out algebraically — a per-W-2 floor for the
+    # payroll-sourced trad_401k/mdv, THEN an above-the-line household floor for hsa —
+    # gives two DISTINCT claims that this comment used to merge into one (fix-round
+    # error, corrected 2026-08-05 THIRD fix round — see below):
+    #
+    # 1. LITERAL COLLAPSE (the two formulas produce the identical dollar figure):
+    # both formulas exclude bonus — bonus is stacked separately as a marginal
+    # increment at line ~513, below, and is not a term in either wage-base formula —
+    # so the collapse condition is bonus-FREE. They collapse whenever the
+    # payroll-sourced deductions (trad_401k + mdv), IN TOTAL, do not exceed the
+    # primary's OWN gross pay EXCLUDING bonus (salary + er_stock/gtli). A prior
+    # version of this comment stated the bound as INCLUDING bonus, which is false as a
+    # collapse claim: the reviewer found 36 counterexamples inside that bonus-inclusive
+    # bound where the two formulas actually diverge by up to $10,000 of wage base
+    # (e.g. salary=0, bonus=10000, spouse=100000, trad_401k=10000 → $90,000 vs
+    # $100,000).
+    #
+    # 2. NO UNDERSTATEMENT (the actual safety property this section relies on) is a
+    # separate, WEAKER claim than literal collapse, and it DOES hold under the
+    # bonus-INCLUSIVE bound — trad_401k + mdv <= salary + er_stock/gtli + bonus —
+    # because for any S, max(0, S) + bonus >= max(0, S + bonus): outside the
+    # (bonus-free) collapse region the household formula's max(0.0, ...) clamp only
+    # ever floors the combined base HIGHER than the per-W-2-then-household reference
+    # model would, never lower. Proven analytically (not just grid-tested) and
+    # confirmed over a 1,440-point MFJ grid: 0 understatements inside this bound, and
+    # the check has real power — 84 understatements outside it, down to -$1,920.
+    #
+    # So: no legally-reachable input understates federal tax through this asymmetry
+    # (also independently supported by the payroll-feasibility reachability argument
+    # above, which rules out the bound ever being exceeded by real payroll); it is
+    # PINNED, not "fixed", by
+    # test_second_earner_clamp_asymmetry_fed_wages_household_vs_fica_primary_only /
+    # ..._ca_wages_household_vs_sdi_primary_only in tests/test_calculator.py.
+    #
+    # A STRONGER, ASSUMPTION-FREE ARGUMENT (not merely "safe", adversarial-review
+    # finding B, 2026-08-05 fix round): even setting the reachability analysis above
+    # aside, the household clamp is the more DEFENSIBLE choice on its own terms, not
+    # just the conservative one. Consider a primary with $0 or near-$0 salary whose
+    # household's 401(k)/HSA/MDV deductions actually belong to the earning spouse (the
+    # natural shape of a single-earner-spouse household using this UI, which has no
+    # per-spouse deduction fields — see FICA finding D below for the field this same
+    # shape stresses on the FICA side). A per-W-2 floor model would clamp those
+    # deductions against the near-$0 primary wage and lose most of them, misattributing
+    # every payroll deduction in the household to whichever spouse happens to sit in
+    # the "primary" field — an artifact of data entry, not of who actually earned the
+    # deduction. The household clamp sidesteps that misattribution entirely: it floors
+    # the JOINT RETURN total, which is correct regardless of which spouse's paycheck
+    # the deduction actually came from. So the household clamp isn't just tolerable
+    # because it's unreachable in the failure direction — it is the right model even
+    # when reachable, because it doesn't assume the deduction belongs to whichever
+    # earner is in the "primary" box.
+    fed_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k - i.hsa - mdv)
+    ca_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k + i.employer_hsa - mdv)
+
+    # FICA wage bases (TODO-247): Social Security is capped PER PERSON, so it (and the
+    # other per-person payroll items below — CA SDI, WA PFML, WA Cares) must be computed
+    # on each earner's own wage base, not a pooled household total, or a couple who
+    # split $300k into two $150k earners is wrongly capped as if it were one $300k
+    # earner. `fica_wages_primary` is BYTE-IDENTICAL to the pre-TODO-247 `fica_wages`
+    # formula (same operations, same order) so an empty/zero spouse_salary reproduces
+    # today's exact float bit pattern (IEEE `x + 0.0 == x`). `fica_wages` remains the
+    # HOUSEHOLD AGGREGATE — its pre-existing meaning is preserved and it still feeds
+    # Medicare/Additional-Medicare below, which are genuinely combined-base taxes.
+    #
+    # KNOWN, UNPINNED-UNTIL-NOW ASYMMETRY (adversarial-review finding D, TODO-247 fix
+    # round 2026-08-05 — a DIFFERENT "finding D" than the negative-spouse-salary clamp
+    # referenced two lines below; that one is from the FIRST fix round, this one is
+    # from the second): `fica_wages_primary` absorbs hsa/mdv only — NOT trad_401k, which
+    # is FICA-taxable (see the field annotation at line ~85), so it has no term below;
+    # the spouse's own FICA base (`fica_wages_spouse`, below) absorbs NONE of hsa/mdv
+    # either — there is no per-spouse deduction field to attribute them to instead
+    # (locked scope: spouse_salary is wages-only). This is correct when the deductions
+    # genuinely are the primary's own (FICA is a per-W-2 mechanism; a deduction from
+    # your paycheck cannot reduce your spouse's Box 3/5). It produces a REAL, DOLLAR-MEASURABLE
+    # divergence when the primary has $0 (or near-$0) salary and the household's
+    # medical/dental/vision premiums are still entered in the primary's mdv fields —
+    # the natural shape for a single-earner-spouse household, since there is no spouse
+    # mdv field to put them in instead. Pinned, not fixed: same $100k household wage,
+    # same $6,000 mdv, same fed_tax ($6,920) either way the $100k is entered —
+    # salary=100000 (spouse=0): ssTax $5,828.00, medTax $1,363.00, takeHome $79,889.00;
+    # salary=0/spouse=100000: ssTax $6,200.00, medTax $1,450.00, takeHome $79,430.00 —
+    # a $459.00/yr FICA-only divergence, entirely a function of which box the SAME
+    # dollar of wage is typed into. See
+    # test_second_earner_fica_attribution_divergence_primary_vs_spouse_box_pin below.
+    # NOT fixed in this round — reported for a modeling decision, not silently changed.
+    # This comment's job is only to make the behavior a documented, tested decision
+    # instead of a silent accident.
+    fica_wages_primary = max(0.0, i.salary + taxable_additions - i.hsa - mdv)
+    fica_wages_spouse = spouse   # already clamped above (finding D, FIRST fix round) — no need to re-clamp
+    fica_wages = fica_wages_primary + fica_wages_spouse
 
     # Federal income tax
     fed_taxable = max(0.0, fed_wages - i.fed_std_deduction)
     fed_tax = apply_brackets(fed_taxable, i.fed_brackets)
 
     # FICA
-    ss_tax = min(fica_wages, i.ss_wage_base) * i.ss_rate
+    # Social Security: capped PER PERSON (TODO-247) — sum the capped tax on each
+    # earner's own wages rather than capping the household total once.
+    ss_tax = (
+        min(fica_wages_primary, i.ss_wage_base) * i.ss_rate
+        + min(fica_wages_spouse, i.ss_wage_base) * i.ss_rate
+    )
+    # Regular Medicare is uncapped and a flat rate, so per-person vs. combined-base are
+    # arithmetically identical — computed on the combined base (unchanged formula/shape).
     med_tax = fica_wages * i.medicare_rate
+    # Additional Medicare (0.9%) is a per-RETURN liability threshold ($250k MFJ / $200k
+    # single) — a genuinely COMBINED-base tax, not per-person. Do NOT split this; doing
+    # so would newly UNDER-tax a couple whose combined wages clear the threshold but
+    # whose individual wages don't (see TODO-247 cross-check: $150k/$150k must still
+    # owe $450, not $0).
     addl_med_tax = max(0.0, fica_wages - i.addl_medicare_threshold) * i.addl_medicare_rate
 
     # State
@@ -285,16 +450,26 @@ def calculate(i: Inputs) -> dict:
         state_tax = apply_brackets(state_taxable, i.ca_brackets)
         if state_taxable > i.ca_mhst_threshold:
             state_tax += (state_taxable - i.ca_mhst_threshold) * i.ca_mhst_rate
-        sdi_tax = fica_wages * i.ca_sdi_rate
+        # CA SDI is an uncapped flat rate, so per-person vs. combined-base are
+        # arithmetically identical (see TODO-247 cross-check). Structured as a
+        # sum-of-function-per-earner anyway, for consistency with SS/WA PFML (which DO
+        # move) and so a per-person cap added to SDI in the future doesn't silently
+        # regress to the household-total shape.
+        sdi_tax = fica_wages_primary * i.ca_sdi_rate + fica_wages_spouse * i.ca_sdi_rate
     elif i.state == "WA":
         # No wage income tax. PFML rides the FICA wage concept capped at the SS wage
-        # base (the caps track each other by law); WA Cares is uncapped.
+        # base PER PERSON (the caps track each other by law, TODO-247); WA Cares is
+        # uncapped per person (same "identical either way, split for consistency"
+        # reasoning as CA SDI above).
         # DOCUMENTED APPROXIMATION: fica_wages excludes §125 cafeteria amounts (HSA/MDV),
         # while real PFML/Cares wages generally do NOT exclude them — an HSA contributor
         # is modeled a few dollars light (~1.39% of the cafeteria amount). Accepted for
         # consistency with the CA SDI base; revisit if payroll-exact figures ever matter.
-        wa_pfml_tax = min(fica_wages, i.ss_wage_base) * i.wa_pfml_total_rate * i.wa_pfml_employee_share
-        wa_cares_tax = fica_wages * i.wa_cares_rate
+        wa_pfml_tax = (
+            min(fica_wages_primary, i.ss_wage_base) * i.wa_pfml_total_rate * i.wa_pfml_employee_share
+            + min(fica_wages_spouse, i.ss_wage_base) * i.wa_pfml_total_rate * i.wa_pfml_employee_share
+        )
+        wa_cares_tax = fica_wages_primary * i.wa_cares_rate + fica_wages_spouse * i.wa_cares_rate
 
     total_tax = fed_tax + ss_tax + med_tax + addl_med_tax + state_tax + sdi_tax + wa_pfml_tax + wa_cares_tax
 
@@ -303,19 +478,40 @@ def calculate(i: Inputs) -> dict:
     # after_tax_401k is a post-tax payroll deduction (no tax benefit, but reduces take-home).
     cash_pre_tax = i.trad_401k + i.hsa + mdv
     cash_post_tax = i.roth_401k + i.ee_stock + i.roth_ira + i.after_tax_401k
-    take_home = i.salary - cash_pre_tax - cash_post_tax - total_tax
+    # take_home is a HOUSEHOLD aggregate (TODO-247): the spouse's cash wage (clamped
+    # `spouse`, above) flows straight through (no per-earner deduction to net against
+    # it, by locked scope).
+    #
+    # NOT SPLIT-INVARIANT, BY DESIGN -- distinct from fed_wages/ca_wages/total_comp/
+    # totalGross above, which ARE pure sums of salary + spouse and so are unchanged
+    # whether a household's income is entered as one earner or split across two.
+    # take_home is NOT: it nets out total_tax, and total_tax embeds ss_tax/
+    # wa_pfml_tax, which are capped PER PERSON (see fica_wages_primary/_spouse above).
+    # A household that splits $300k into two $150k earners pays MORE combined SS than
+    # one $300k earner (two uncapped $150k bases vs. one base partly over the cap), so
+    # its take_home is correctly LOWER. That is the entire point of TODO-247, not a
+    # bug -- do not "fix" this back into a false take-home-is-split-invariant
+    # assumption; see test_second_earner_take_home_is_not_split_invariant_by_design.
+    take_home = i.salary + spouse - cash_pre_tax - cash_post_tax - total_tax
 
     # Employer HSA is non-cash compensation; the bonus is also compensation, so the
     # total-comp / gross / earnings figures AGGREGATE the bonus (take-home and the
     # regular paycheck do NOT). Effective rate (below) includes the bonus tax too.
-    total_comp = i.salary + taxable_additions + i.employer_hsa + i.bonus
+    # total_comp is a HOUSEHOLD aggregate (TODO-247): +spouse.
+    total_comp = i.salary + spouse + taxable_additions + i.employer_hsa + i.bonus
     marginal = find_marginal(fed_taxable, i.fed_brackets)
     # All-in marginal on the next earned wage dollar: fed bracket + FICA (+ CA when applicable).
     # This is the true wedge on a dollar of pay; the fed-only figure understates it.
     marginal_all_in = marginal + i.medicare_rate
     if fica_wages >= i.addl_medicare_threshold:
         marginal_all_in += i.addl_medicare_rate
-    if fica_wages < i.ss_wage_base:
+    # SS-headroom test uses the PRIMARY's own wage base (TODO-247, locked scope): "the
+    # next earned wage dollar" here means the PRIMARY earner's next dollar (this figure
+    # has no per-spouse variant), so its SS-cap check must mirror bonus_ss below and use
+    # fica_wages_primary, not the household aggregate fica_wages. Forced by the
+    # empty-spouse byte-identity requirement (fica_wages_primary == fica_wages when
+    # spouse_salary is 0, so single-filer/no-spouse output is unchanged).
+    if fica_wages_primary < i.ss_wage_base:
         marginal_all_in += i.ss_rate
     if i.state == "CA":
         marginal_all_in += find_marginal(state_taxable, i.ca_brackets) + i.ca_sdi_rate
@@ -323,7 +519,12 @@ def calculate(i: Inputs) -> dict:
             marginal_all_in += i.ca_mhst_rate
     elif i.state == "WA":
         marginal_all_in += i.wa_cares_rate
-        if fica_wages < i.ss_wage_base:
+        # JUDGMENT CALL (TODO-247 — not explicitly enumerated in the locked spec, flagged
+        # per its own instruction to say so rather than decide silently): WA PFML is
+        # capped at the SS wage base PER PERSON, mechanically identical to the SS
+        # headroom test just above. Applying the same "primary earner's own headroom"
+        # reasoning here for consistency; byte-identical for empty spouse_salary either way.
+        if fica_wages_primary < i.ss_wage_base:
             marginal_all_in += i.wa_pfml_total_rate * i.wa_pfml_employee_share
 
     hsa_legal = i.hsa_limit_family if i.hsa_coverage == "family" else i.hsa_limit_self
@@ -333,11 +534,19 @@ def calculate(i: Inputs) -> dict:
     # The bonus is NOT reduced by any pre-tax deduction and does NOT change any
     # wage base, take-home, total_comp, or the regular tax section above.
     bonus_fed = apply_brackets(fed_taxable + i.bonus, i.fed_brackets) - fed_tax
+    # Bonus attributed to the PRIMARY earner only (TODO-247 locked scope: bonus is a
+    # primary/household-level field, not split). It must ride the PRIMARY's own SS
+    # headroom (fica_wages_primary), not the household-aggregate fica_wages — otherwise
+    # a bonus would phantom-share SS cap room with the spouse's separate wages. Forced
+    # by the empty-spouse byte-identity requirement (fica_wages_primary == fica_wages
+    # when spouse_salary is 0).
     bonus_ss = (
-        (min(fica_wages + i.bonus, i.ss_wage_base) - min(fica_wages, i.ss_wage_base))
+        (min(fica_wages_primary + i.bonus, i.ss_wage_base) - min(fica_wages_primary, i.ss_wage_base))
         * i.ss_rate
     )
     bonus_med = i.bonus * i.medicare_rate
+    # Additional Medicare stays on the COMBINED household base (unchanged) — same
+    # rationale as addl_med_tax above: it's a per-return liability threshold, not per-person.
     bonus_addl = (
         max(0.0, fica_wages + i.bonus - i.addl_medicare_threshold)
         - max(0.0, fica_wages - i.addl_medicare_threshold)
@@ -357,8 +566,13 @@ def calculate(i: Inputs) -> dict:
         )
         bonus_sdi = i.bonus * i.ca_sdi_rate
     elif i.state == "WA":
+        # JUDGMENT CALL (TODO-247, flagged per the spec's own instruction rather than
+        # decided silently): same reasoning as bonus_ss above — WA PFML is capped at the
+        # SS wage base per person, mechanically identical to SS, so the (primary-only)
+        # bonus rides the PRIMARY's PFML headroom too. Byte-identical for empty
+        # spouse_salary either way.
         bonus_wa_pfml = (
-            min(fica_wages + i.bonus, i.ss_wage_base) - min(fica_wages, i.ss_wage_base)
+            min(fica_wages_primary + i.bonus, i.ss_wage_base) - min(fica_wages_primary, i.ss_wage_base)
         ) * i.wa_pfml_total_rate * i.wa_pfml_employee_share
         bonus_wa_cares = i.bonus * i.wa_cares_rate
     bonus_total = bonus_fed + bonus_ss + bonus_med + bonus_addl + bonus_state + bonus_sdi + bonus_wa_pfml + bonus_wa_cares
@@ -498,6 +712,11 @@ def calculate(i: Inputs) -> dict:
     return {
         "inputs": {
             "salary": i.salary,
+            # Echoes the CLAMPED value (finding D), not the raw i.spouse_salary — a
+            # negative spouse_salary is fully inert (see `spouse = max(0.0, ...)`
+            # above), so echoing it back unclamped would misreport it as having had
+            # an effect it never had.
+            "spouseSalary": spouse,
             "trad401k": i.trad_401k,
             "roth401k": i.roth_401k,
             "hsa": i.hsa,
@@ -518,7 +737,9 @@ def calculate(i: Inputs) -> dict:
         "wages": {
             "fedWages": fed_wages,
             "fedTaxable": fed_taxable,
-            "ficaWages": fica_wages,
+            "ficaWages": fica_wages,              # HOUSEHOLD aggregate — unchanged meaning
+            "ficaWagesPrimary": fica_wages_primary,  # TODO-247: primary earner's own base
+            "ficaWagesSpouse": fica_wages_spouse,    # TODO-247: spouse's own base
             "caWages": ca_wages,
             "stateTaxable": state_taxable,
         },
@@ -534,6 +755,13 @@ def calculate(i: Inputs) -> dict:
             "totalTax": total_tax,
         },
         "cash": {
+            # PRIMARY-ONLY (TODO-247): unlike "wages"/"cash".totalGross/totalComp/
+            # takeHome above, which are HOUSEHOLD aggregates (+ spouse), this field
+            # never gained spouse_salary — it is, and always was, "your own" cash
+            # salary. Any future Python consumer of this dict (reports, add-on,
+            # tracking) must read cash.totalGross / the "inputs".spouseSalary field
+            # for household gross, not this one. (index.html carries the equivalent
+            # JS-side note; see householdCashSalary() there.)
             "salary": i.salary,
             "trad401k": i.trad_401k,
             "roth401k": i.roth_401k,
@@ -553,7 +781,7 @@ def calculate(i: Inputs) -> dict:
             "takeHome": take_home,
             "totalComp": total_comp,
             # Summary lines for the paycheck view:
-            "totalGross": i.salary + taxable_additions + i.bonus,   # gross taxable wages incl. bonus
+            "totalGross": i.salary + spouse + taxable_additions + i.bonus,   # gross taxable wages incl. bonus; HOUSEHOLD aggregate (TODO-247)
             "totalEarnings": total_comp,                            # full economic value incl. employer HSA + bonus
             "totalDeductions": cash_pre_tax + cash_post_tax,   # all pre-tax + post-tax payroll deductions
         },
