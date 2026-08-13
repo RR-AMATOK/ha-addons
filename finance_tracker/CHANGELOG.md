@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.1
+
+- **Deleting an account works again.** The ✕ next to an account did nothing at all —
+  not even the confirmation prompt. When Accounts moved onto the Setup tab in 0.6.0
+  the button came with it but its wiring did not, so the click reached nothing. Every
+  other control on that row (edit, save, cancel, type, "Fix") kept working, which is
+  why it looked like only delete was broken.
+- **Updating an investment balance works again.** Typing a figure into an account's
+  "new balance" box and pressing **update** silently did nothing — no saved balance,
+  no error, no message. The button and the code meant to handle it were referring to
+  each other by two different names. Balances again save a dated snapshot, so the
+  net-worth trajectory and FIRE progress stay honest.
+
+- **Balances saved in the evening are dated correctly.** A balance updated after about 7pm
+  was stored with tomorrow's date and then displayed as "dated ahead", because the app
+  wrote the date in UTC and read it back in your own timezone. The same slip affected a
+  venture's start date and the 12-month CSV range. Every date the app calls "today" now
+  means today where you are.
+
+Both were silent failures: nothing appeared to go wrong, the thing you asked for
+simply did not happen. Both now have tests that drive the real controls in a real
+browser and check the server afterwards, so neither can come back unnoticed.
+
 ## 0.6.0
 
 - **Every tab has a contents strip now.** It sits under the tab bar, tells you what

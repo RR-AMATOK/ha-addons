@@ -3738,7 +3738,7 @@ function foldCategoriesByCountsAs(categories, rawTotals) {
 }
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
-window.__clientMath = { rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, householdCashSalary, sxHouseholdWages, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
+window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, householdCashSalary, sxHouseholdWages, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
@@ -6161,7 +6161,7 @@ async function doBackup(kind) {
   const a = document.createElement('a');
   a.href = url;
   const suffix = kind === 'actuals-only' ? '-actuals' : (kind === 'client-only' ? '-settings' : '');
-  a.download = `finance-backup-${new Date().toISOString().slice(0, 10)}${suffix}.json`;
+  a.download = `finance-backup-${isoLocalDate()}${suffix}.json`;
   a.click();
   URL.revokeObjectURL(url);
   if (degraded) showToast(failDetail || 'Actuals server unavailable — backed up plan & settings only');
@@ -6169,6 +6169,17 @@ async function doBackup(kind) {
 
 // Pure: resolve a CSV date-range preset to concrete from/to bounds, given "today" (ISO
 // YYYY-MM-DD) explicitly rather than reading Date.now() internally — deterministic and
+// One calendar "today", in the user's OWN timezone. `new Date().toISOString().slice(0,10)` is
+// the UTC date, so from UTC midnight until local midnight -- the whole evening, anywhere west
+// of Greenwich -- it returns TOMORROW. That is how a balance saved at 8pm got stamped a day
+// ahead and then rendered as "dated ahead" by ivBalanceAge, which reads the same string back as
+// LOCAL midnight. Every date a user would call "today" goes through here.
+function isoLocalDate(d) {
+  const x = d || new Date();
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-'
+       + String(x.getDate()).padStart(2, '0');
+}
+
 // directly unit-testable via window.__clientMath. 'all' returns both blank; the endpoint
 // treats missing bounds as unbounded.
 function resolveCsvRange(range, todayIso, customFrom, customTo) {
@@ -6176,7 +6187,7 @@ function resolveCsvRange(range, todayIso, customFrom, customTo) {
   if (range === '12mo') {
     const d = new Date(todayIso + 'T00:00:00');
     d.setFullYear(d.getFullYear() - 1); d.setDate(d.getDate() + 1);
-    return { from: d.toISOString().slice(0, 10), to: todayIso };
+    return { from: isoLocalDate(d), to: todayIso };
   }
   if (range === 'custom') return { from: customFrom || '', to: customTo || '' };
   return { from: '', to: '' };   // 'all'
@@ -7403,7 +7414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       VN.ventures = vr.ventures || []; VN.tags = tr.tags || []; VN.accounts = ar.accounts || [];
     } catch (e) { $('vn_list').innerHTML = '<span class="muted">Server offline — ventures unavailable.</span>'; return; }
     vnFillLink(); vnRender();
-    if (!$('vn_date').value) $('vn_date').value = new Date().toISOString().slice(0, 10);
+    if (!$('vn_date').value) $('vn_date').value = isoLocalDate();
     if (!$('vn_inv_rows').children.length) vnAddItemRow();
   }
   function vnFillLink() {
@@ -7562,7 +7573,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const items = vnItems();
     if (!items.length) { showToast('Add at least one investment item (label + amount)'); return; }
     const link = $('vn_link').value;
-    const body = { name: name, items: items, startedOn: $('vn_date').value || new Date().toISOString().slice(0, 10) };
+    const body = { name: name, items: items, startedOn: $('vn_date').value || isoLocalDate() };
     if (link === '__newtag__') {
       const t = ($('vn_newtag').value || '').trim() || vnSlug(name);
       if (!t) { showToast('Name the tag'); return; }
@@ -8548,7 +8559,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         h += '<tr class="iv-row"><td class="iv-nm" title="' + esc(a.name) + '">' + esc(a.name) + '<small>' + esc(a.type) + '</small></td>'
           + '<td class="num mono iv-bal">' + (bal != null ? fmt$(bal) : '<span class="muted">no balance yet</span>') + '</td>'
           + '<td class="iv-when">' + ageHtml + '</td>'
-          + '<td class="num iv-upd"><input type="number" min="0" step="100" data-ivbal="' + a.id + '" placeholder="new balance" style="max-width:110px"/> <button type="button" class="ac-tool" data-ivsave="' + a.id + '">update</button></td>'
+          + '<td class="num iv-upd"><input type="number" min="0" step="100" data-ivbal="' + a.id + '" placeholder="new balance" style="max-width:110px"/> <button type="button" class="ac-tool" data-ivupd="' + a.id + '">update</button></td>'
           + '<td class="iv-grp"><select data-ivgrp="' + a.id + '" title="move to another group">' + ivGroupNames().map(x => '<option value="' + esc(x) + '"' + (x === a.investGroup ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
       });
       h += '</table>';
@@ -8686,7 +8697,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const bal = rn($('iv_acct_bal').value);
     try {
       const acct = await post('/api/tracking/accounts', { name: name, type: $('iv_acct_type').value, investGroup: group || null });
-      if (bal > 0) await post('/api/tracking/snapshots', { accountId: acct.id, asOf: new Date().toISOString().slice(0, 10), balance: bal });
+      if (bal > 0) await post('/api/tracking/snapshots', { accountId: acct.id, asOf: isoLocalDate(), balance: bal });
       $('iv_acct_name').value = ''; $('iv_acct_bal').value = ''; $('iv_acct_group_new').value = '';
       showToast('Added “' + name + '”' + (group ? ' to ' + group : ''));
       ivAcctLoad();
@@ -8704,7 +8715,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const v = rn(inp && inp.value);
         if (!(v >= 0) || inp.value === '') { showToast('Enter the new balance first'); return; }
         try {
-          await post('/api/tracking/snapshots', { accountId: id, asOf: new Date().toISOString().slice(0, 10), balance: v });
+          await post('/api/tracking/snapshots', { accountId: id, asOf: isoLocalDate(), balance: v });
           showToast('Balance updated — snapshot saved for today');
           ivAcctLoad();
           if (typeof renderNetWorth === 'function') { try { renderNetWorth(); } catch (e2) {} }   // trajectory reflects it
@@ -13677,6 +13688,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         const sv = e.target.closest('[data-acct-save]'); if (sv) { e.preventDefault(); await acSaveAccountEdit(sv.dataset.acctSave); return; }
         const ea = e.target.closest('[data-edit-acct]'); if (ea) { e.preventDefault(); acEnterAcctEdit(ea.dataset.editAcct); return; }
         const ca = e.target.closest('[data-acct-cancel]'); if (ca) { e.preventDefault(); acCancelAcctEdit(ca.dataset.acctCancel); return; }
+        // Delete lives HERE, on #ac_accts, beside the row's other actions -- not on a tab
+        // panel. It used to be bound to #tab-actuals, which was correct until the accounts
+        // panel moved to Setup in the 0.6.0 nav round: the markup moved, the hook did not,
+        // and the ✕ silently did nothing (BUG-0023). Binding to the container that actually
+        // renders the row makes a future move harmless, which is the whole lesson of that
+        // round -- moving a node moves its element listeners but not a hook keyed elsewhere.
+        const da = e.target.closest('[data-del-acct]');
+        if (da) {
+          e.preventDefault();
+          if (acWriteGuard()) return;
+          const acctId = da.dataset.delAcct;
+          const acct = (ACT.accounts || []).find(x => String(x.id) === String(acctId));
+          const name = acct ? acct.name : 'this account';
+          if (!window.confirm('Delete "' + name + '"? Its transactions and snapshots are deleted too. This cannot be undone.')) return;
+          try {
+            const res = await fetch('/api/tracking/accounts/' + acctId, { method: 'DELETE' });
+            if (!res.ok) throw new Error(res.status);
+            showToast('Account deleted');
+          } catch (e2) { showToast('Could not delete the account: ' + (e2.message || '')); }
+          acLoadAccounts().then(acRefresh);
+          return;
+        }
         const fl = e.target.closest('[data-fix-liab]'); if (fl) { e.preventDefault(); await acFixLiability(fl.dataset.fixLiab, fl.dataset.fixTarget === 'true'); return; }
         const sb = e.target.closest('[data-set-balance]'); if (sb) { e.preventDefault(); acScrollToSnapshotForm(sb.dataset.setBalance); return; }
       });
@@ -15009,27 +15042,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Card payment — cancel inline edit (re-render cleans up)
       const xp = ev.target.closest('[data-cancel-payment]');
       if (xp) { ev.preventDefault(); acRefresh(); return; }
-      // Adversarial-review finding #4: DELETE /accounts/{id} cascades its transactions AND
-      // snapshots (tracking_store.py's ON DELETE CASCADE) -- the sole destructive action in the
-      // app with no confirm() (ventures/goals/funds/categories all confirm their deletes) and,
-      // until now, the easiest to fat-finger since it sits 4px from ✎. Name the account and the
-      // consequence; surface a failed DELETE instead of silently swallowing it.
-      const da = ev.target.closest('[data-del-acct]');
-      if (da) {
-        ev.preventDefault();
-        if (acWriteGuard()) return;
-        const acctId = da.dataset.delAcct;
-        const acct = ACT.accounts.find(x => String(x.id) === String(acctId));
-        const name = acct ? acct.name : 'this account';
-        if (!window.confirm('Delete "' + name + '"? Its transactions and snapshots are deleted too. This cannot be undone.')) return;
-        try {
-          const res = await fetch('/api/tracking/accounts/' + acctId, { method: 'DELETE' });
-          if (!res.ok) throw new Error(res.status);
-          showToast('Account deleted');
-        } catch (e) { showToast('Could not delete the account: ' + (e.message || '')); }
-        acLoadAccounts().then(acRefresh);
-        return;
-      }
+      // Account delete (with its confirm() -- adversarial-review finding #4: DELETE
+      // /accounts/{id} cascades transactions AND snapshots) moved to the #ac_accts listener
+      // beside the row's other actions when it was found dead here: the accounts panel now
+      // lives in #tab-setup, so a click on it never reaches a #tab-actuals listener. See
+      // BUG-0023 and the note at that handler.
       // Card payment trigger: toggle form visibility + focus amount
       const cp = ev.target.closest('[data-card-pay]');
       if (cp) { ev.preventDefault(); const aid = cp.dataset.cardPay; const det = document.getElementById('ac_card_det_' + aid); const tog = document.querySelector('[data-card-toggle="' + aid + '"]'); if (det && det.style.display === 'none') { det.style.display = ''; if (tog) tog.setAttribute('aria-expanded', 'true'); } const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; const open = !form.hidden; form.hidden = open; cp.setAttribute('aria-expanded', String(!open)); if (!open) { const ai = form.querySelector('[data-pay="amt"]'); if (ai) ai.focus(); acUpdateEarmarkChip(form); } return; }

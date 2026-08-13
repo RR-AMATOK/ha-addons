@@ -19,7 +19,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager, closing
-from datetime import date as _date, datetime as _datetime
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -2283,6 +2283,293 @@ class RecurringModel(BaseModel):
     expected: float = 0
     active: bool = True
     model_config = {"populate_by_name": True}
+
+
+# ===== scheduled money =====================================================================
+#
+# The old `/api/tracking/recurring` routes below are DELIBERATELY still here. The shipped
+# client still calls them, and this layer lands before the client work; removing them now
+# would break the running app between two commits. They go when index.html stops calling
+# them, not before.
+#
+# Route order matters here: `/schedules/due` and `/schedules/catch-up` are declared BEFORE
+# `/schedules/{schedule_id}`. FastAPI matches in declaration order, and an int path param
+# does not "fall through" on a non-numeric segment -- it 422s -- so a literal path declared
+# after a parameterised one is simply unreachable.
+
+_UNSET_Q = object()
+
+
+class ScheduleModel(BaseModel):
+    """A whole schedule. Used for create; PATCH reuses it with everything optional."""
+    name: str
+    direction: Literal["in", "out", "transfer"]
+    amount: float = Field(0, ge=0)                                    # dollars
+    amount_is_estimate: bool = Field(False, alias="amountIsEstimate")
+    account_id: int | None = Field(None, alias="accountId")
+    to_account_id: int | None = Field(None, alias="toAccountId")
+    bucket: str | None = None
+    category: str | None = None
+    description: str | None = None
+    freq: Literal["daily", "weekly", "semimonthly", "monthly", "yearly"]
+    interval: int = Field(1, ge=1)
+    weekdays: str | None = None                                       # 'FR' or 'MO,WE'
+    day1: int | None = Field(None, ge=1, le=32)                       # 32 = last day
+    day2: int | None = Field(None, ge=1, le=32)
+    month_of_year: int | None = Field(None, ge=1, le=12, alias="monthOfYear")   # 1-BASED
+    anchor_on: str = Field(..., alias="anchorOn")
+    end_mode: Literal["never", "on", "after"] = Field("never", alias="endMode")
+    ends_on: str | None = Field(None, alias="endsOn")
+    end_count: int | None = Field(None, ge=1, alias="endCount")
+    weekend_shift: Literal["none", "before", "after"] = Field("none", alias="weekendShift")
+    auto_post: bool = Field(False, alias="autoPost")
+    active: bool = True
+    model_config = {"populate_by_name": True}
+
+
+class SchedulePatchModel(BaseModel):
+    """Every field optional. An omitted field keeps its stored value; sending an explicit
+    null CLEARS a nullable one -- see tracking_store.update_schedule."""
+    name: str | None = None
+    direction: Literal["in", "out", "transfer"] | None = None
+    amount: float | None = Field(None, ge=0)
+    amount_is_estimate: bool | None = Field(None, alias="amountIsEstimate")
+    account_id: int | None = Field(None, alias="accountId")
+    to_account_id: int | None = Field(None, alias="toAccountId")
+    bucket: str | None = None
+    category: str | None = None
+    description: str | None = None
+    freq: Literal["daily", "weekly", "semimonthly", "monthly", "yearly"] | None = None
+    interval: int | None = Field(None, ge=1)
+    weekdays: str | None = None
+    day1: int | None = Field(None, ge=1, le=32)
+    day2: int | None = Field(None, ge=1, le=32)
+    month_of_year: int | None = Field(None, ge=1, le=12, alias="monthOfYear")
+    anchor_on: str | None = Field(None, alias="anchorOn")
+    end_mode: Literal["never", "on", "after"] | None = Field(None, alias="endMode")
+    ends_on: str | None = Field(None, alias="endsOn")
+    end_count: int | None = Field(None, ge=1, alias="endCount")
+    weekend_shift: Literal["none", "before", "after"] | None = Field(None, alias="weekendShift")
+    auto_post: bool | None = Field(None, alias="autoPost")
+    active: bool | None = None
+    model_config = {"populate_by_name": True}
+
+
+class ConfirmOccurrenceModel(BaseModel):
+    on: str                                                   # the occurrence date
+    amount: float | None = Field(None, ge=0)                  # None = the schedule's own amount
+    model_config = {"populate_by_name": True}
+
+
+class OccurrenceExceptionModel(BaseModel):
+    action: Literal["skip", "override"]
+    amount: float | None = Field(None, ge=0)
+    moved_to: str | None = Field(None, alias="movedTo")
+    description: str | None = None
+    model_config = {"populate_by_name": True}
+
+
+class SplitScheduleModel(BaseModel):
+    from_date: str = Field(..., alias="fromDate")
+    amount: float | None = Field(None, ge=0)
+    name: str | None = None
+    account_id: int | None = Field(None, alias="accountId")
+    auto_post: bool | None = Field(None, alias="autoPost")
+    model_config = {"populate_by_name": True}
+
+
+def _schedule_fields(m, *, partial: bool) -> dict:
+    """Map an API model onto the store's field names. For a patch, anything the caller did
+    not send is dropped entirely so the store's merge can keep the stored value."""
+    raw = m.model_dump(exclude_unset=True) if partial else m.model_dump()
+    out: dict = {}
+    mapping = {
+        "name": "name", "direction": "direction", "amount_is_estimate": "amount_is_estimate",
+        "account_id": "account_id", "to_account_id": "to_account_id", "bucket": "bucket",
+        "category": "category", "description": "description", "freq": "freq",
+        "interval": "interval_n", "weekdays": "weekdays", "day1": "day_1", "day2": "day_2",
+        "month_of_year": "month_of_year", "anchor_on": "anchor_on", "end_mode": "end_mode",
+        "ends_on": "ends_on", "end_count": "end_count", "weekend_shift": "weekend_shift",
+        "auto_post": "auto_post", "active": "active",
+    }
+    for src, dst in mapping.items():
+        if src in raw:
+            out[dst] = raw[src]
+    if "amount" in raw and raw["amount"] is not None:
+        out["amount_cents"] = _cents(raw["amount"])
+    return out
+
+
+def _today_or(value: str | None) -> str:
+    """`today` is an accepted query param so the whole surface stays testable without
+    freezing the clock; it defaults to the server's own date."""
+    if not value:
+        return _date.today().isoformat()
+    try:
+        _datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"today must be YYYY-MM-DD, got {value!r}")
+    return value
+
+
+@app.get("/api/tracking/schedules/due")
+def schedules_due_endpoint(today: str | None = None, request: Request = None) -> dict:
+    """READ-ONLY. What is waiting for a decision. Computed, never stored."""
+    scope = resolve_user(request)["scopeId"]
+    day = _today_or(today)
+    with closing(tracking_store.connect()) as c:
+        return {"today": day, "due": tracking_store.due_occurrences(c, scope, day)}
+
+
+@app.post("/api/tracking/schedules/catch-up")
+def schedules_catch_up_endpoint(today: str | None = None, request: Request = None) -> dict:
+    """The ONLY writer in this group, and a POST for exactly that reason -- a write must not
+    hide behind a GET the browser may prefetch or replay. Idempotent, so the client can call
+    it on every load."""
+    scope = resolve_user(request)["scopeId"]
+    day = _today_or(today)
+    with closing(tracking_store.connect()) as c:
+        return tracking_store.materialize_due_schedules(c, scope, day)
+
+
+@app.get("/api/tracking/schedules")
+def list_schedules_endpoint(includeInactive: bool = True, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return {"schedules": tracking_store.list_schedules(c, scope, include_inactive=includeInactive)}
+
+
+@app.post("/api/tracking/schedules")
+def create_schedule_endpoint(m: ScheduleModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.create_schedule(c, scope, **_schedule_fields(m, partial=False))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.get("/api/tracking/schedules/{schedule_id}")
+def get_schedule_endpoint(schedule_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        s = tracking_store.get_schedule(c, scope, schedule_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    return s
+
+
+@app.patch("/api/tracking/schedules/{schedule_id}")
+def update_schedule_endpoint(schedule_id: int, m: SchedulePatchModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            s = tracking_store.update_schedule(c, scope, schedule_id, **_schedule_fields(m, partial=True))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    if s is None:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    return s
+
+
+@app.delete("/api/tracking/schedules/{schedule_id}")
+def delete_schedule_endpoint(schedule_id: int, request: Request = None) -> dict:
+    """Deletes the RULE. Transactions it already posted are kept — real money that really
+    moved, which a plan change must never rewrite."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        ok = tracking_store.delete_schedule(c, scope, schedule_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="schedule not found")
+    return {"ok": True, "postedTransactionsKept": True}
+
+
+@app.get("/api/tracking/schedules/{schedule_id}/occurrences")
+def schedule_occurrences_endpoint(schedule_id: int, start: str | None = None,
+                                  end: str | None = None, request: Request = None) -> dict:
+    """The computed forward list for one schedule. These are NOT transactions and never
+    become rows until their date arrives — the `posted` flag says which already have."""
+    scope = resolve_user(request)["scopeId"]
+    s = _today_or(start)
+    e = end or (_date.fromisoformat(s) + _timedelta(days=90)).isoformat()
+    try:
+        _datetime.strptime(e, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"end must be YYYY-MM-DD, got {e!r}")
+    with closing(tracking_store.connect()) as c:
+        try:
+            occ = tracking_store.schedule_occurrences(c, scope, schedule_id, s, e)
+        except ValueError as ex:
+            raise HTTPException(status_code=404, detail=str(ex))
+    return {"scheduleId": schedule_id, "start": s, "end": e, "occurrences": occ}
+
+
+@app.post("/api/tracking/schedules/{schedule_id}/confirm")
+def confirm_occurrence_endpoint(schedule_id: int, m: ConfirmOccurrenceModel,
+                                request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.confirm_occurrence(
+                c, scope, schedule_id, m.on,
+                amount_cents=None if m.amount is None else _cents(m.amount))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/api/tracking/schedules/{schedule_id}/skip")
+def skip_occurrence_endpoint(schedule_id: int, m: ConfirmOccurrenceModel,
+                             request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.skip_occurrence(c, scope, schedule_id, m.on)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.patch("/api/tracking/schedules/{schedule_id}/occurrence/{occurrence_on}")
+def set_occurrence_endpoint(schedule_id: int, occurrence_on: str, m: OccurrenceExceptionModel,
+                            request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.set_occurrence_exception(
+                c, scope, schedule_id, occurrence_on, action=m.action,
+                amount_cents=None if m.amount is None else _cents(m.amount),
+                moved_to=m.moved_to, description=m.description)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.delete("/api/tracking/schedules/{schedule_id}/occurrence/{occurrence_on}")
+def clear_occurrence_endpoint(schedule_id: int, occurrence_on: str, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            cleared = tracking_store.clear_occurrence_exception(c, scope, schedule_id, occurrence_on)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True, "cleared": cleared}
+
+
+@app.post("/api/tracking/schedules/{schedule_id}/split")
+def split_schedule_endpoint(schedule_id: int, m: SplitScheduleModel, request: Request = None) -> dict:
+    """"This one and everything after it": ends the current series and starts a successor,
+    so occurrences already posted keep the terms they were posted under."""
+    scope = resolve_user(request)["scopeId"]
+    changes: dict = {}
+    raw = m.model_dump(exclude_unset=True)
+    if "amount" in raw and raw["amount"] is not None:
+        changes["amount_cents"] = _cents(raw["amount"])
+    for src, dst in (("name", "name"), ("account_id", "account_id"), ("auto_post", "auto_post")):
+        if src in raw:
+            changes[dst] = raw[src]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.split_schedule(c, scope, schedule_id, m.from_date, **changes)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
 
 @app.post("/api/tracking/recurring")

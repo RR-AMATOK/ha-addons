@@ -23,8 +23,9 @@ import re
 import secrets
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
+import schedules
 import tracking
 
 _ACCOUNT_TYPES = ("checking", "savings", "brokerage", "retirement", "hsa", "credit", "loan", "cash", "other")
@@ -92,6 +93,15 @@ _BACKUP_TABLES: tuple = (
     # `fund`/`fund_txn` precedent. Parent before child.
     ("household_budget",       ("id", "name", "bucket", "type", "total_cents", "status", "created_by", "created_at")),
     ("household_budget_share", ("line_id", "user_id", "split_ratio_bps", "contribution_cents")),
+    # Scheduled money. Ordinary user data with no write-time invariants beyond its own values,
+    # so a plain verbatim restore is correct (same story as fund/fund_txn). Parent first:
+    # `schedule` before its two children, and `schedule_txn` references `txn` as well, which is
+    # already restored earlier in this tuple. `recurring` above is KEPT even though nothing
+    # writes to it any more -- an older backup still carries its rows, and _mig_add_schedule_tables
+    # converts them on restore.
+    ("schedule",           ("id", "user_id", "name", "direction", "amount_cents", "amount_is_estimate", "account_id", "to_account_id", "bucket", "category", "description", "freq", "interval_n", "weekdays", "day_1", "day_2", "month_of_year", "anchor_on", "end_mode", "ends_on", "end_count", "weekend_shift", "auto_post", "active", "parent_id", "created_at")),
+    ("schedule_exception", ("id", "schedule_id", "occurrence_on", "action", "amount_cents", "moved_to", "description", "created_at")),
+    ("schedule_txn",       ("schedule_id", "occurrence_on", "txn_id")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
@@ -99,6 +109,7 @@ _BACKUP_TABLES: tuple = (
 _BACKUP_OPTIONAL_TABLES = frozenset({
     "scenario", "goal", "venture", "user_profile", "fund", "fund_txn",
     "household_budget", "household_budget_share",
+    "schedule", "schedule_exception", "schedule_txn",
 })
 
 
@@ -463,6 +474,91 @@ CREATE TABLE IF NOT EXISTS household_budget_share (
   PRIMARY KEY (line_id, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_hbshare_user ON household_budget_share(user_id);
+
+-- Scheduled money (docs/mockups/scheduled-money-app.html, schedules.py): paychecks, bills and
+-- standing transfers, with a real recurrence rule, an optional end, and per-occurrence edits.
+-- Supersedes the narrow `recurring` bill checklist above, whose rows migrate in
+-- (_mig_add_schedule_tables); `recurring` itself is KEPT and kept in _BACKUP_TABLES so older
+-- backups still restore, but nothing writes to it any more.
+--
+-- FUTURE OCCURRENCES ARE NEVER ROWS. Only the rule is stored; dates are expanded on demand by
+-- schedules.occurrences() across a bounded window. That is what keeps DEC-009 #3 ("never
+-- auto-generate actuals") true for everything that has not happened yet -- an open-ended
+-- schedule cannot pollute history because it has no history to pollute. Materialisation only
+-- ever runs for dates <= today, and only for `auto_post` schedules.
+--
+-- Placed at the very END of SCHEMA on purpose: tests/test_s1_1_qa_matrix.py reconstructs
+-- synthetic pre-migration schemas by cutting this text at the "-- Sinking funds" and
+-- "-- Household identity roster" markers above, so anything after both is correctly absent
+-- from those old-DB simulations. Same reasoning as `fund`'s and `household_budget`'s own
+-- placement notes.
+CREATE TABLE IF NOT EXISTS schedule (
+  id                 INTEGER PRIMARY KEY,
+  user_id            TEXT    NOT NULL DEFAULT '__owner__',
+  name               TEXT    NOT NULL,
+  -- 'transfer' moves between two of your own accounts and writes TWO txn legs sharing a
+  -- transfer_group, exactly like record_card_payment; 'in'/'out' write one.
+  direction          TEXT    NOT NULL CHECK (direction IN ('in','out','transfer')),
+  amount_cents       INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+  -- A variable bill (electricity). Estimates never auto-post: the figure is a guess, so it
+  -- waits for confirmation with the guess pre-filled.
+  amount_is_estimate INTEGER NOT NULL DEFAULT 0,
+  account_id         INTEGER REFERENCES account(id) ON DELETE CASCADE,
+  to_account_id      INTEGER REFERENCES account(id) ON DELETE CASCADE,   -- transfer destination; NULL otherwise
+  bucket             TEXT,
+  category           TEXT,
+  description        TEXT,
+  -- ---- the rule (see schedules.Rule, which reads exactly these columns) ----
+  freq               TEXT    NOT NULL CHECK (freq IN ('daily','weekly','semimonthly','monthly','yearly')),
+  interval_n         INTEGER NOT NULL DEFAULT 1 CHECK (interval_n >= 1),
+  weekdays           TEXT,                    -- 'FR' or 'MO,WE' (Sunday-based codes); weekly only
+  -- 32 is the "last day of the month" sentinel -- deliberately outside 1..31 so it can never
+  -- collide with a real day. A day beyond the month's length clamps (31 Feb -> 28/29).
+  day_1              INTEGER CHECK (day_1 IS NULL OR (day_1 >= 1 AND day_1 <= 32)),
+  day_2              INTEGER CHECK (day_2 IS NULL OR (day_2 >= 1 AND day_2 <= 32)),
+  month_of_year      INTEGER CHECK (month_of_year IS NULL OR (month_of_year >= 1 AND month_of_year <= 12)),  -- 1-BASED (January = 1)
+  anchor_on          TEXT    NOT NULL,        -- first occurrence / phase anchor; biweekly parity depends on it
+  end_mode           TEXT    NOT NULL DEFAULT 'never' CHECK (end_mode IN ('never','on','after')),
+  ends_on            TEXT,                    -- end_mode='on'; INCLUSIVE
+  end_count          INTEGER,                 -- end_mode='after'; counted from anchor_on, never from a view window
+  weekend_shift      TEXT    NOT NULL DEFAULT 'none' CHECK (weekend_shift IN ('none','before','after')),
+  -- ---- behaviour ----
+  auto_post          INTEGER NOT NULL DEFAULT 0,   -- opt-in; posts as status='pending' on the day
+  active             INTEGER NOT NULL DEFAULT 1,
+  -- "Change this one and all future" ends the current series and starts a successor; parent_id
+  -- keeps the lineage visible rather than leaving two unrelated-looking schedules.
+  parent_id          INTEGER REFERENCES schedule(id) ON DELETE SET NULL,
+  created_at         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_user   ON schedule(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedule_active ON schedule(user_id, active);
+
+-- Per-occurrence edits. `occurrence_on` is the date the RULE produced (schedules.py's `raw`),
+-- NOT the date it lands on after a weekend shift -- keying on the shifted date would silently
+-- orphan every exception the moment weekend_shift changed.
+CREATE TABLE IF NOT EXISTS schedule_exception (
+  id            INTEGER PRIMARY KEY,
+  schedule_id   INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  occurrence_on TEXT    NOT NULL,
+  action        TEXT    NOT NULL CHECK (action IN ('skip','override')),
+  amount_cents  INTEGER,
+  moved_to      TEXT,
+  description   TEXT,
+  created_at    TEXT    NOT NULL,
+  UNIQUE (schedule_id, occurrence_on)
+);
+
+-- Which occurrences have already become real transactions. The PRIMARY KEY *is* the
+-- idempotency guarantee: catch-up can run on every page load and cannot double-post. For a
+-- transfer this points at the primary leg; the pair is found via the txn's transfer_group,
+-- exactly as card payments already work (delete_txn removes every leg in the group).
+CREATE TABLE IF NOT EXISTS schedule_txn (
+  schedule_id   INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  occurrence_on TEXT    NOT NULL,
+  txn_id        INTEGER NOT NULL REFERENCES txn(id) ON DELETE CASCADE,
+  PRIMARY KEY (schedule_id, occurrence_on)
+);
+CREATE INDEX IF NOT EXISTS idx_schedtxn_txn ON schedule_txn(txn_id);
 """
 
 # Future migrations append to this list; each takes a conn and upgrades by one step.
@@ -907,7 +1003,109 @@ def _mig_add_household_budget(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_hbshare_user ON household_budget_share(user_id)")
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget]
+def _mig_add_schedule_tables(conn) -> None:
+    """Migration 16 (scheduled money) -- v15 -> v16. Additive tables plus a one-time backfill
+    of the old `recurring` bill checklist into `schedule`.
+
+    `CREATE TABLE IF NOT EXISTS` makes the structural half idempotent on fresh DBs that already
+    have the tables from SCHEMA (the goal/venture/fund/household convention).
+
+    The BACKFILL is the only part with data in it, and it is guarded to run **only when
+    `schedule` is empty**. That is what makes it safe to re-enter: `import_all` runs pending
+    migrations after restoring a backup, so an older backup's `recurring` rows convert for free
+    on restore -- but a backup that already contains `schedule` rows must never have them
+    duplicated by a second conversion of the `recurring` rows sitting beside them.
+
+    `recurring` is deliberately NOT dropped. It stays in `_BACKUP_TABLES` so older backups keep
+    validating, and dropping a table is the one migration shape that cannot be rolled back by
+    booting older code. Nothing writes to it after this point.
+
+    Conversion, per row: a monthly rule on the recorded `due_day`, the expected amount treated
+    as an ESTIMATE (that was always its meaning -- "electricity may bill more or less"), and
+    `auto_post` off, because a checklist entry never implied permission to write to the ledger.
+    A row with no `due_day` has no date to recur on, so it becomes an inactive schedule rather
+    than being silently dropped or silently assigned the 1st.
+    """
+    conn.execute("""CREATE TABLE IF NOT EXISTS schedule (
+  id                 INTEGER PRIMARY KEY,
+  user_id            TEXT    NOT NULL DEFAULT '__owner__',
+  name               TEXT    NOT NULL,
+  direction          TEXT    NOT NULL CHECK (direction IN ('in','out','transfer')),
+  amount_cents       INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+  amount_is_estimate INTEGER NOT NULL DEFAULT 0,
+  account_id         INTEGER REFERENCES account(id) ON DELETE CASCADE,
+  to_account_id      INTEGER REFERENCES account(id) ON DELETE CASCADE,
+  bucket             TEXT,
+  category           TEXT,
+  description        TEXT,
+  freq               TEXT    NOT NULL CHECK (freq IN ('daily','weekly','semimonthly','monthly','yearly')),
+  interval_n         INTEGER NOT NULL DEFAULT 1 CHECK (interval_n >= 1),
+  weekdays           TEXT,
+  day_1              INTEGER CHECK (day_1 IS NULL OR (day_1 >= 1 AND day_1 <= 32)),
+  day_2              INTEGER CHECK (day_2 IS NULL OR (day_2 >= 1 AND day_2 <= 32)),
+  month_of_year      INTEGER CHECK (month_of_year IS NULL OR (month_of_year >= 1 AND month_of_year <= 12)),
+  anchor_on          TEXT    NOT NULL,
+  end_mode           TEXT    NOT NULL DEFAULT 'never' CHECK (end_mode IN ('never','on','after')),
+  ends_on            TEXT,
+  end_count          INTEGER,
+  weekend_shift      TEXT    NOT NULL DEFAULT 'none' CHECK (weekend_shift IN ('none','before','after')),
+  auto_post          INTEGER NOT NULL DEFAULT 0,
+  active             INTEGER NOT NULL DEFAULT 1,
+  parent_id          INTEGER REFERENCES schedule(id) ON DELETE SET NULL,
+  created_at         TEXT    NOT NULL
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedule_user   ON schedule(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedule_active ON schedule(user_id, active)")
+    conn.execute("""CREATE TABLE IF NOT EXISTS schedule_exception (
+  id            INTEGER PRIMARY KEY,
+  schedule_id   INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  occurrence_on TEXT    NOT NULL,
+  action        TEXT    NOT NULL CHECK (action IN ('skip','override')),
+  amount_cents  INTEGER,
+  moved_to      TEXT,
+  description   TEXT,
+  created_at    TEXT    NOT NULL,
+  UNIQUE (schedule_id, occurrence_on)
+)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS schedule_txn (
+  schedule_id   INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  occurrence_on TEXT    NOT NULL,
+  txn_id        INTEGER NOT NULL REFERENCES txn(id) ON DELETE CASCADE,
+  PRIMARY KEY (schedule_id, occurrence_on)
+)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_schedtxn_txn ON schedule_txn(txn_id)")
+
+    # ---- one-time backfill, only into an empty `schedule` table ----
+    have = conn.execute("SELECT 1 FROM schedule LIMIT 1").fetchone()
+    if have:
+        return
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "recurring" not in tables:
+        return
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(recurring)").fetchall()}
+    if not {"category", "direction", "expected_cents"} <= cols:
+        return
+    has_user = "user_id" in cols
+    now = _now()
+    rows = conn.execute("SELECT * FROM recurring").fetchall()
+    for r in rows:
+        due = r["due_day"] if "due_day" in cols else None
+        # An entry with no due day cannot be given one honestly -- it arrives paused, named, and
+        # visible, so it can be finished by hand rather than quietly guessing the 1st.
+        active = 1 if (due and r["active"]) else 0
+        anchor = f"2000-{1:02d}-{min(int(due or 1), 28):02d}"
+        conn.execute(
+            "INSERT INTO schedule (user_id, name, direction, amount_cents, amount_is_estimate,"
+            " bucket, category, freq, interval_n, day_1, anchor_on, end_mode, weekend_shift,"
+            " auto_post, active, created_at)"
+            " VALUES (?,?,?,?,1,?,?,'monthly',1,?,?,'never','none',0,?,?)",
+            (r["user_id"] if has_user else "__owner__",
+             r["category"], r["direction"], int(r["expected_cents"] or 0),
+             r["bucket"], r["category"], int(due) if due else 1, anchor, active, now))
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables]
 
 
 def _now() -> str:
@@ -3678,6 +3876,435 @@ def delete_recurring(conn, user_id, recurring_id) -> None:
     conn.commit()
 
 
+# ---------- scheduled money (schedules.py is the pure engine) ----------
+#
+# What is stored is the RULE. Occurrences are computed on demand, and only ever become
+# transactions once their date has arrived. Two guards keep that honest, and both matter:
+#
+#   1. Nothing is posted before its date. `materialize_due_schedules` expands to `today`,
+#      never past it.
+#   2. Nothing is posted from before the schedule existed. A rule anchored years back (every
+#      migrated bill is anchored at 2000-01-01 to carry its day-of-month) must not retroactively
+#      post two decades of rent the first time auto-post is switched on. The window therefore
+#      starts at the LATER of the anchor, the schedule's own creation date, and a bounded
+#      catch-up horizon.
+#
+# Idempotency is enforced by the database, not by bookkeeping: `schedule_txn`'s composite
+# primary key, plus `idx_txn_dedupe` on (source, external_id). Catch-up can run on every page
+# load and cannot double-post.
+
+_CATCHUP_DAYS = 60          # how far back a catch-up will reach; see guard 2 above
+
+
+def _schedule_dict(r) -> dict:
+    return {
+        "id": r["id"], "name": r["name"], "direction": r["direction"],
+        "amount": round(r["amount_cents"] / 100.0, 2),
+        "amountIsEstimate": bool(r["amount_is_estimate"]),
+        "accountId": r["account_id"], "toAccountId": r["to_account_id"],
+        "bucket": r["bucket"], "category": r["category"], "description": r["description"],
+        "freq": r["freq"], "interval": r["interval_n"], "weekdays": r["weekdays"],
+        "day1": r["day_1"], "day2": r["day_2"], "monthOfYear": r["month_of_year"],
+        "anchorOn": r["anchor_on"], "endMode": r["end_mode"], "endsOn": r["ends_on"],
+        "endCount": r["end_count"], "weekendShift": r["weekend_shift"],
+        "autoPost": bool(r["auto_post"]), "active": bool(r["active"]),
+        "parentId": r["parent_id"], "createdAt": r["created_at"],
+    }
+
+
+def _schedule_row(conn, user_id, schedule_id):
+    return conn.execute("SELECT * FROM schedule WHERE id = ? AND user_id = ?",
+                        (schedule_id, user_id)).fetchone()
+
+
+def _exceptions_for(conn, schedule_id) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM schedule_exception WHERE schedule_id = ?", (schedule_id,)).fetchall()]
+
+
+def _validate_schedule_fields(conn, user_id, f: dict) -> dict:
+    """Normalize + validate one schedule's fields. The rule half is validated by constructing
+    a `schedules.Rule`, so the DB can never hold a rule the engine refuses to read — one
+    definition of validity, not two that drift."""
+    name = str(f.get("name") or "").strip()
+    if not name:
+        raise ValueError("name must not be empty")
+    direction = f.get("direction")
+    if direction not in ("in", "out", "transfer"):
+        raise ValueError(f"direction must be in|out|transfer, got {direction!r}")
+
+    amount_cents = int(f.get("amount_cents") or 0)
+    if amount_cents < 0:
+        raise ValueError("amount_cents must be >= 0")
+
+    account_id = f.get("account_id")
+    to_account_id = f.get("to_account_id")
+    if account_id is not None:
+        _require_own_account(conn, user_id, account_id)
+    if direction == "transfer":
+        if account_id is None or to_account_id is None:
+            raise ValueError("a transfer needs both account_id and to_account_id")
+        if account_id == to_account_id:
+            raise ValueError("a transfer needs two different accounts")
+        _require_own_account(conn, user_id, to_account_id)
+    else:
+        to_account_id = None
+
+    bucket = f.get("bucket")
+    if bucket is not None and not str(bucket).strip():
+        raise ValueError("bucket must not be empty")
+
+    # Raises ScheduleRuleError (a ValueError) on anything the engine cannot expand.
+    rule = schedules.Rule(
+        freq=f.get("freq"), anchor_on=f.get("anchor_on"), interval=f.get("interval_n", 1),
+        weekdays=f.get("weekdays"), day_1=f.get("day_1"), day_2=f.get("day_2"),
+        month_of_year=f.get("month_of_year"), ends_on=f.get("ends_on"),
+        end_mode=f.get("end_mode", "never"), end_count=f.get("end_count"),
+        weekend_shift=f.get("weekend_shift", "none"))
+
+    weekdays = ",".join(schedules.WEEKDAY_CODES[w] for w in rule.weekdays) if rule.weekdays else None
+    return {
+        "name": name, "direction": direction, "amount_cents": amount_cents,
+        "amount_is_estimate": 1 if f.get("amount_is_estimate") else 0,
+        "account_id": account_id, "to_account_id": to_account_id,
+        "bucket": bucket, "category": f.get("category"), "description": f.get("description"),
+        "freq": rule.freq, "interval_n": rule.interval, "weekdays": weekdays,
+        "day_1": rule.day_1, "day_2": rule.day_2, "month_of_year": rule.month_of_year,
+        "anchor_on": rule.anchor_on.isoformat(),
+        "end_mode": rule.end_mode,
+        "ends_on": rule.ends_on.isoformat() if rule.ends_on else None,
+        "end_count": rule.end_count,
+        "weekend_shift": rule.weekend_shift,
+        "auto_post": 1 if f.get("auto_post") else 0,
+        "active": 0 if f.get("active") is False else 1,
+        "parent_id": f.get("parent_id"),
+    }
+
+
+def create_schedule(conn, user_id, created_at=None, **fields) -> dict:
+    """`created_at` is injectable because it is load-bearing, not bookkeeping: it is one of the
+    three terms in the catch-up window (see `_window_start`), so a caller reconstructing history
+    -- a migration, a restore, a test -- must be able to say when the schedule really began."""
+    vals = _validate_schedule_fields(conn, user_id, fields)
+    cols = ["user_id"] + list(vals) + ["created_at"]
+    params = [user_id] + list(vals.values()) + [created_at or _now()]
+    cur = conn.execute(
+        f"INSERT INTO schedule ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", params)
+    conn.commit()
+    return _schedule_dict(conn.execute("SELECT * FROM schedule WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def list_schedules(conn, user_id, include_inactive=True) -> list[dict]:
+    sql = "SELECT * FROM schedule WHERE user_id = ?"
+    if not include_inactive:
+        sql += " AND active = 1"
+    return [_schedule_dict(r) for r in conn.execute(sql + " ORDER BY name", (user_id,)).fetchall()]
+
+
+def get_schedule(conn, user_id, schedule_id) -> dict | None:
+    row = _schedule_row(conn, user_id, schedule_id)
+    return _schedule_dict(row) if row else None
+
+
+def update_schedule(conn, user_id, schedule_id, **fields) -> dict | None:
+    """Merge semantics with an explicit-clear escape hatch, which is what a schedule needs:
+    an omitted field keeps its stored value, and passing `None` explicitly CLEARS it (the
+    `_UNSET` sentinel is what distinguishes the two). Without that distinction there would be
+    no way to remove an end date once set — the classic PATCH trap.
+
+    The merged result is re-validated as a whole, so a partial edit can never leave a rule the
+    engine cannot expand."""
+    row = _schedule_row(conn, user_id, schedule_id)
+    if row is None:
+        return None
+    merged = {k: row[k] for k in row.keys() if k not in ("id", "user_id", "created_at")}
+    merged.update({k: v for k, v in fields.items() if v is not _UNSET})
+    vals = _validate_schedule_fields(conn, user_id, merged)
+    conn.execute(
+        f"UPDATE schedule SET {', '.join(f'{k} = ?' for k in vals)} WHERE id = ? AND user_id = ?",
+        list(vals.values()) + [schedule_id, user_id])
+    conn.commit()
+    return _schedule_dict(_schedule_row(conn, user_id, schedule_id))
+
+
+def delete_schedule(conn, user_id, schedule_id) -> bool:
+    """Delete the rule. Transactions it already posted are KEPT — they are real money that
+    really moved, and deleting a plan must never rewrite history. `schedule_txn` rows go with
+    the schedule via ON DELETE CASCADE, which releases those dates, but the txns stay."""
+    cur = conn.execute("DELETE FROM schedule WHERE id = ? AND user_id = ?", (schedule_id, user_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def set_schedule_active(conn, user_id, schedule_id, active: bool) -> dict | None:
+    row = _schedule_row(conn, user_id, schedule_id)
+    if row is None:
+        return None
+    conn.execute("UPDATE schedule SET active = ? WHERE id = ? AND user_id = ?",
+                 (1 if active else 0, schedule_id, user_id))
+    conn.commit()
+    return _schedule_dict(_schedule_row(conn, user_id, schedule_id))
+
+
+# ----- occurrences -----
+
+def _window_start(row, today: str, catchup_days=None) -> str:
+    """The earliest date catch-up is willing to post for this schedule.
+
+    The later of: the rule's anchor, the day the schedule was created, and the catch-up
+    horizon. Without the created_at term, switching auto-post on for a bill anchored in 2000
+    would post 25 years of rent in one click; without the horizon term, a long-dormant app
+    would flood the ledger on the next open.
+    """
+    t = date.fromisoformat(today)
+    horizon = _CATCHUP_DAYS if catchup_days is None else int(catchup_days)
+    candidates = [date.fromisoformat(row["anchor_on"]), t - timedelta(days=horizon)]
+    created = (row["created_at"] or "")[:10]
+    try:
+        # created_at is stamped in UTC; `today` is the caller's LOCAL date. The two disagree
+        # for a few hours every evening, and an unclamped UTC date then sits in the caller's
+        # future -- which pushed the window past today and silently dropped a just-created
+        # schedule's own first occurrence. The earliest LOCAL day a schedule could have been
+        # created is its UTC date minus one, so that is the honest floor; a day of slack is
+        # nothing against the 60-day horizon, and it removes a whole class of timezone bugs
+        # rather than the one that happened to surface. Also clamped to `today` so a
+        # far-future created_at (clock skew, a bad restore) cannot freeze catch-up entirely.
+        candidates.append(min(date.fromisoformat(created) - timedelta(days=1), t))
+    except ValueError:
+        pass
+    return max(candidates).isoformat()
+
+
+def _posted_dates(conn, schedule_id) -> set:
+    return {r["occurrence_on"] for r in conn.execute(
+        "SELECT occurrence_on FROM schedule_txn WHERE schedule_id = ?", (schedule_id,)).fetchall()}
+
+
+def _due_for_row(conn, row, today: str, catchup_days=None) -> list[dict]:
+    """Occurrences of one schedule that have come due and have not been posted."""
+    hits = schedules.expand(schedules.Rule.from_row(row), _exceptions_for(conn, row["id"]),
+                            _window_start(row, today, catchup_days), today)
+    posted = _posted_dates(conn, row["id"])
+    return [h for h in hits if h["on"].isoformat() not in posted]
+
+
+def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, status: str) -> list[int]:
+    """Write the transaction(s) for one occurrence and link the occurrence to them.
+
+    Raw inserts and a single commit, mirroring `record_card_payment` — a transfer's two legs
+    must land together or not at all, and `create_txn` commits per call.
+
+    `external_id` is `sched:<id>:<date>`, which makes the existing `idx_txn_dedupe` partial
+    unique index a second, database-level guarantee against double-posting, on top of
+    `schedule_txn`'s primary key. No new column on `txn` was needed for either.
+    """
+    sid = row["id"]
+    ext = f"sched:{sid}:{occurrence_on}"
+    desc = row["description"] or row["name"]
+    now = _now()
+    ids: list[int] = []
+
+    def _insert(account_id, direction, is_transfer, bucket, external_id):
+        cur = conn.execute(
+            """INSERT INTO txn (user_id, account_id, posted_on, direction, amount_cents, bucket,
+                   category, description, is_transfer, transfer_group, source, external_id,
+                   partner_owed_cents, status, kind, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, account_id, occurrence_on, direction, int(amount_cents), bucket,
+             row["category"], desc, 1 if is_transfer else 0, tg, "schedule", external_id,
+             0, status, "charge", now))
+        return cur.lastrowid
+
+    if row["direction"] == "transfer":
+        tg = secrets.token_hex(16)
+        # OUT of the source account first, so the returned primary leg is the one whose
+        # account the schedule names.
+        ids.append(_insert(row["account_id"], "out", True, None, ext))
+        ids.append(_insert(row["to_account_id"], "in", True, None, ext + ":2"))
+    else:
+        tg = None
+        ids.append(_insert(row["account_id"], row["direction"], False, row["bucket"], ext))
+
+    conn.execute("INSERT INTO schedule_txn (schedule_id, occurrence_on, txn_id) VALUES (?,?,?)",
+                 (sid, occurrence_on, ids[0]))
+    conn.commit()
+    return ids
+
+
+def materialize_due_schedules(conn, user_id, today: str, catchup_days=None) -> dict:
+    """Post every due occurrence of every AUTO-POST schedule, exactly once.
+
+    Idempotent by construction, so the client may call it on every load. Returns a summary
+    rather than raising when one schedule is unpostable: a single broken schedule (its account
+    archived, say) must not stop the other nine from posting, and the surviving problem is
+    reported so the UI can say so rather than failing silently.
+    """
+    posted, problems = [], []
+    rows = conn.execute(
+        "SELECT * FROM schedule WHERE user_id = ? AND active = 1 AND auto_post = 1",
+        (user_id,)).fetchall()
+    for row in rows:
+        # An estimate never auto-posts however the flag is set: the amount is a guess, and
+        # writing a guess into the ledger unasked is exactly what DEC-009 #3 forbids.
+        if row["amount_is_estimate"]:
+            continue
+        if row["account_id"] is None:
+            problems.append({"scheduleId": row["id"], "name": row["name"], "reason": "no account"})
+            continue
+        try:
+            due = _due_for_row(conn, row, today, catchup_days)
+        except ValueError as e:
+            problems.append({"scheduleId": row["id"], "name": row["name"], "reason": str(e)})
+            continue
+        for hit in due:
+            on = hit["on"].isoformat()
+            amount = hit.get("amount_cents", row["amount_cents"])
+            try:
+                ids = _post_occurrence(conn, user_id, row, on, amount, "pending")
+            except sqlite3.IntegrityError:
+                conn.rollback()          # already posted by a concurrent call; the DB said so
+                continue
+            except sqlite3.Error as e:
+                conn.rollback()
+                problems.append({"scheduleId": row["id"], "name": row["name"], "reason": str(e)})
+                break
+            posted.append({"scheduleId": row["id"], "name": row["name"], "on": on, "txnIds": ids})
+    return {"posted": posted, "problems": problems, "today": today}
+
+
+def due_occurrences(conn, user_id, today: str, catchup_days=None) -> list[dict]:
+    """What is waiting for a decision: due occurrences of schedules that do NOT auto-post
+    (including every estimate). These are computed, never stored — nothing exists in the
+    ledger until the user confirms it."""
+    out = []
+    rows = conn.execute(
+        "SELECT * FROM schedule WHERE user_id = ? AND active = 1", (user_id,)).fetchall()
+    for row in rows:
+        if row["auto_post"] and not row["amount_is_estimate"]:
+            continue
+        try:
+            due = _due_for_row(conn, row, today, catchup_days)
+        except ValueError:
+            continue
+        for hit in due:
+            out.append({
+                "scheduleId": row["id"], "name": row["name"], "direction": row["direction"],
+                "on": hit["on"].isoformat(),
+                "amount": round(hit.get("amount_cents", row["amount_cents"]) / 100.0, 2),
+                "amountIsEstimate": bool(row["amount_is_estimate"]),
+                "accountId": row["account_id"], "toAccountId": row["to_account_id"],
+                "bucket": row["bucket"], "category": row["category"],
+            })
+    out.sort(key=lambda o: (o["on"], o["name"]))
+    return out
+
+
+def confirm_occurrence(conn, user_id, schedule_id, occurrence_on: str, amount_cents=None) -> dict:
+    """Post one occurrence now, at a possibly-corrected amount. This is the one-tap path out
+    of the due tray, and the amount the user leaves in the field is the amount that lands —
+    a confirmed transaction is `settled`, not `pending`, because the user is asserting it
+    happened."""
+    row = _schedule_row(conn, user_id, schedule_id)
+    if row is None:
+        raise ValueError("schedule not found")
+    if row["account_id"] is None:
+        raise ValueError("this schedule has no account to post to")
+    if occurrence_on in _posted_dates(conn, schedule_id):
+        raise ValueError(f"{occurrence_on} has already been posted")
+    amount = row["amount_cents"] if amount_cents is None else int(amount_cents)
+    if amount < 0:
+        raise ValueError("amount_cents must be >= 0")
+    ids = _post_occurrence(conn, user_id, row, occurrence_on, amount, "settled")
+    return {"scheduleId": schedule_id, "on": occurrence_on, "txnIds": ids}
+
+
+def skip_occurrence(conn, user_id, schedule_id, occurrence_on: str) -> dict:
+    """Drop one occurrence without touching the rule or any other date."""
+    return set_occurrence_exception(conn, user_id, schedule_id, occurrence_on, action="skip")
+
+
+def set_occurrence_exception(conn, user_id, schedule_id, occurrence_on: str, *, action,
+                             amount_cents=None, moved_to=None, description=None) -> dict:
+    """Record a per-occurrence edit, keyed by the date the RULE produced.
+
+    `occurrence_on` is the engine's `raw` date, not the shifted one — keying on where an
+    occurrence lands would orphan every exception the moment weekend_shift changed.
+    """
+    if _schedule_row(conn, user_id, schedule_id) is None:
+        raise ValueError("schedule not found")
+    if action not in ("skip", "override"):
+        raise ValueError(f"action must be skip|override, got {action!r}")
+    conn.execute(
+        """INSERT INTO schedule_exception (schedule_id, occurrence_on, action, amount_cents,
+               moved_to, description, created_at)
+           VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(schedule_id, occurrence_on) DO UPDATE SET
+               action = excluded.action, amount_cents = excluded.amount_cents,
+               moved_to = excluded.moved_to, description = excluded.description""",
+        (schedule_id, occurrence_on, action,
+         None if amount_cents is None else int(amount_cents), moved_to, description, _now()))
+    conn.commit()
+    return {"scheduleId": schedule_id, "occurrenceOn": occurrence_on, "action": action}
+
+
+def clear_occurrence_exception(conn, user_id, schedule_id, occurrence_on: str) -> bool:
+    if _schedule_row(conn, user_id, schedule_id) is None:
+        raise ValueError("schedule not found")
+    cur = conn.execute("DELETE FROM schedule_exception WHERE schedule_id = ? AND occurrence_on = ?",
+                       (schedule_id, occurrence_on))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def split_schedule(conn, user_id, schedule_id, from_date: str, **changes) -> dict:
+    """"Change this one and everything after it": end the current series the day before
+    `from_date` and start a successor from it.
+
+    A split, not an edit, because occurrences already posted must keep the terms they were
+    posted under — the old rent really was $2,150 in March. `parent_id` keeps the lineage
+    visible so the two read as one history rather than two unrelated schedules.
+    """
+    row = _schedule_row(conn, user_id, schedule_id)
+    if row is None:
+        raise ValueError("schedule not found")
+    start = date.fromisoformat(from_date)
+    anchor = date.fromisoformat(row["anchor_on"])
+    if start <= anchor:
+        raise ValueError("split date must be after the schedule's own start; edit the schedule instead")
+
+    successor_fields = {k: row[k] for k in row.keys() if k not in ("id", "user_id", "created_at")}
+    successor_fields.update({k: v for k, v in changes.items() if v is not _UNSET})
+    successor_fields["anchor_on"] = from_date
+    successor_fields["parent_id"] = schedule_id
+    # The successor starts its own life: an "after N times" limit counted from the ORIGINAL
+    # anchor would be meaningless here, and silently carrying it would end the new series early.
+    if successor_fields.get("end_mode") == "after":
+        successor_fields["end_mode"] = "never"
+        successor_fields["end_count"] = None
+
+    successor = create_schedule(conn, user_id, **successor_fields)
+    conn.execute("UPDATE schedule SET end_mode = 'on', ends_on = ?, end_count = NULL "
+                 "WHERE id = ? AND user_id = ?",
+                 ((start - timedelta(days=1)).isoformat(), schedule_id, user_id))
+    conn.commit()
+    return {"ended": _schedule_dict(_schedule_row(conn, user_id, schedule_id)), "successor": successor}
+
+
+def schedule_occurrences(conn, user_id, schedule_id, start: str, end: str, cap: int = 400) -> list[dict]:
+    """The computed forward list for one schedule, exceptions applied. Never stored."""
+    row = _schedule_row(conn, user_id, schedule_id)
+    if row is None:
+        raise ValueError("schedule not found")
+    posted = _posted_dates(conn, schedule_id)
+    out = []
+    for h in schedules.expand(schedules.Rule.from_row(row), _exceptions_for(conn, schedule_id), start, end, cap):
+        on = h["on"].isoformat()
+        out.append({"on": on, "raw": h["raw"].isoformat(), "posted": on in posted,
+                    "amount": round(h.get("amount_cents", row["amount_cents"]) / 100.0, 2),
+                    "overridden": bool(h.get("overridden"))})
+    return out
+
+
 # ---------- scenarios (TODO-219, DEC-017) ----------
 
 class ScenarioConflictError(Exception):
@@ -4143,6 +4770,8 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
             order_by = "user_id"                # PK is user_id, not id -- no surrogate id column
         elif tbl == "household_budget_share":
             order_by = "line_id, user_id"       # PK is (line_id, user_id) -- no surrogate id column
+        elif tbl == "schedule_txn":
+            order_by = "schedule_id, occurrence_on"  # PK is the pair -- no surrogate id column
         else:
             order_by = "id"
         rows = conn.execute(f"SELECT * FROM {tbl} ORDER BY {order_by}").fetchall()
