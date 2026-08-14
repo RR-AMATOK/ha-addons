@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.2
+
+- **Money reads like money everywhere.** The tax-bracket boxes showed bare digits — `640600`
+  instead of `640,600` — because they were the one kind of field that cannot display a
+  separator. Every money box in the app now carries its commas. Every one was checked, not
+  just the ones on screen.
+- **Fields line up.** Labels beside a date box sat a few pixels off the ones beside a text box,
+  because date fields were the only control still using the browser's own styling. Every field
+  is now the same height, so rows read as rows.
+- **Room to breathe.** The FIRE assumptions panel had no space at all between its edge and its
+  text; the small "Match 50% of first 6%" boxes were tight enough to crowd two digits against
+  the arrows. Both have proper room now, and one field that was clipping its own hint text is
+  wide enough for it.
+- **Easier to tap.** The dismiss crosses and the bucket collapse arrows were around 13-16 pixels
+  square on a phone, below the accessibility minimum. The symbols look the same; the area
+  around them that responds to a tap is bigger.
+- **Sharing an expense inside a what-if.** Creating a shared line is deliberately not allowed
+  inside a what-if — it would write real household data from a hypothetical. But the "Share…"
+  links stayed on screen anyway, so the only way to find out was to click one and be told no.
+  They are now hidden while a what-if is open, and come back when you leave.
+- **Leaving a what-if actually leaves.** Choosing **Exit — keep** immediately asked "Resume this
+  what-if?" with a Resume and a Discard button, so the only thing that cleared the screen was
+  Discard — which throws the sandbox away. You already chose to keep it, so the app no longer
+  asks again. Your what-if is still there: it is offered the next time you open the app, and
+  the picker's "Parked" entry resumes it from any device.
+- **Screen readers can name two more fields.** The current-age and retirement-age boxes on
+  Overview sit inside a sentence, which reads fine on screen and said nothing out loud.
+
 ## 0.6.1
 
 - **Deleting an account works again.** The ✕ next to an account did nothing at all —

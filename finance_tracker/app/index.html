@@ -264,11 +264,18 @@
      the fill+border+shadow directly. Inputs INSIDE .input-pair are excluded via :not(.input-pair *)
      so the WRAPPER stays the sole field surface — exactly ONE border per control group, never a
      nested double border (the wrapper carries fill/border/shadow; the inner input stays transparent). */
-  select, input[type="text"]:not(.input-pair *), input[type="number"]:not(.input-pair *), input[type="search"]:not(.input-pair *), textarea {
+  select, input[type="text"]:not(.input-pair *), input[type="number"]:not(.input-pair *), input[type="search"]:not(.input-pair *), input[type="date"]:not(.input-pair *), input[type="month"]:not(.input-pair *), textarea {
     background: var(--field); color: var(--text); border: 1px solid var(--field-border);
     padding: 6px 8px; border-radius: 6px; font: inherit; box-shadow: var(--field-shadow);
   }
-  select:focus, input[type="text"]:not(.input-pair *):focus, input[type="number"]:not(.input-pair *):focus, input[type="search"]:not(.input-pair *):focus, textarea:focus {
+  /* Every control in a row is the same height, so a label beside one lines up with a label
+     beside another. Date inputs were on browser-default styling and came out 13px shorter than
+     a text input; a `select` sits 2px shorter again from its own box model. Measured, not
+     guessed -- the labels in the Goals and Ventures rows were 6px out of line because of it. */
+  select, input[type="text"]:not(.input-pair *), input[type="number"]:not(.input-pair *), input[type="search"]:not(.input-pair *), input[type="date"]:not(.input-pair *), input[type="month"]:not(.input-pair *) {
+    height: 34px; box-sizing: border-box;
+  }
+  select:focus, input[type="text"]:not(.input-pair *):focus, input[type="number"]:not(.input-pair *):focus, input[type="search"]:not(.input-pair *):focus, input[type="date"]:not(.input-pair *):focus, input[type="month"]:not(.input-pair *):focus, textarea:focus {
     border-color: var(--accent); box-shadow: var(--field-focus-ring); outline: none;
   }
   /* Actuals ledger — inline-edit fields: clearly "in edit mode" against the row.
@@ -489,7 +496,9 @@
   .wi-picker-split { position: relative; display: inline-flex; }
   .wi-popup { width: 320px; }
   .wi-rename-input { flex: 1 1 auto; min-width: 0; }
-  .sc-grid { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin:8px 0; }
+  /* center, not flex-end: these rows carry their labels BESIDE the field, so bottom-aligning
+     rows of unequal height puts each label at a different y. */
+  .sc-grid { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:8px 0; }
   .sc-tbl input[type="text"], .sc-tbl input[type="number"], .sc-tbl input[type="month"] { height:26px; box-sizing:border-box; font-size:var(--fs-sm); padding:0 6px; max-width:120px; }
   .sc-tbl input[type="text"].sc-lbl { max-width:170px; }
   .sc-sandbox { border:1px dashed var(--line); border-radius:10px; padding:10px 12px; margin-top:8px; }
@@ -560,7 +569,7 @@
     text-transform: uppercase; letter-spacing: var(--ls-caps); font-weight: var(--fw-semibold);
   }
   details[open] > summary { border-bottom: 1px solid var(--line); }
-  details .body { padding: 12px; }
+  details .body { padding: 12px 16px 14px; }
   details.card { padding: 0; }
   details.card > .body { padding: 14px 16px 16px; }
 
@@ -1035,7 +1044,15 @@
   .bgb-items input[type=text], .bgb-items input[type=number] { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 6px; font-size:var(--fs-sm); }
   .bgb-iname { width:150px; }
   .good-text { color:var(--good); } .bad-text { color:var(--bad); }
-  .mi { width:46px; background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px; font-size:var(--fs-sm); }
+  /* Small inline number boxes ("Match 50 % of first 6 %"). 46px left about 28px of content
+     box once padding, border and the number spinner took their share, so two digits sat
+     hard against the arrows. Note `.mi`'s own padding never applied -- the base
+     `input[type=number]:not(.input-pair *)` rule out-specifies a bare class -- so width is
+     the lever that actually moves here. */
+  /* The colour swatch is deliberately outside the shared field rule (it has no text to pad),
+     but it still shares a row with text inputs, so it matches their height. */
+  input[type="color"] { height: 34px; box-sizing: border-box; padding: 2px; }
+  .mi { width:68px; background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; font-size:var(--fs-sm); }
   .bgb-group { margin:6px 0 6px 6px; padding-left:10px; border-left:2px solid var(--line); }
   .bgb-ghead { display:flex; align-items:center; gap:8px; }
   .bgb-gname { background:transparent; border:none; color:var(--muted); font-weight:var(--fw-semibold); font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); width:150px; }
@@ -1200,6 +1217,14 @@
      everything here lives inside a max-width/max-height query, so >480px-wide viewports
      are byte-for-byte unaffected by construction. */
   @media (max-width: 480px) {
+    /* WCAG 2.5.8 target size (24x24 minimum). These icon buttons measured 12-16px square on a
+       phone -- the two dismiss crosses and every bucket collapse chevron. The glyph is unchanged;
+       only the hit area grows around it, so nothing moves on screen. */
+    .demo-x, .disclaimer-x, .bgb-x, .bgb-collapse-btn, .chip-x {
+      min-width: 24px; min-height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+
     /* gutters: reclaim ~40px width (tokens only, no new ad-hoc px) */
     header, main, #tab-budget, #tab-invest, #tab-decisions, #tab-actuals, footer,
     section.card { padding-left: var(--space-3); padding-right: var(--space-3); }
@@ -1551,9 +1576,9 @@
            storage keys, same What-If twinning + backups as any other forecast input. -->
       <div class="mini" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--muted)">
         <span>I&rsquo;m</span>
-        <span class="input-pair"><input id="nw_cur_age" type="number" min="18" max="80" value="35"/><span class="unit">yr</span></span>
+        <span class="input-pair"><input id="nw_cur_age" type="number" min="18" max="80" value="35" aria-label="Your current age"/><span class="unit">yr</span></span>
         <span>&middot; plan to retire at</span>
-        <span class="input-pair"><input id="nw_ret_age" type="number" min="40" max="100" value="65"/><span class="unit">yr</span></span>
+        <span class="input-pair"><input id="nw_ret_age" type="number" min="40" max="100" value="65" aria-label="Age you plan to retire"/><span class="unit">yr</span></span>
         <span id="nw_horizon_note"></span>
       </div>
       <!-- G) sourced-and-locked row: Current net worth ← Invest registry, Annual invested ←
@@ -1624,7 +1649,7 @@
       <div id="fire-resolved" style="font-size:var(--fs-md);margin-bottom:10px;line-height:1.5;color:var(--muted)">Open the Tax and Budget tabs to seed values.</div>
       <details id="fire-assumptions-details">
         <summary style="cursor:pointer;color:var(--accent);font-size:var(--fs-sm);user-select:none">Edit assumptions</summary>
-        <div style="margin-top:10px">
+        <div class="body">
           <div class="row">
             <label>Current net worth</label>
             <span class="input-pair"><input id="fire-nw" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span>
@@ -2197,7 +2222,7 @@
   <p class="mini">Save X by a date — see what it takes per month and per paycheck. Link a goal to an account and its latest balance drives progress automatically; <b>→ Budget line</b> reserves the monthly amount under Savings › Goals.</p>
   <div id="gl_list" class="mini muted">No goals yet — add one below.</div>
   <div class="sc-grid" style="margin-top:12px;align-items:flex-end">
-    <div class="row" style="margin:0"><label class="mini">Goal</label><input id="gl_name" type="text" placeholder="e.g. House down payment" style="min-width:180px"/></div>
+    <div class="row" style="margin:0"><label class="mini">Goal</label><input id="gl_name" type="text" placeholder="e.g. House down payment" style="min-width:210px"/></div>
     <div class="row" style="margin:0"><label class="mini">Target</label><span class="input-pair"><input id="gl_target" type="text" inputmode="decimal" data-fmt="usd2" style="width:110px"/><span class="unit">$</span></span></div>
     <div class="row" style="margin:0"><label class="mini">By</label><input id="gl_date" type="date"/></div>
     <div class="row" style="margin:0"><label class="mini">Progress from</label><select id="gl_acct" style="min-width:170px"></select></div>
@@ -2279,7 +2304,7 @@
     <div class="row" style="margin:0"><label class="mini">Account name</label><input id="iv_acct_name" type="text" placeholder="e.g. Rollover IRA (Acme)" style="min-width:190px"/></div>
     <div class="row" style="margin:0"><label class="mini">Type</label><select id="iv_acct_type"><option value="retirement">Retirement (401k/IRA)</option><option value="savings">Savings</option><option value="brokerage">Brokerage</option><option value="hsa">HSA</option><option value="other">Other</option></select></div>
     <div class="row" style="margin:0"><label class="mini">Group</label><select id="iv_acct_group_sel" style="min-width:190px"></select></div>
-    <div class="row" style="margin:0;display:none" id="iv_acct_group_new_wrap"><label class="mini">New group name</label><input id="iv_acct_group_new" type="text" placeholder="e.g. Past employer — Acme" style="min-width:190px"/></div>
+    <div class="row" style="margin:0;display:none" id="iv_acct_group_new_wrap"><label class="mini">New group name</label><input id="iv_acct_group_new" type="text" placeholder="e.g. Past employer — Acme" style="min-width:205px"/></div>
     <div class="row" style="margin:0"><label class="mini">Balance</label><span class="input-pair"><input id="iv_acct_bal" type="text" inputmode="decimal" data-fmt="usd" value="" style="width:110px"/><span class="unit">$</span></span></div>
     <button class="seed-btn" id="iv_acct_add" type="button">+ Add account</button>
   </div>
@@ -3790,9 +3815,13 @@ function rn(v) { return parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]
 function fmtUSDval(n) { return (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 // usd2: money fields that always show cents (payment amounts) — 99.8 → "99.80"; blank stays blank so placeholders show.
 function fmtUSD2val(n) { return (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function formatUSDFields() { document.querySelectorAll('input[data-fmt="usd"], input[data-fmt="usd2"]').forEach(el => { if (document.activeElement === el) return; if (el.dataset.fmt === 'usd2') { if (el.value.trim()) el.value = fmtUSD2val(rn(el.value)); } else el.value = fmtUSDval(rn(el.value)); }); }
+// `data-fmt-blank="keep"`: for most money fields an empty box means zero, and formatting it to
+// "0" is right. For the open-ended top tax bracket, empty means INFINITY — formatting it wrote a
+// $0 ceiling into the bracket table and made a freshly-loaded app report two edited values.
+function fmtKeepsBlank(el) { return el.dataset.fmtBlank === 'keep' && !el.value.trim(); }
+function formatUSDFields() { document.querySelectorAll('input[data-fmt="usd"], input[data-fmt="usd2"]').forEach(el => { if (document.activeElement === el) return; if (fmtKeepsBlank(el)) return; if (el.dataset.fmt === 'usd2') { if (el.value.trim()) el.value = fmtUSD2val(rn(el.value)); } else el.value = fmtUSDval(rn(el.value)); }); }
 document.addEventListener('focusin', e => { const el = e.target; if (el && el.dataset && (el.dataset.fmt === 'usd' || el.dataset.fmt === 'usd2')) { const n = rn(el.value); el.value = n ? String(n) : ''; } });
-document.addEventListener('focusout', e => { const el = e.target; if (!el || !el.dataset) return; if (el.dataset.fmt === 'usd') el.value = fmtUSDval(rn(el.value)); else if (el.dataset.fmt === 'usd2') el.value = el.value.trim() ? fmtUSD2val(rn(el.value)) : ''; });
+document.addEventListener('focusout', e => { const el = e.target; if (!el || !el.dataset) return; if (fmtKeepsBlank(el)) return; if (el.dataset.fmt === 'usd') el.value = fmtUSDval(rn(el.value)); else if (el.dataset.fmt === 'usd2') el.value = el.value.trim() ? fmtUSD2val(rn(el.value)) : ''; });
 
 function annualSalary() { return rn($('salary_yr').value); }
 
@@ -4148,7 +4177,7 @@ function renderBrackets(containerId, brackets, prefix) {
     const lower = i === 0 ? 0 : brackets[i - 1].upper;
     row.innerHTML = `
       <span class="muted mono">${fmt$(lower)} –</span>
-      <span class="input-pair" style="width:100%"><input type="number" data-${prefix}-idx="${i}" data-field="upper" value="${b.upper ?? ''}" placeholder="∞" /><span class="unit">$</span></span>
+      <span class="input-pair" style="width:100%"><input type="text" inputmode="decimal" data-fmt="usd" data-fmt-blank="keep" data-${prefix}-idx="${i}" data-field="upper" value="${b.upper == null ? '' : fmtUSDval(b.upper)}" placeholder="∞" /><span class="unit">$</span></span>
       <span class="input-pair" style="width:100%"><input type="number" step="0.001" data-${prefix}-idx="${i}" data-field="rate" value="${(b.rate * 100).toFixed(2)}" /><span class="unit">%</span></span>
     `;
     c.appendChild(row);
@@ -4162,8 +4191,10 @@ function readBrackets(containerId, prefix) {
     const idx = +inp.getAttribute(`data-${prefix}-idx`);
     const field = inp.getAttribute('data-field');
     map[idx] = map[idx] || {};
-    if (field === 'upper') map[idx].upper = inp.value === '' ? null : +inp.value;
-    else if (field === 'rate') map[idx].rate = (+inp.value || 0) / 100;
+    // rn(), not `+value`: the upper bound is a formatted money field now, and `+"124,000"`
+    // is NaN — which would silently write a broken bracket table on the next read.
+    if (field === 'upper') map[idx].upper = inp.value.trim() === '' ? null : rn(inp.value);
+    else if (field === 'rate') map[idx].rate = (rn(inp.value) || 0) / 100;
   });
   return Object.keys(map).sort((a, b) => +a - +b).map(k => map[k]);
 }
@@ -9270,7 +9301,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<label class="ac-field" style="flex:1 1 140px"><span class="ac-lbl">Label</span>'
         + '<input id="' + esc(id) + '_lbl" type="text" placeholder="e.g. Medical"></label>'
         + '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Color</span>'
-        + '<input id="' + esc(id) + '_clr" type="color" value="#7aa7ff" style="height:31px;width:40px;padding:2px;cursor:pointer;border-radius:4px"></label>'
+        + '<input id="' + esc(id) + '_clr" type="color" value="#7aa7ff" style="height:34px;width:40px;padding:2px;cursor:pointer;border-radius:4px"></label>'
         + '<button class="seed-btn" data-addcat="' + esc(id) + '" type="button">+ Add</button>'
         + '</div>';
       el.innerHTML = h;
@@ -11474,6 +11505,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // WhatIf.active — re-render on every transition this function already covers (resume,
     // discard, exit-keep, peek start/end) so an already-open Budget tab never shows stale
     // lock/unlock chrome. Cheap (no fetch): reuses whatever GL.goals/SF.funds already hold.
+    // …and the budget line list for the same reason: hbPromoteTriggerHtml hides the "Share…"
+    // link while What-If is active, but that only takes effect when the list re-renders. Without
+    // this, entering a what-if left every Share… link on screen until some unrelated edit
+    // redrew the table — a control that looks available and then refuses. The click guard
+    // (hbEnterPromote -> wiBlockIfActive) always held, so this was confusing rather than
+    // dangerous; it is listed here beside glRender/sfRender because it is the same bug.
+    try { bgbRender(); } catch (e) {}
     try { glRender(); sfRender(); } catch (e) {}
   }
   // Re-run the exact same DOM-repopulation chain the app uses at boot, but reading through the
@@ -11776,7 +11814,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     WhatIf.active = true;   // set BEFORE any input can fire
     wiShowActiveBanner();
     wiStartHeartbeat();
-    try { glRender(); sfRender(); } catch (e) {}   // TODO-243 Phase 2: lock real rows / show the (empty) draft group immediately
+    // Same three renders as the shared transition helper below — ENTER does not route through
+    // it, which is why this call exists twice. bgbRender() is here for the same reason the
+    // other two are: hbPromoteTriggerHtml hides "Share…" while What-If is active, and that
+    // only takes effect when the list redraws. Without it, entering a what-if left every
+    // Share… link on screen until an unrelated edit happened to redraw the table.
+    try { bgbRender(); glRender(); sfRender(); } catch (e) {}   // TODO-243 Phase 2: lock real rows / show the (empty) draft group immediately
     showToast('What-If Mode on — edit anything, nothing real changes until you Activate');
   }
 
@@ -11851,7 +11894,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { await recompute(); } finally { WhatIf.suppress = false; }
     wiHideBanner();
     reArmProfileSyncIfSkipped();   // Fix C: retry a boot hydrate/flush GUARD-0 skipped for What-If
-    wiCheckResumeOnBoot();   // offer the Resume bar right away, same as after a reload
+    // NO immediate Resume bar here. The banner you just used already offered "Exit — keep"
+    // and "Discard" side by side, so re-appearing with "Resume / Discard" the instant you
+    // choose keep re-asks the question you just answered — and made "exit" feel like it had
+    // not worked, since Discard was the only button that cleared the screen.
+    //
+    // The sandbox is NOT lost and nothing else changes: wiCheckResumeOnBoot() still offers it
+    // on the next load (its actual purpose — you may have forgotten a parked sandbox), and the
+    // picker's "Parked" entry resumes it at any time, from any device, via the server row the
+    // park below writes.
     // The network park runs strictly AFTER the mode teardown above (WhatIf.active is already
     // false) — mirrors wiActivate's "never mid-mode" placement for real-data writes, even though
     // a scenario-table row is hypothetical-by-definition, not real Actuals data (M4 is unaffected).
