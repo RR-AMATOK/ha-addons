@@ -200,7 +200,11 @@
   .row { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; margin: 6px 0; }
   .row label { color: var(--muted); font-size: var(--fs-md); }
   .row .hint { color: var(--muted); font-size: var(--fs-xs); }
-  .input-pair { display: inline-flex; align-items: stretch; gap: 0; width: 168px;
+  /* 168px fitted a value plus ONE unit. Once "$/mo" became "$" + "/mo" — two segments with a
+     divider — the same 168px left the cadence crammed against the border and, in the narrowest
+     rows, clipped the value itself. 192px is the smallest width that carries a 9-character money
+     value plus both segments at full padding, measured across every field in the app. */
+  .input-pair { display: inline-flex; align-items: stretch; gap: 0; width: 192px;
     border: 1px solid var(--field-border); border-radius: 6px; overflow: hidden;
     background: var(--field); box-shadow: var(--field-shadow); }
   .input-pair:focus-within { border-color: var(--accent); box-shadow: var(--field-focus-ring); }
@@ -224,6 +228,11 @@
     background: var(--unit-bg); cursor: pointer; user-select: none;
   }
   .input-pair .unit:hover { color: var(--text); }
+  /* A static cadence segment ("/mo", "/yr" where it is not a toggle) is a LABEL, not a target,
+     so it does not need the 2.6em minimum tap width — but it does need real side padding, or it
+     reads as jammed against the border. Shaving it to 6px was a bad trade made to stop two
+     narrow fields clipping; the actual constraint was the pair's own width, fixed below. */
+  .input-pair .unit:not(.cad) + .unit:not(.cad) { min-width: 0; padding: 0 9px; }
   /* A BARE unit ($ / % / yr) is a static label; only `.cad` is a control (it cycles
      /yr -> /mo -> /pay on click). They shared one treatment, so the static ones inherited a
      fill, a pointer cursor and a hover state and read as buttons that do nothing — the "weird
@@ -337,6 +346,77 @@
   .mng-flag   { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
                 border-radius: 999px; background: var(--chip); color: var(--muted);
                 font-size: var(--fs-2xs); white-space: nowrap; }
+  /* Setup ▸ Categories — the five zones become real COLUMNS instead of inline flow.
+     `.mng-main` is a flex row, so every zone was sized by ITS OWN row's content: the built-in
+     chip and the counts-toward select started at a different x on every line (measured on the
+     shipped build: 297 / 348 / 368px for three adjacent rows). A grid only fixes that if the
+     tracks are FIXED lengths — each `.mng-row` is its own grid container, so an `auto` /
+     `max-content` track aligns nothing across rows, it just re-sizes per row. Hence the px
+     tracks, and hence EVERY cell is placed explicitly: a row with no built-in chip has to leave
+     column 3 empty rather than let the select auto-place into it.
+         1 swatch · 2 name · 3 tag · 4 counts-toward · 5 spacer · 6 actions
+     The 1fr spacer is what keeps the actions on the pane's right edge (48c0d14 widened these
+     panes precisely so row actions stop floating mid-page) while the identity cluster stays
+     left, beside the name it describes. Every track was measured, not guessed: the tag fits the
+     one chip this list has ("built-in", 50.4px), the select fits its own shrink-to-fit width
+     (120px, identical on both themes). Re-measure if either's content changes. */
+  .cat-list   { --cat-c-name: 210px; --cat-c-tag: 64px; --cat-c-sel: 124px; --cat-c-act: 56px; }
+  .cat-head,
+  .cat-list .mng-row { display: grid; align-items: center; column-gap: var(--space-2);
+                grid-template-columns: 14px var(--cat-c-name) var(--cat-c-tag) var(--cat-c-sel) 1fr var(--cat-c-act); }
+  .cat-head   { padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+  .cat-head .ac-lbl { grid-column: 2; }
+  .cat-head .ac-lbl.is-counts { grid-column: 4; }
+  .cat-swatch { grid-column: 1; width: 14px; height: 14px; border-radius: 4px; }
+  .cat-list .mng-name  { grid-column: 2; }
+  .cat-list .mng-flag  { grid-column: 3; justify-self: start; }
+  .cat-countsas { grid-column: 4; width: 100%; }
+  /* Two fixed action slots, so ✎ sits at ONE x for every row and the second slot (↺ reset /
+     ✕ delete / nothing) at another — a right-anchored inline-flex would have put a lone ✎
+     where the next row's ✕ is. */
+  .cat-list .mng-actions { grid-column: 6; width: var(--cat-c-act); gap: 0;
+                display: grid; grid-template-columns: repeat(2, 1fr); justify-items: center; }
+  /* The in-place editor keeps its own inline shape but spans the four reading columns, so its
+     ✓/✕ land in the same two action slots as every resting row's ✎/✕. */
+  .cat-edit   { grid-column: 1 / 6; display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+  .cat-edit .cat-editlbl { flex: 0 1 var(--cat-c-name); min-width: 0; }
+  /* The composer at the foot is not part of the table grid (it sits below a rule, and its
+     colour picker is 40px against a 14px swatch column — nothing to align to), but its Label
+     field has no business being 1100px wide either. */
+  .cat-add .ac-field.is-label { flex: 0 1 300px; }
+  /* Below 900px the pane's content box drops under the ~550px the six tracks need (at 901px:
+     901 − 48 main − 190 nav rail − 48 pane padding = 613px, the last width that fits). Two
+     lines: identity + actions up top, tag and counts-toward under the name. */
+  @media (max-width: 900px) {
+    .cat-head { display: none; }
+    /* Column 2 stays a FIXED tag track here for the same reason it is fixed on the wide row:
+       `auto` collapses to 0 on the rows with no built-in chip and the select slides left. */
+    .cat-list .mng-row { grid-template-columns: 14px var(--cat-c-tag) minmax(0,1fr) var(--cat-c-act); }
+    .cat-swatch          { grid-area: 1 / 1; }
+    .cat-list .mng-name  { grid-area: 1 / 2 / auto / 4; }
+    .cat-list .mng-actions { grid-area: 1 / 4; }
+    .cat-list .mng-flag  { grid-area: 2 / 2; }
+    .cat-countsas        { grid-area: 2 / 3; justify-self: start; width: var(--cat-c-sel); }
+    .cat-edit            { grid-column: 1 / 4; flex-wrap: wrap; }
+  }
+  @media (max-width: 480px) { .cat-list { --cat-c-act: 96px; } }   /* the 9px/11px tap padding */
+  /* Setup ▸ Budget strategies — one shared centre line across the composer. Name was the only
+     LABELLED column (label + control = 52.5px tall) while Need / Want / Investment were prose
+     with bare `.mi` boxes centred against it: three vertical anchors in one row. Every
+     column is the same `.ac-field` shape now, so the labels share one line and the controls
+     share one centre line (all 34px — the app's control height). Investment is DERIVED
+     (100 − need − want) and takes the locked-field treatment: a fill, never a subtle edge. */
+  .strat-form .ac-field.is-name { flex: 0 1 260px; }
+  .strat-form .ac-field.is-pct  { flex: 0 0 96px; }
+  .strat-edit { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; min-width: 0; }
+  .strat-edit .strat-editname { flex: 0 1 260px; min-width: 0; }
+  .strat-edit .input-pair { width: 96px; }
+  .strat-edit .strat-lbl { color: var(--muted); font-size: var(--fs-sm); }
+  /* `<output>` is the correct element for a derived value (it carries an implicit live region),
+     but `.input-pair`'s inner-field rules were written for `input` alone. */
+  .input-pair > output { flex: 1 1 auto; min-width: 0; padding: 6px 8px; text-align: right;
+                color: var(--text); font-variant-numeric: tabular-nums;
+                display: flex; align-items: center; justify-content: flex-end; }
   /* G) lock toggle — now an in-pair SEGMENT (mirrors .unit): the pill is ONE bordered group
      [value | $ | lock], not a floating square button beside it. Interactive (hover/focus) where
      .unit is static; overflow:hidden on the wrapper clips it into the pill radius, so border-radius:0
@@ -749,35 +829,6 @@
        reappearing the moment something new arrives. */
     #hp_out, #vn_list { overflow-x: auto; }
   }
-  /* Invest account rows. The date used to break mid-value ("as of 2026-07-" / "26") because it
-     shared a narrow right-aligned cell with the amount, and the update control wrapped under its
-     own input for the same reason. Neither is a wrapping problem worth solving with more width —
-     they are values that must never break. */
-  .iv-upd { white-space:nowrap; }
-  .iv-acct-head { display:flex; justify-content:space-between; max-width:940px; }
-  /* One grid across the WHOLE registry, not one per group. Each group renders its own <table>,
-     and an auto-layout table sizes its columns from its own content -- so "Vanguard 401K" made
-     one group's name column wide and "HSA" made the next one narrow, and the balances they were
-     supposed to line up in landed at a different x in every group. Scanning for the smallest
-     balance meant re-finding the column four times. Fixed layout with shared percentages is what
-     actually makes them one column. */
-  .iv-acct-tbl { table-layout:fixed; width:100%; max-width:940px; }
-  .iv-acct-tbl .iv-nm   { width:26%; }
-  .iv-acct-tbl .iv-bal  { width:13%; }
-  .iv-acct-tbl .iv-when { width:13%; }
-  .iv-acct-tbl .iv-upd  { width:22%; }
-  /* Widest of the five: the longest group name ("Current employer — 401(k)") was rendering
-     under its own chevron, which reads as a broken control rather than a truncated label. */
-  .iv-acct-tbl .iv-grp  { width:26%; }
-  .iv-acct-tbl .iv-grp select { width:100%; }
-  /* Account rows share ONE grid, so balances line up in a column you can scan rather than landing
-     wherever each row's text happened to end. */
-  /* Fixed columns mean a long account name can no longer widen its own cell, so it has to be
-     told what to do instead of silently overlapping the balance beside it. */
-  .iv-nm  { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .iv-nm small { display:block; color:var(--muted); font-size:var(--fs-2xs); }
-  .iv-bal { white-space:nowrap; }
-  .iv-when { white-space:nowrap; text-align:right; }
   /* The age, not the raw date. "4 months ago" is a judgment you can act on; "2026-07-26" is a
      lookup you have to perform. Stale is the WARNING colour, never the error one -- old data is
      not wrong, it is unverified, and overstating that teaches people to ignore it.
@@ -794,6 +845,84 @@
   .stale-banner[hidden] { display:none !important; }
   .stale-banner b { color:var(--warn-text-strong); }
   .stale-banner .sb-sub { display:block; margin-top:2px; font-size:var(--fs-xs); }
+
+  /* ==== Invest ▸ Your investment accounts — registry redesign (approved mockup:
+     docs/mockups/invest-accounts.html). Groups run side by side in an auto-fit grid instead of
+     one 940px-capped table; the balance input and group picker leave the resting `.mng-row` for
+     an editor that opens in place; add-account and include-from-Actuals share one `<details>` lid
+     at the foot. This REPLACES the old `.iv-acct-tbl` fixed-percentage table entirely -- that
+     table shared one x across every group at the cost of a 940px cap inside a wider card; the
+     scan this card is actually built for is "which balance is old", not "which balance is
+     smallest", and a group's total now sits directly above the column it totals. */
+  .card p.mini.iv-lede { max-width:64ch; color:var(--muted); margin:0 0 var(--space-4); }
+
+  /* Register head: one sentence, one number -- deliberately not a `.tiles` row (three equal
+     metric tiles is the hero-metric template). The "not counted" qualifier gets its own line
+     directly under the total it qualifies, rather than the far edge of a flex spacer. */
+  .iv-reg-head { display:flex; align-items:baseline; gap:var(--space-2); flex-wrap:wrap;
+                 margin:0 0 var(--space-5); padding-bottom:var(--space-3); border-bottom:1px solid var(--line); }
+  .iv-reg-total { font-size:var(--fs-2xl); font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; letter-spacing:var(--ls-tight); }
+  .iv-reg-sub { font-size:var(--fs-md); color:var(--muted); }
+  .iv-reg-note { font-size:var(--fs-xs); color:var(--muted); flex-basis:100%; }
+
+  /* THE WIDTH FIX: groups run side by side instead of stacking, so extra width carries more list
+     rather than a wider row. min() keeps the track from overflowing a narrow phone content box --
+     3 columns at ~1530px, 2 at ~940px, 1 at 390px, with no media query. */
+  .iv-groups { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+               column-gap:32px; row-gap:28px; align-items:start; }
+  .iv-ghead { display:flex; justify-content:space-between; align-items:baseline; gap:var(--space-3);
+              margin:0 0 var(--space-1); padding-bottom:var(--space-2); border-bottom:1px solid var(--line); }
+  .iv-gname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .iv-gtot  { text-transform:none; letter-spacing:0; font-size:var(--fs-md); color:var(--text);
+              font-variant-numeric:tabular-nums; flex-shrink:0; }
+
+  /* The account row -- four children fall into `.mng-row`'s existing 2x2 grid: name | balance on
+     the top line, type/flag | age+action on the second. No new grid. */
+  .iv-amt { font-size:var(--fs-lg); font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums;
+            justify-self:end; white-space:nowrap; }
+  .iv-amt.is-none { font-size:var(--fs-xs); font-weight:var(--fw-normal); color:var(--muted); }
+  .iv-when { display:inline-flex; align-items:center; gap:var(--space-3); }
+  .iv-when .age-tag { font-size:var(--fs-xs); }
+  .iv-when .age-tag.is-stale { font-size:var(--fs-sm); }
+  /* The row action is the row's primary act, so it reads accent at rest instead of --muted. */
+  .iv-act { color:var(--accent); white-space:nowrap; }
+  .iv-act:hover { color:var(--text); }
+
+  /* Stale rows carry a tint wash so they're findable across three columns without reading every
+     age -- same idiom as `.hb-tr`'s tinted ground, never a side stripe. */
+  .iv-acct.is-stale { background:var(--warn-tint); border-radius:var(--radius-sm);
+                      margin-inline:calc(var(--space-2) * -1); padding-inline:var(--space-2); }
+  .iv-acct.is-stale .iv-act { color:var(--text); }   /* --accent drops to ~4.2:1 on the wash */
+  .iv-acct.is-never .mng-name { color:var(--muted); }
+
+  /* The inline editor -- extends `.hb-editing`. `--panel-2` (not `--chip`, a 3-value difference
+     from `--panel`) gives it a real edge in both themes instead of reading as a ghost. */
+  .iv-edit { grid-column:1 / -1; margin-top:var(--space-2); background:var(--panel-2); }
+  .iv-edit-grid { display:flex; align-items:flex-end; gap:var(--space-3); flex-wrap:wrap; }
+  .iv-edit-grid .ac-field { flex:1 1 130px; }
+  .iv-edit-grid .ac-field.is-wide { flex:1 1 230px; }   /* the longest group preset needs room */
+  .iv-edit-actions { display:inline-flex; align-items:center; gap:var(--space-3); }
+  .iv-edit-note { margin:var(--space-2) 0 0; font-size:var(--fs-xs); color:var(--muted); max-width:58ch; }
+  .iv-edit-note b { color:var(--text); font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; }
+  /* One authored moment, starting from an already-visible default -- a dropped frame never shows
+     an empty editor. This is the file's first `@keyframes`/`animation:` rule (DESIGN.md §7 notes
+     none existed); the approved mockup calls for it explicitly, honoured `prefers-reduced-motion`. */
+  @media (prefers-reduced-motion: no-preference) {
+    .iv-acct.is-editing .iv-edit { animation: iv-open .16s ease-out; }
+    @keyframes iv-open { from { transform: translateY(-4px); } }
+  }
+
+  /* Empty state -- teaches the model rather than saying "nothing here". */
+  .iv-empty { max-width:56ch; padding:var(--space-5) 0 var(--space-4); }
+  .iv-empty h3 { margin:0 0 var(--space-2); font-size:var(--fs-lg); font-weight:var(--fw-semibold); }
+  .iv-empty p  { margin:0 0 var(--space-4); color:var(--muted); font-size:var(--fs-md); }
+
+  /* The maintenance lid: add-account and include-from-Actuals share one `<details>`, one grammar
+     (`.ac-field`/`.ac-lbl`) inside it. */
+  .iv-foot { margin-top:var(--space-5); }
+  .iv-foot .body > .ac-row { flex-wrap:wrap; }
+  .iv-foot .ac-row .ac-field { flex:1 1 160px; }
+  .iv-foot-sep { margin:var(--space-4) 0; border:0; border-top:1px solid var(--line); }
 
   /* Setup — a destination for configuration. Two columns so a section can be plainly VISIBLE
      rather than behind a lid; that is the entire reason this page exists, and a stack of
@@ -819,7 +948,11 @@
      screen away from the label it edits. The rail is fixed, so this caps the CONTENT rather
      than the page. */
   .setup-pane { padding:var(--space-4) var(--space-5) var(--space-5); min-width:0; }
-  .setup-pane > section { max-width:860px; }
+  /* 860px left ~490px of every Setup pane empty. These panes are lists of rows — a name, a
+     control and row actions — and they read better long than they do narrow, because the actions
+     stop floating in the middle of the page. Still bounded: a setting row stretched to full
+     bleed separates its label from its control by more than the eye tracks. */
+  .setup-pane > section { max-width:1180px; }
   .setup-pane > section > h2 { margin-top:0; }
   .setup-pane > section[hidden] { display:none; }
   /* Below the two-column breakpoint the rail becomes a scrollable row of chips -- the same
@@ -872,10 +1005,102 @@
      label a column and let the field sit immediately after it, the same shape the tax tables use.
      `minmax(0,...)` so a long label wraps inside its column instead of pushing the field right. */
   #tab-decisions .card .row,
-  #iv_plan_card .row { display:grid; grid-template-columns: minmax(0,380px) auto;
-    justify-content:start; gap:8px 12px; align-items:center; max-width:780px; }
+  #iv_plan_card .row,
+  /* ONE control width for every row on this screen. Measured before choosing: the money pairs
+     rendered at 168px, the selects at 169-182px, the [90][days] pair at 386px and the target
+     select at 152px — nine different right edges down one column. 200px is the smallest that
+     fits the longest select ("The same mix as before", 192px) without truncating it. Every
+     control below is then stretched to fill it, so the column has a single right edge. */
+  #jc_card { --jc-ctl: 200px; }
+  #jc_card .row { display:grid; grid-template-columns: minmax(0,380px) var(--jc-ctl);
+    justify-content:start; gap:8px 12px; align-items:center; max-width:592px; }
+  #jc_card .row > .input-pair,
+  #jc_card .row > select,
+  #jc_card .jc-wait,
+  #jc_card .jc-target { width:100%; }
   #tab-decisions .card .row > label,
-  #iv_plan_card .row > label { text-align:left; }
+  #iv_plan_card .row > label,
+  #jc_card .row > label { text-align:left; }
+
+  /* Job change's two compound controls. These shipped as class names with NO rule at all, so
+     their children laid out by default inline flow: the eligibility hint sat 0px from the select
+     it explains and 11px below the controls' centre line, because it was baseline-flowed rather
+     than aligned. DESIGN.md §8.7 asks for reuse before a new shape — these are the reuse. */
+  .jc-target { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-2); }
+  /* The eligibility note ("-> Dec 6, 2026 - 1 paycheck left") used to sit INLINE after the unit
+     select, which is what made this cell 386px wide against every other row's 168px. It is a
+     note about the row, not a third control, so it takes its own line underneath. */
+  .jc-wait { display:grid; grid-template-columns:84px minmax(0,1fr); gap:var(--space-2);
+             align-items:center; }
+  .jc-wait > .input-pair { width:100%; }
+  /* The unit select sits inside .jc-wait, not directly in .row, so `#jc_card .row > select`
+     never reached it. It was left to `.tab-panel select { min-width:120px }` in a 108px track
+     and painted exactly 12px past the shared right edge. Written with the #jc_card prefix
+     deliberately: `.jc-wait > select` ties that rule on specificity (0,1,1) and LOSES on source
+     order, since .tab-panel select is declared later in the sheet. */
+  #jc_card .jc-wait > select { width:100%; min-width:0; }
+  .jc-elig { grid-column:1 / -1; }
+
+
+  /* Each bucket's section heading carries its own verdict. The tiles at the top say the same
+     thing, but they scroll away — and by the time you are typing in the HSA section they are
+     long gone, which is exactly when you want to know whether what you just typed changed the
+     answer. Deliberately NOT inside a live region: #jc_verdicts already announces, and echoing
+     it here would make a screen reader say every verdict twice on each keystroke. */
+  .jc-shead { display:flex; align-items:baseline; gap:var(--space-2); flex-wrap:wrap; }
+  .jc-verd { text-transform:none; letter-spacing:0; color:var(--muted); }
+  .jc-verd.good { color:var(--good); }
+  .jc-verd.warn { color:var(--warn); }
+  .jc-verd.bad  { color:var(--bad); }
+
+  /* Each bucket is an ENCLOSED box spanning the card's full width, with the fields on the left
+     and that bucket's running numbers on the right. Two problems solved at once: the form used
+     ~700px of a ~1550px card and left the rest empty, and four sections separated only by a
+     heading read as one long column. Same border/radius/fill vocabulary as .tile — DESIGN.md
+     §8.7 asks for reuse before a new shape — but as a container rather than a result. */
+  .jc-sec { border:1px solid var(--line); border-radius:10px; background:var(--panel-2);
+            padding:var(--space-3) var(--space-4) var(--space-4); margin:var(--space-4) 0; }
+  .jc-sec > .subhead { margin-top:0; }
+  /* Fields keep their natural width and their ORDER; the stats rail absorbs the rest. A
+     row-major two-up field grid did fill the width, but it interleaved the two jobs — "Bonus
+     paid so far" landed beside "New job starts" — and order carries meaning in this form. */
+  /* 780px, not max-content: max-content sized each section to its own widest row, so the four
+     boxes had field columns of 561/778/780/560 and their stats rails ended up different widths
+     and different column counts. 780px is the cap `#jc_card .row` already imposes, so every
+     section now aligns and the rails read as one instrument. Shrinks freely below it. */
+  .jc-sec-body { display:grid; grid-template-columns: minmax(0,592px) minmax(240px,1fr);
+                 gap:var(--space-4) var(--space-5); align-items:start; }
+  .jc-fields { min-width:0; }
+  .jc-fields > p { max-width:none; }
+  /* The stats rail is a SECOND column, so the fields keep their own 780px measure and the rail
+     takes the space that was empty. Below 1000px it stacks under the fields and the divider
+     turns from a left border into a top one. */
+  /* min(280px,100%) floor, not a bare 280px: an auto-fit minmax floor is a HARD minimum and
+     overflows any container narrower than it — measured on a 291px phone column. */
+  .jc-stats { border-left:1px solid var(--line); padding-left:var(--space-4); min-width:0;
+              display:grid; grid-template-columns:repeat(auto-fit, minmax(min(240px,100%),1fr));
+              gap:0 var(--space-5); align-content:start; }
+  @media (max-width: 1000px) {
+    .jc-sec-body { grid-template-columns: minmax(0,1fr); }
+    .jc-stats { border-left:0; border-top:1px solid var(--line); padding-left:0; padding-top:var(--space-3); }
+  }
+  .jc-stat { display:grid; grid-template-columns: minmax(0,1fr) auto; gap:2px var(--space-3);
+             padding:6px 0; border-bottom:1px solid var(--line-faint); }
+  .jc-stat:last-child { border-bottom:0; }
+  .jc-stat .k { color:var(--muted); font-size:var(--fs-xs); }
+  .jc-stat .v { font-variant-numeric:tabular-nums; font-weight:var(--fw-semibold); text-align:right;
+                white-space:nowrap; }
+  .jc-stat .s { grid-column:1 / -1; color:var(--muted); font-size:var(--fs-2xs); line-height:1.45; }
+  .jc-stat.good .v { color:var(--good); }
+  .jc-stat.warn .v { color:var(--warn); }
+  .jc-stat.bad  .v { color:var(--bad); }
+
+  @media (max-width: 480px) {
+    .jc-wait .input-pair { width:100%; }
+    /* .mi measured 34px on a phone: the 480px block enumerates .chip/.seed-btn/.mng-row select
+       and never included it. */
+    .mi { min-height:40px; }
+  }
 
   /* House: the assumptions flow ACROSS under the verdict rather than down a sidebar beside it.
      A 400px aside held ten short fields in a column far taller than the verdict it accompanied,
@@ -891,8 +1116,15 @@
   /* Overrides the tab-wide 380px label column: inside a ~300px cell that leaves the field
      nowhere to sit. Label and field share the cell, fields landing on the cell's right edge so
      they still form scannable columns down the grid. */
-  #tab-decisions .hp-assume .row { grid-template-columns:minmax(0,1fr) auto; max-width:none; gap:4px 10px; }
-  #tab-decisions .hp-assume .row .input-pair { width:132px; }
+  /* `auto` let the control column collapse to whatever the 1fr label left it — 132px in this
+     4-up grid, which shrank the .input-pair below its own width and clipped "2,000.00" by 2px.
+     A floor on the control instead: the label wraps (it already does), the value never truncates.
+     Money that silently loses a digit is worse than a label on two lines. */
+  #tab-decisions .hp-assume .row { grid-template-columns:minmax(0,1fr) minmax(160px,auto); max-width:none; gap:4px 10px; }
+  /* 132px predates the "$/mo" -> "$" + "/mo" split and was the real cap here — it beat the
+     column floor above, so the pair stayed 132px and clipped "2,000.00" by 2px. This field is
+     data-fmt="usd2", the widest money format in the app (cents), so it sets the floor. */
+  #tab-decisions .hp-assume .row .input-pair { width:160px; }
   /* The PMI caveat belongs to the whole loan block, not to whichever cell it lands in. */
   .hp-assume-note { grid-column:1/-1; margin-top:6px; }
   #tab-decisions .hp-assume .mini.muted { max-width:none; }
@@ -944,7 +1176,12 @@
      width; its prose does not -- the step explanations are the longest text in the app and at
      full bleed they ran ~190 characters a line. Two tiers: the table and tiles keep a wide
      measure, the paragraphs take a readable one. */
-  #iv_out { max-width: 1060px; }
+  /* Was 1060px to keep the step explanations readable — but it capped the TABLE and TILES too,
+     holding them 292px short of the 1352px card. Every piece of prose in here is a .note-box,
+     which the global rule below already holds to 780px, so the cap is redundant for its stated
+     purpose and harmful for everything else. Same two-tier move already made for #hp_out and
+     #au_out: results fill, prose keeps its measure. */
+  #iv_out { max-width: none; }
   /* Prose takes a readable measure EVERYWHERE, not only where someone happened to notice it.
      The QA sweep found eighteen paragraphs over 900px, the worst at 1318px and 280 characters --
      about 190 characters a line, far past the point where the eye reliably finds the start of the
@@ -1237,6 +1474,10 @@
 
     /* paired inputs: stack label over full-width control */
     .row { grid-template-columns: 1fr; row-gap: var(--space-1); }
+    /* #jc_card .row's fixed 200px control column would leave the label 79px on a 291px phone
+       column, so it stacks here like every other row does. */
+    #jc_card .row { grid-template-columns: minmax(0,1fr); max-width:none; }
+    #jc_card { --jc-ctl: 100%; }
     .input-pair { width: 100%; min-width: 0; }
     .input-pair input { width: 100%; min-width: 0; }
     .input-cluster { width: 100%; align-items: stretch; }
@@ -1281,11 +1522,6 @@
     .bracket-row, .tt-body .row, #tab-decisions .card .row {
       grid-template-columns: 1fr; justify-content: stretch; }
     .bracket-row > :first-child { text-align: left; }
-    /* The account registry's fixed percentages assume desktop width; at phone size the five
-       columns would each be ~70px. Let the table size to its content and scroll. */
-    .iv-acct-tbl { table-layout:auto; width:auto; min-width:640px; }
-    #iv_acct_groups { overflow-x:auto; }
-
     /* tiles: guarantee 2-up down to ~264px */
     .tiles { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 
@@ -1312,6 +1548,17 @@
        especially, since it mutates money data). */
     .mng-row .gl-act { padding: 9px 11px; }            /* inherits the line-808 44px tap rule           */
     .mng-row select, .ac-manage .ac-field select { min-height: 40px; }   /* type + countsAs tap targets */
+    /* Invest ▸ accounts registry phone pass (docs/mockups/invest-accounts.html). */
+    .ac-tool { min-height: 40px; }
+    .iv-reg-total { font-size: var(--fs-xl); }
+    .iv-when { gap: var(--space-2); }
+    .iv-edit-grid .ac-field { flex: 1 1 100%; }
+    .iv-edit-actions { width: 100%; justify-content: flex-start; }
+    .iv-foot .ac-row .ac-field { flex: 1 1 100%; }
+    /* Setup ▸ Budget strategies: `.mi` takes the two editable percent inputs to a 40px tap
+       target here, which the DERIVED Investment field has no input to inherit — without this it
+       renders 8px shorter than the pair beside it and the shared centre line breaks on phones. */
+    .strat-form .input-pair.is-locked, .strat-edit .input-pair.is-locked { min-height: 42px; }
   }
 
   /* landscape / short-viewport popup guard (P1) — max-height query, independent of the
@@ -1633,7 +1880,10 @@
     <div class="tiles" style="margin-bottom:14px">
       <div class="tile" id="fire-coast-tile">
         <div class="k">% to Coast FI</div>
-        <div class="v" id="fire-coast-pct" style="font-size:var(--fs-3xl);font-variant-numeric:tabular-nums">—</div>
+        <!-- No inline font-size: this was the only .tile .v in the app overriding the
+             component's own size, so "% to Coast FI" rendered at 28px beside "% to Full FI",
+             "Lean FI", "Full FI" and "Fat FI" at 18px. .tile .v already sets tabular-nums. -->
+        <div class="v" id="fire-coast-pct">—</div>
         <div class="s" id="fire-coast-line">—</div>
       </div>
       <div class="tile">
@@ -1664,7 +1914,7 @@
           </div>
           <div class="row" id="fire-custom-spend-row" style="display:none">
             <label>Annual spend</label>
-            <span class="input-pair"><input id="fire-custom-spend" type="text" inputmode="decimal" data-fmt="usd" value="60000"/><span class="unit">$/yr</span></span>
+            <span class="input-pair"><input id="fire-custom-spend" type="text" inputmode="decimal" data-fmt="usd" value="60000"/><span class="unit">$</span><span class="unit">/yr</span></span>
           </div>
           <div class="row">
             <label>Current age</label>
@@ -1721,7 +1971,7 @@
       <div id="fire-lever-current" class="mini muted" style="margin-bottom:8px">&mdash;</div>
       <div class="row">
         <label>Bump annual savings to</label>
-        <span class="input-pair"><input id="fire-lever-savings" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span>
+        <span class="input-pair"><input id="fire-lever-savings" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span>
       </div>
       <div id="fire-lever-result" class="mini" style="margin-top:8px"></div>
     </section>
@@ -1792,7 +2042,7 @@
       <div class="row" id="spouseSalaryRow" style="display:none">
         <label>Spouse's salary <span class="hint">(annual, gross cash)</span></label>
         <span class="input-cluster">
-          <span class="input-pair"><input id="spouseSalary" type="text" inputmode="decimal" data-fmt="usd" min="0" step="1000" value="0" /><span class="unit">$/yr</span></span>
+          <span class="input-pair"><input id="spouseSalary" type="text" inputmode="decimal" data-fmt="usd" min="0" step="1000" value="0" /><span class="unit">$</span><span class="unit">/yr</span></span>
           <p class="limit-hint" data-limit="spouseSalary"></p>
           <p class="mini muted" id="spouseAttributionNote" style="display:none;margin-top:4px">Your HSA and medical/dental/vision deductions reduce only your own wage base, not your spouse's. Since Social Security and Medicare are figured from each person's own wage base, which box the same income goes into can change your payroll tax total — income tax stays the same either way.</p>
         </span>
@@ -1823,13 +2073,13 @@
       <details id="tax_invest_wrap">
         <summary>Investment income &amp; §415(c) <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(taxed at filing — not withheld)</span></summary>
         <div class="body">
-          <div class="row"><label class="mini">Long-term capital gains</label><span class="input-pair"><input id="inv_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">Short-term capital gains</label><span class="input-pair"><input id="inv_stg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">Ordinary dividends <span class="hint">(total, incl. qualified)</span></label><span class="input-pair"><input id="inv_odiv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">Qualified dividends <span class="hint">(of the above)</span></label><span class="input-pair"><input id="inv_qdiv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">Taxable interest</label><span class="input-pair"><input id="inv_int" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
+          <div class="row"><label class="mini">Long-term capital gains</label><span class="input-pair"><input id="inv_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+          <div class="row"><label class="mini">Short-term capital gains</label><span class="input-pair"><input id="inv_stg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+          <div class="row"><label class="mini">Ordinary dividends <span class="hint">(total, incl. qualified)</span></label><span class="input-pair"><input id="inv_odiv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+          <div class="row"><label class="mini">Qualified dividends <span class="hint">(of the above)</span></label><span class="input-pair"><input id="inv_qdiv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+          <div class="row"><label class="mini">Taxable interest</label><span class="input-pair"><input id="inv_int" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
           <div class="mini muted" style="margin:2px 0 8px">Long-term gains &amp; qualified dividends get 0/15/20%; the rest is ordinary. NIIT 3.8% applies over $200k MAGI. ESPP/RSU <i>sale</i> treatment (qualifying vs disqualifying) is not modeled.</div>
-          <div class="row"><label class="mini">Employer 401(k) match <span class="hint">(counts toward §415(c))</span></label><span class="input-pair"><input id="emp_match" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
+          <div class="row"><label class="mini">Employer 401(k) match <span class="hint">(counts toward §415(c))</span></label><span class="input-pair"><input id="emp_match" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
         </div>
       </details>
     </section>
@@ -2151,9 +2401,9 @@
     <section class="card" id="sx_card">
       <h2>Living in Washington vs Texas</h2>
       <p class="mini">The same life priced under both states. Neither taxes wages — the differences are WA payroll deductions, sales tax on what you spend, property tax, and WA's capital-gains excise. <button class="seed-btn" id="sx_seed" type="button">Use my numbers</button></p>
-      <div class="row"><label class="mini">Household gross wages <span class="hint">(you + spouse, if filing jointly)</span></label><span class="input-pair"><input id="sx_wages" type="text" inputmode="decimal" data-fmt="usd" value="150,000"/><span class="unit">$/yr</span></span></div>
-      <div class="row"><label class="mini">Long-term capital gains <span class="hint">(sales of shares held &gt;1yr; RSU vest income &amp; short-term gains are NOT WA-taxed)</span></label><span class="input-pair"><input id="sx_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-      <div class="row"><label class="mini">Taxable spending <span class="hint">(sales-taxable only — groceries &amp; rent are exempt in both states)</span></label><span class="input-pair"><input id="sx_spend" type="text" inputmode="decimal" data-fmt="usd" value="2,000"/><span class="unit">$/mo</span></span></div>
+      <div class="row"><label class="mini">Household gross wages <span class="hint">(you + spouse, if filing jointly)</span></label><span class="input-pair"><input id="sx_wages" type="text" inputmode="decimal" data-fmt="usd" value="150,000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+      <div class="row"><label class="mini">Long-term capital gains <span class="hint">(sales of shares held &gt;1yr; RSU vest income &amp; short-term gains are NOT WA-taxed)</span></label><span class="input-pair"><input id="sx_ltg" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+      <div class="row"><label class="mini">Taxable spending <span class="hint">(sales-taxable only — groceries &amp; rent are exempt in both states)</span></label><span class="input-pair"><input id="sx_spend" type="text" inputmode="decimal" data-fmt="usd" value="2,000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
       <div class="row"><label class="mini">Home value <span class="hint">(0 = renting)</span></label><span class="input-pair"><input id="sx_home" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
       <div class="row"><label class="mini">WA region</label><select id="sx_wa_region"><option value="seattle">Seattle metro</option><option value="wa_avg">WA average</option></select></div>
       <div class="row"><label class="mini">TX region</label><select id="sx_tx_region"><option value="austin">Austin</option><option value="dallas">Dallas</option><option value="tx_avg">TX average</option></select></div>
@@ -2163,6 +2413,130 @@
       <button class="calc-btn" id="sx_go" type="button">Compare</button>
       <div id="sx_out" class="mini" style="margin-top:10px">Enter your numbers and compare.</div>
     </section>
+    <section class="card" id="jc_card">
+      <h2>Changing jobs mid-year</h2>
+      <p class="mini measure">Your annual limits do not reset when you change employer — what you already
+        deferred eats the new job's room — but the <b>§415(c)</b> total-additions cap does reset, because it
+        follows the employer rather than you. Add the wait before you can contribute again and the question
+        stops being "what should I elect" and becomes <b>"can I still get there at all"</b>. That is what this
+        answers.</p>
+
+      <!-- Verdict first: after a gap the cap is often not reachable, and that is the finding. -->
+      <!-- role=status: this block is replaced wholesale on every keystroke and IS the answer.
+           Same treatment as #toast, which the app already announces politely. -->
+      <div id="jc_verdicts" class="tiles" role="status" aria-live="polite" style="margin:12px 0"></div>
+
+      <!-- Organised by BUCKET, not by phase. Each of 401(k) / HSA / Roth IRA has its own limit,
+           its own eligibility wait and its own verdict, so each owns every field that feeds it —
+           what is in it so far, when it reopens, and what you are aiming for. The phase-ordered
+           version asked about 401(k) in three separate places and named it five times over; the
+           user's objection ("why are there 3 401(k)?") was about that repetition, and sections
+           fix it where re-labelling the rows only moved it around. Section order matches the
+           verdict tiles above, top to bottom. -->
+
+      <section class="jc-sec">
+      <div class="subhead">Your pay</div>
+      <p class="mini muted measure" style="margin:-4px 0 8px">Take the year-to-date figures straight off your
+        final payslip — it carries exact YTD boxes, so nothing here has to be estimated. Everything labelled
+        <b>so far</b> below means what this year has already put in, before the new job starts.</p>
+      <div class="jc-sec-body"><div class="jc-fields">
+      <div class="row"><label>Last day worked</label>
+        <span class="input-pair"><input id="jc_a_last" type="date"></span></div>
+      <div class="row"><label>Gross wages so far</label>
+        <span class="input-pair"><input id="jc_a_wages" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Bonus paid so far</label>
+        <span class="input-pair"><input id="jc_a_bonus" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>New job starts</label>
+        <span class="input-pair"><input id="jc_start" type="date"></span></div>
+      <div class="row"><label>New salary</label>
+        <span class="input-pair"><input id="jc_b_salary" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span><span class="unit">/yr</span></span></div>
+      <div class="row"><label>Bonus you expect this year</label>
+        <span class="input-pair"><input id="jc_b_bonus" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Paid</label>
+        <select id="jc_b_freq">
+          <option value="weekly">Weekly (52)</option>
+          <option value="biweekly">Every two weeks (26)</option>
+          <option value="semimonthly" selected>Twice a month (24)</option>
+          <option value="monthly">Monthly (12)</option>
+        </select></div>
+      </div><div class="jc-stats" id="jc_stats_pay"></div></div>
+      </section>
+
+      <section class="jc-sec">
+      <div class="subhead jc-shead">401(k) <span class="jc-verd" id="jc_head_401k"></span></div>
+      <p class="mini muted measure" style="margin:-4px 0 8px">Pre-tax and Roth are both elective deferrals and
+        share <b>one</b> cap, which does not reset when you change employer. After-tax is a separate bucket
+        under <b>§415(c)</b>, which does. All three come off the same payslip.</p>
+      <div class="jc-sec-body"><div class="jc-fields">
+      <div class="row"><label>Pre-tax so far</label>
+        <span class="input-pair"><input id="jc_a_trad" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Roth so far</label>
+        <span class="input-pair"><input id="jc_a_roth" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>After-tax so far <span class="hint">(mega-backdoor)</span></label>
+        <span class="input-pair"><input id="jc_a_mega" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Employer match received</label>
+        <span class="input-pair"><input id="jc_a_match" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Contributions allowed after</label>
+        <span class="jc-wait"><span class="input-pair"><input id="jc_wait_401k" type="text" inputmode="numeric" value="90"></span>
+          <select id="jc_wait_401k_unit"><option value="days">days</option><option value="weeks">weeks</option><option value="months">months</option></select>
+          <span class="mini muted jc-elig" id="jc_elig_401k_out">&nbsp;</span></span></div>
+      <div class="row"><label>New employer match <span class="hint">(of what you defer)</span></label>
+        <span class="input-pair"><input id="jc_b_mrate" type="number" step="5" value="50" aria-label="Employer match rate"><span class="unit">%</span></span></div>
+      <div class="row"><label>…on the first <span class="hint">(of salary)</span></label>
+        <span class="input-pair"><input id="jc_b_mpct" type="number" step="1" value="6" aria-label="Match applies to this percent of salary"><span class="unit">%</span></span></div>
+      <div class="row"><label>What you elect today <span class="hint">(so the answer is a change, not a number)</span></label>
+        <span class="input-pair"><input id="jc_b_current" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span><span class="unit">/pay</span></span></div>
+      <div class="row"><label>New deferral goes to</label>
+        <select id="jc_b_kind">
+          <option value="same" selected>The same mix as before</option>
+          <option value="trad">All pre-tax</option>
+          <option value="roth">All Roth</option>
+        </select></div>
+      <div class="row"><label>Aiming for</label>
+        <span class="jc-target"><select id="jc_t_401k_mode"><option value="cap">The annual cap</option><option value="match">Just the full match</option><option value="custom">A number I choose</option></select>
+          <span class="input-pair" id="jc_t_401k_wrap" hidden><input id="jc_t_401k" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></span></div>
+      </div><div class="jc-stats" id="jc_stats_401k"></div></div>
+      </section>
+
+      <section class="jc-sec">
+      <div class="subhead jc-shead">HSA <span class="jc-verd" id="jc_head_hsa"></span></div>
+      <div class="jc-sec-body"><div class="jc-fields">
+      <div class="row"><label>Your payroll $ so far <span class="hint">(not employer)</span></label>
+        <span class="input-pair"><input id="jc_a_hsa" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Benefits start after</label>
+        <span class="jc-wait"><span class="input-pair"><input id="jc_wait_hsa" type="text" inputmode="numeric" value="1"></span>
+          <select id="jc_wait_hsa_unit"><option value="days">days</option><option value="weeks">weeks</option><option value="months" selected>months</option></select>
+          <span class="mini muted jc-elig" id="jc_elig_hsa_out">&nbsp;</span></span></div>
+      <div class="row"><label>Qualifying cover in the gap <span class="hint">(COBRA, a spouse's plan, or the new one starting at once)</span></label>
+        <select id="jc_hsa_cover">
+          <option value="continues">Continues all year</option>
+          <option value="lapses">Lapses during the gap</option>
+        </select></div>
+      <p class="mini muted measure" id="jc_hsa_note" style="margin:2px 0 0"></p>
+      <div class="row"><label>Aiming for</label>
+        <span class="jc-target"><select id="jc_t_hsa_mode"><option value="cap">The annual cap</option><option value="custom">A number I choose</option></select>
+          <span class="input-pair" id="jc_t_hsa_wrap" hidden><input id="jc_t_hsa" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></span></div>
+      </div><div class="jc-stats" id="jc_stats_hsa"></div></div>
+      </section>
+
+      <section class="jc-sec">
+      <div class="subhead jc-shead">Roth IRA <span class="jc-verd" id="jc_head_ira"></span></div>
+      <div class="jc-sec-body"><div class="jc-fields">
+      <div class="row"><label>Contributed so far <span class="hint">(your own, not payroll)</span></label>
+        <span class="input-pair"><input id="jc_a_ira" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
+      <div class="row"><label>Aiming for</label>
+        <span class="jc-target"><select id="jc_t_ira_mode"><option value="cap">The annual cap</option><option value="custom">A number I choose</option></select>
+          <span class="input-pair" id="jc_t_ira_wrap" hidden><input id="jc_t_ira" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></span></div>
+      </div><div class="jc-stats" id="jc_stats_ira"></div></div>
+      </section>
+
+      <div class="subhead">Your year, blended</div>
+      <div id="jc_blended" class="mini"></div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="primary" id="jc_apply" type="button">Apply to my Tax inputs</button>
+        <span class="mini muted">Nothing changes until you press it.</span>
+      </div>
+    </section>
   </div>
 </main>
 
@@ -2170,13 +2544,13 @@
   <section class="card" id="bgb_inputs_card">
     <h2>Budget</h2>
     <p class="mini">Frameworks computed on your <b>after-tax</b> base (net take-home + pre-tax 401k/HSA/premiums). <button class="seed-btn" id="bg_seed" type="button">Use Tax take-home</button></p>
-    <div class="row"><label class="mini">Net take-home</label><span class="input-pair"><input id="bg_net" type="text" inputmode="decimal" data-fmt="usd" value="120000"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax 401(k)</label><span class="input-pair"><input id="bg_t401" type="text" inputmode="decimal" data-fmt="usd" value="24500"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax HSA</label><span class="input-pair"><input id="bg_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax health premiums <span class="muted" style="font-size:var(--fs-2xs)">(medical/dental/vision — a Need, NOT an investment)</span></label><span class="input-pair"><input id="bg_prem" type="text" inputmode="decimal" data-fmt="usd" value="3600"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Post-tax savings (Roth/ESPP)</label><span class="input-pair"><input id="bg_post" type="text" inputmode="decimal" data-fmt="usd" value="7500"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:var(--fs-2xs)">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Gross income (50/15/5)</label><span class="input-pair"><input id="bg_gross" type="text" inputmode="decimal" data-fmt="usd" value="180000"/><span class="unit">$/yr</span></span></div>
+    <div class="row"><label class="mini">Net take-home</label><span class="input-pair"><input id="bg_net" type="text" inputmode="decimal" data-fmt="usd" value="120000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Pre-tax 401(k)</label><span class="input-pair"><input id="bg_t401" type="text" inputmode="decimal" data-fmt="usd" value="24500"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Pre-tax HSA</label><span class="input-pair"><input id="bg_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Pre-tax health premiums <span class="muted" style="font-size:var(--fs-2xs)">(medical/dental/vision — a Need, NOT an investment)</span></label><span class="input-pair"><input id="bg_prem" type="text" inputmode="decimal" data-fmt="usd" value="3600"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Post-tax savings (Roth/ESPP)</label><span class="input-pair"><input id="bg_post" type="text" inputmode="decimal" data-fmt="usd" value="7500"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:var(--fs-2xs)">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Gross income (50/15/5)</label><span class="input-pair"><input id="bg_gross" type="text" inputmode="decimal" data-fmt="usd" value="180000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
     <div class="row"><label class="mini">Employer 401(k) match</label><span class="mini">Match <input id="bg_mrate" class="mi" type="number" step="5" value="50"/>% of first <input id="bg_mpct" class="mi" type="number" step="1" value="6"/>% of salary</span></div>
     <div id="bg_match_out" class="mini" style="margin:4px 0 8px"></div>
     <div class="row"><label class="mini">Income base</label><select id="bg_base"><option value="after_tax">After-tax (recommended)</option><option value="take_home">Raw take-home</option></select></div>
@@ -2197,7 +2571,7 @@
   <p class="mini">Allocate your monthly take-home into buckets and services. Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups. <button class="seed-btn" id="bgb_seed" type="button">Use Tax take-home</button></p>
   <p class="mini" style="margin-top:-4px;color:var(--muted)">Your base auto-tracks <b>net take-home</b> — all 401k/Roth/HSA/ESPP contributions are already taken out, so this is only your spendable cash.</p>
   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
-    <div class="row" style="margin:0"><label class="mini">Monthly base</label><span class="input-pair"><input id="bgb_base" type="text" inputmode="decimal" data-fmt="usd" value="8,000"/><span class="unit">$/mo</span></span></div>
+    <div class="row" style="margin:0"><label class="mini">Monthly base</label><span class="input-pair"><input id="bgb_base" type="text" inputmode="decimal" data-fmt="usd" value="8,000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
     <div class="row" style="margin:0"><label class="mini">Local sales tax</label><span class="input-pair"><input id="bgb_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span></div>
     <div id="bgb_summary" class="mini" style="margin-left:auto;align-self:center"></div>
   </div>
@@ -2269,11 +2643,11 @@
     <p class="mini">Waterfall: match → high-interest debt → HSA → IRA → 401(k) → mega-backdoor → taxable. <button class="seed-btn" id="iv_seed" type="button" title="Gross income &amp; state ← the Tax tab · Monthly essential expenses ← your Budget's raw Need-kind budget-line total (before any counts-toward folding) · Amount to allocate ← your planned annual investing (Budget's Investments bucket + Tax-tab contributions) × 12 · Emergency fund balance ← your registered cash-savings accounts, if any · Match %s ← the Budget tab's employer-match fields, if set. Everything here stays editable after — this only fills, it never locks. Contribution rooms are set to the FULL annual limits (the plan decides what fills them — your Tax-tab contributions are part of the amount being planned); balances/eligibility stay untouched.">Pull from Tax + Budget</button></p>
     <div class="row"><label class="mini">Waterfall strategy</label><select id="iv_strategy"><option value="default">Default</option><option value="henry-v2">HENRY Playbook v2 (community)</option></select></div>
     <div class="row" id="iv_henry_age_row" style="display:none"><label class="mini">Retirement age <span class="hint">(HENRY glide + debt-vs-invest horizon)</span></label><span class="input-pair"><input id="iv_henry_age" type="number" value="65"/><span class="unit">yr</span></span></div>
-    <div class="row"><label class="mini">Amount to allocate</label><span class="input-pair"><input id="iv_amt" type="text" inputmode="decimal" data-fmt="usd" value="60000"/><span class="unit">$/yr</span></span></div>
+    <div class="row"><label class="mini">Amount to allocate</label><span class="input-pair"><input id="iv_amt" type="text" inputmode="decimal" data-fmt="usd" value="60000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
     <div class="row"><label class="mini">Age</label><span class="input-pair"><input id="iv_age" type="number" value="32"/><span class="unit">yr</span></span></div>
     <div class="row"><label class="mini">State</label><select id="iv_state"><option>TX</option><option>WA</option><option value="none">none</option></select></div>
-    <div class="row"><label class="mini">Gross income</label><span class="input-pair"><input id="iv_gross" type="text" inputmode="decimal" data-fmt="usd" value="200000"/><span class="unit">$/yr</span></span></div>
-    <div class="row"><label class="mini">Monthly essential expenses</label><span class="input-pair"><input id="iv_exp" type="text" inputmode="decimal" data-fmt="usd" value="5000"/><span class="unit">$/mo</span></span></div>
+    <div class="row"><label class="mini">Gross income</label><span class="input-pair"><input id="iv_gross" type="text" inputmode="decimal" data-fmt="usd" value="200000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+    <div class="row"><label class="mini">Monthly essential expenses</label><span class="input-pair"><input id="iv_exp" type="text" inputmode="decimal" data-fmt="usd" value="5000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
     <div class="row"><label class="mini">Emergency fund balance</label><span class="input-pair"><input id="iv_ef" type="text" inputmode="decimal" data-fmt="usd" value="10000"/><span class="unit">$</span></span></div>
     <div class="row"><label class="mini">Match: % of salary</label><span class="input-pair"><input id="iv_mpct" type="number" step="0.5" value="4"/><span class="unit">%</span></span></div>
     <div class="row"><label class="mini">Match: employer rate</label><span class="input-pair"><input id="iv_mrate" type="number" step="1" value="50"/><span class="unit">%</span></span></div>
@@ -2286,43 +2660,60 @@
     <div class="row"><label class="mini">Over Roth MAGI limit</label><input id="iv_rmo" type="checkbox"></div>
     <div class="mini muted" id="iv_rmo_note" style="margin:-4px 0 8px"></div>
     <div class="row"><label class="mini">Mega-backdoor available</label><input id="iv_mega" type="checkbox"></div>
-    <div class="row"><label class="mini">Expected retirement income <span class="hint">(annual; for Trad-vs-Roth)</span></label><span class="input-pair"><input id="iv_retinc" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/yr</span></span></div>
+    <div class="row"><label class="mini">Expected retirement income <span class="hint">(annual; for Trad-vs-Roth)</span></label><span class="input-pair"><input id="iv_retinc" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
     <button class="calc-btn" id="iv_go" type="button">Build plan</button>
   </section>
 </div>
 <section class="card" id="iv_accounts_card" style="margin-top:16px">
   <h2>Your investment accounts</h2>
-  <p class="mini">Group every account — cash savings, your current employer's 401(k), past-employer rollovers, IRAs, HSA, brokerage. Updating a balance writes a dated snapshot, so the Overview net-worth trajectory and FIRE progress stay honest too.</p>
+  <p class="mini iv-lede">Group every account: cash savings, your current employer's 401(k), past-employer rollovers, IRAs, HSA, brokerage. Updating a balance writes a dated snapshot, so the Overview net-worth trajectory and FIRE progress stay honest too.</p>
   <!-- The staleness call-out. Per-row ages tell you which balance is old only once you are
        already reading the rows; this says it before you start, because the cost of stale balances
        is paid on OTHER screens -- net worth and FIRE progress quote these figures with no hint of
        their age. Rendered by ivAcctRender, hidden entirely when nothing is stale. -->
   <div id="iv_stale_banner" class="stale-banner" hidden></div>
-  <div id="iv_acct_summary" class="mini" style="margin-bottom:8px"></div>
+  <!-- The total/count/group-count readout, plus its "N have no balance" qualifier -- both written
+       by ivAcctRender into this one element. Its id also doubles as the LID_SCENT scent for
+       #iv_include_wrap below: an empty textContent here is what makes the closed lid read
+       "nothing to include yet" (scripts/audit_fields.py / the LID_SCENT registry). -->
+  <div id="iv_acct_summary"></div>
   <div id="iv_acct_groups"><span class="mini muted">Loading accounts…</span></div>
-  <div class="sc-grid" style="margin-top:12px;align-items:flex-end">
-    <div class="row" style="margin:0"><label class="mini">Account name</label><input id="iv_acct_name" type="text" placeholder="e.g. Rollover IRA (Acme)" style="min-width:190px"/></div>
-    <div class="row" style="margin:0"><label class="mini">Type</label><select id="iv_acct_type"><option value="retirement">Retirement (401k/IRA)</option><option value="savings">Savings</option><option value="brokerage">Brokerage</option><option value="hsa">HSA</option><option value="other">Other</option></select></div>
-    <div class="row" style="margin:0"><label class="mini">Group</label><select id="iv_acct_group_sel" style="min-width:190px"></select></div>
-    <div class="row" style="margin:0;display:none" id="iv_acct_group_new_wrap"><label class="mini">New group name</label><input id="iv_acct_group_new" type="text" placeholder="e.g. Past employer — Acme" style="min-width:205px"/></div>
-    <div class="row" style="margin:0"><label class="mini">Balance</label><span class="input-pair"><input id="iv_acct_bal" type="text" inputmode="decimal" data-fmt="usd" value="" style="width:110px"/><span class="unit">$</span></span></div>
-    <button class="seed-btn" id="iv_acct_add" type="button">+ Add account</button>
-  </div>
-  <details id="iv_include_wrap" class="mini" style="margin-top:8px"><summary class="muted">Include an existing account (from your Actuals) in this registry…</summary>
-    <div class="sc-grid" style="align-items:flex-end;margin-top:6px">
-      <div class="row" style="margin:0"><label class="mini">Account</label><select id="iv_acct_existing" style="min-width:220px"></select></div>
-      <div class="row" style="margin:0"><label class="mini">Group</label><select id="iv_acct_exgroup" style="min-width:190px"></select></div>
-      <div class="row" style="margin:0;display:none" id="iv_acct_exgroup_new_wrap"><label class="mini">New group name</label><input id="iv_acct_exgroup_new" type="text" style="min-width:190px"/></div>
-      <button class="seed-btn" id="iv_acct_exadd" type="button">Include</button>
+  <p id="iv_acct_suggest" class="mini muted" style="margin-top:20px"></p>
+  <!-- One form, one lid: add-account and include-from-Actuals share the same grammar
+       (.ac-field/.ac-lbl composer) inside a single <details>, rather than two differently-shaped
+       strips. `.body`, not bare children: `details .body { padding: 12px 16px 14px }` is what
+       gives every other lid in the app its inset. -->
+  <details id="iv_include_wrap" class="iv-foot"><summary>Add an account, or include one from your Actuals</summary>
+    <div class="body">
+      <div class="ac-row">
+        <label class="ac-field" style="flex:2 1 220px"><span class="ac-lbl">Account name</span><input id="iv_acct_name" type="text" placeholder="e.g. Rollover IRA (Acme)"></label>
+        <label class="ac-field"><span class="ac-lbl">Type</span><select id="iv_acct_type"><option value="retirement">Retirement (401k/IRA)</option><option value="savings">Savings</option><option value="brokerage">Brokerage</option><option value="hsa">HSA</option><option value="other">Other</option></select></label>
+        <label class="ac-field"><span class="ac-lbl">Group</span><select id="iv_acct_group_sel"></select></label>
+        <label class="ac-field" id="iv_acct_group_new_wrap" style="display:none"><span class="ac-lbl">New group name</span><input id="iv_acct_group_new" type="text" placeholder="e.g. Past employer — Acme"></label>
+        <label class="ac-field" style="flex:0 1 150px"><span class="ac-lbl">Balance today</span><span class="input-pair"><input id="iv_acct_bal" type="text" inputmode="decimal" data-fmt="usd" placeholder="0"><span class="unit">$</span></span></label>
+        <button class="primary" id="iv_acct_add" type="button">Add account</button>
+      </div>
+      <hr class="iv-foot-sep">
+      <div class="ac-row">
+        <label class="ac-field" style="flex:2 1 260px"><span class="ac-lbl">Account already in your Actuals</span><select id="iv_acct_existing"></select></label>
+        <label class="ac-field"><span class="ac-lbl">Add it to group</span><select id="iv_acct_exgroup"></select></label>
+        <label class="ac-field" id="iv_acct_exgroup_new_wrap" style="display:none"><span class="ac-lbl">New group name</span><input id="iv_acct_exgroup_new" type="text"></label>
+        <button id="iv_acct_exadd" type="button">Include</button>
+      </div>
+      <div class="mini muted" style="margin-top:4px">Only accounts you include here appear in this registry and the projection — your day-to-day Actuals accounts stay out until you opt them in.</div>
     </div>
-    <div class="mini muted" style="margin-top:4px">Only accounts you include here appear in this registry and the projection — your day-to-day Actuals accounts stay out until you opt them in.</div>
   </details>
-  <div id="iv_acct_suggest" class="mini" style="margin-top:8px"></div>
 </section>
 <section class="card" id="iv_nw_card" style="margin-top:16px">
   <h2>Net worth — actual vs forecast</h2>
   <p class="mini">Your logged account balances (green) tracked against the Overview forecast cone — are you keeping pace?</p>
-  <div id="iv_nw_chart" class="mini muted">Update a balance in <b>Your investment accounts</b> above to plot your real net worth on the forecast cone.</div>
+  <!-- The container carries NO prose classes. `.card .mini.muted { max-width: 780px }` is the
+       reading-measure rule, and its own comment says charts keep whatever width they had — but
+       this div wore `mini muted` for the sake of its empty-state sentence, so once the chart
+       rendered INTO it the SVG inherited a 780px cap inside a 1352px card (measured). The
+       sentence carries its own class now; every other branch of acRenderOverlay already wrapped
+       its own prose, so this was the one that leaked. -->
+  <div id="iv_nw_chart"><div class="mini muted">Update a balance in <b>Your investment accounts</b> above to plot your real net worth on the forecast cone.</div></div>
 </section>
 <!-- Venture ROI tracker (TODO-228, DEC-020) -->
 <section class="card" id="iv_proj_card" style="margin-top:16px">
@@ -2347,7 +2738,11 @@
        rides #tab-invest's TABS_SEL like #pj_touched below, no new storage key. -->
   <input type="checkbox" id="pj_yrs_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
   <div id="pj_accts" class="mini" style="margin-top:10px"></div>
-  <table class="res-table" style="margin-top:10px;max-width:520px"><thead><tr><th>Account</th><th>Annual contribution</th><th>Current balance</th></tr></thead><tbody>
+  <!-- Was 520px in a 1352px card. Not taken to full bleed: every cell holds a narrow number
+       input, and stretching three columns across 1352px would put ~300px of dead space between
+       a label and the field it belongs to — the label-to-field binding DESIGN.md warns about.
+       860px matches the Setup panes' measure and roughly doubles the space actually used. -->
+  <table class="res-table" style="margin-top:10px;max-width:860px"><thead><tr><th>Account</th><th>Annual contribution</th><th>Current balance</th></tr></thead><tbody>
     <tr><td>Traditional 401(k)</td><td><input id="pj_c_trad" type="text" inputmode="decimal" data-fmt="usd" value="24500" style="width:96px"></td><td><input id="pj_b_trad" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
     <tr><td>Roth (401k + IRA)</td><td><input id="pj_c_roth" type="text" inputmode="decimal" data-fmt="usd" value="15000" style="width:96px"></td><td><input id="pj_b_roth" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
     <tr><td>HSA</td><td><input id="pj_c_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400" style="width:96px"></td><td><input id="pj_b_hsa" type="text" inputmode="decimal" data-fmt="usd" value="0" style="width:96px"></td></tr>
@@ -2391,10 +2786,10 @@
 
         <div class="subhead">Your situation</div>
         <div class="hp-assume">
-          <div class="row" id="hp_pay_row" style="display:none"><label class="mini">Desired payment</label><span class="input-pair"><input id="hp_pay" type="text" inputmode="decimal" data-fmt="usd2" value="2,000"/><span class="unit">$/mo</span></span></div>
-          <div class="row"><label class="mini">Current rent/housing you'll replace <span class="hint">(detected from your budget — freed when you buy)</span></label><span class="input-pair"><input id="hp_curhousing" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
-          <div class="row hp-partner" style="display:none"><label class="mini">Partner take-home <span class="hint">(after-tax, monthly)</span></label><span class="input-pair"><input id="hp_ptake" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$/mo</span></span></div>
-          <div class="row hp-partner" style="display:none"><label class="mini">Partner debt payments <span class="hint">(loans, cards — theirs)</span></label><span class="input-pair"><input id="hp_pdebt" type="text" inputmode="decimal" data-fmt="usd2" value="0"/><span class="unit">$/mo</span></span></div>
+          <div class="row" id="hp_pay_row" style="display:none"><label class="mini">Desired payment</label><span class="input-pair"><input id="hp_pay" type="text" inputmode="decimal" data-fmt="usd2" value="2,000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
+          <div class="row"><label class="mini">Current rent/housing you'll replace <span class="hint">(detected from your budget — freed when you buy)</span></label><span class="input-pair"><input id="hp_curhousing" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$</span><span class="unit">/mo</span></span></div>
+          <div class="row hp-partner" style="display:none"><label class="mini">Partner take-home <span class="hint">(after-tax, monthly)</span></label><span class="input-pair"><input id="hp_ptake" type="text" inputmode="decimal" data-fmt="usd2" value=""/><span class="unit">$</span><span class="unit">/mo</span></span></div>
+          <div class="row hp-partner" style="display:none"><label class="mini">Partner debt payments <span class="hint">(loans, cards — theirs)</span></label><span class="input-pair"><input id="hp_pdebt" type="text" inputmode="decimal" data-fmt="usd2" value="0"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
         </div>
 
         <div class="subhead">The loan</div>
@@ -2403,8 +2798,8 @@
           <div class="row"><label class="mini">Rate</label><span class="input-pair"><input id="hp_rate" type="number" step="0.125" min="0" value="6.5"/><span class="unit">%/yr</span></span></div>
           <div class="row"><label class="mini">Term</label><span class="input-pair"><input id="hp_term" type="number" step="5" min="1" value="30"/><span class="unit">yr</span></span></div>
           <div class="row"><label class="mini">Property tax</label><span class="input-pair"><input id="hp_ptax" type="number" step="0.05" min="0" value="1.65"/><span class="unit">%/yr</span></span></div>
-          <div class="row"><label class="mini">Insurance</label><span class="input-pair"><input id="hp_ins" type="text" inputmode="decimal" data-fmt="usd" value="2,400"/><span class="unit">$/yr</span></span></div>
-          <div class="row"><label class="mini">HOA</label><span class="input-pair"><input id="hp_hoa" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$/mo</span></span></div>
+          <div class="row"><label class="mini">Insurance</label><span class="input-pair"><input id="hp_ins" type="text" inputmode="decimal" data-fmt="usd" value="2,400"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+          <div class="row"><label class="mini">HOA</label><span class="input-pair"><input id="hp_hoa" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
           <div class="mini muted hp-assume-note">PMI is automatic: 0.5%/yr of the loan while the down payment is under 20%.</div>
         </div>
 
@@ -2469,7 +2864,7 @@
 
       <div class="au-col">
         <div class="subhead">Can you afford it?</div>
-        <div class="row"><label class="mini">Your gross monthly income</label><span class="input-pair"><input id="au_gmi" type="text" inputmode="decimal" data-fmt="usd" value="12000"/><span class="unit">$/mo</span></span></div>
+        <div class="row"><label class="mini">Your gross monthly income</label><span class="input-pair"><input id="au_gmi" type="text" inputmode="decimal" data-fmt="usd" value="12000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
         <div class="mini muted" style="margin:2px 0 8px">Before tax. The 20/4/10 rule caps <b>all</b> car costs at 10% of this.</div>
 
       </div>
@@ -3122,6 +3517,9 @@ const TAB_SCREENS = {
     // it. The strip entry ALREADY shows take-home ("Tax tables $51,104"), so the feedback lives
     // there instead, in one line rather than a column. `refreshTaxScent()` keeps it live.
     { key: 'tables', label: 'Tax tables', sections: ['tax_tables_wrap'], solo: true },
+    // A whole-screen tool used a few times in a career, not a daily one — same shape as
+    // WA-vs-TX above it.
+    { key: 'jobchange', label: 'Job change', sections: ['jc_card'], solo: true },
   ],
   // Invest, by CADENCE rather than by feature: a monthly chore, an occasional decision, a rare
   // what-if. Accounts and Net worth stay together because the chart exists to prove the balances
@@ -3618,10 +4016,13 @@ async function wiCheckPendingMaterializeOnBoot() {
   }
 }
 
-// 2026 projected contribution limits. Editable here if the IRS finalizes different numbers.
-// Hydrated from /api/defaults when available (hsaLimitSelf / hsaLimitFamily).
-const LIMIT_401K = 24_500;       // elective deferral (Trad + Roth 401k combined, employee side)
-const LIMIT_ROTH_IRA = 7_500;    // Roth IRA contribution
+// 2026 projected contribution limits. These are FALLBACKS: every one of them is hydrated from
+// /api/defaults below, which overlays tax_data/<year>.json. They were not always — 401(k) and
+// Roth IRA were `const` and so could never track the server, meaning a new year's limits would
+// update the Python side while every client-side clamp and readout kept quoting the old number
+// (BUG-0028). `let`, and hydrated beside the other two.
+let   LIMIT_401K = 24_500;       // elective deferral (Trad + Roth 401k combined, employee side)
+let   LIMIT_ROTH_IRA = 7_500;    // Roth IRA contribution
 let   LIMIT_HSA_SELF = 4_400;
 let   LIMIT_HSA_FAMILY = 8_750;
 let   hsaCoverage = 'self';      // 'self' | 'family'
@@ -3763,9 +4164,156 @@ function foldCategoriesByCountsAs(categories, rawTotals) {
 }
 
 // Test hook: exposes the client-side math for tests/test_client_math.js (harmless in the browser).
+// ---------- Job change: a split year with a contribution gap ----------
+//
+// The app models a year as ONE salary with ONE set of elections. A mid-year job change breaks
+// that, and the ways it breaks are not symmetric:
+//
+//   §402(g) — the $24,500 elective-deferral limit — follows the PERSON. What you deferred at
+//             the old job eats the new job's room.
+//   §415(c) — the $72,000 total-additions limit — follows the EMPLOYER, and RESETS at an
+//             unrelated one. So mega-backdoor room reopens while elective room does not.
+//             Getting these two the wrong way round is the classic job-change mistake.
+//
+// Everything here is pure: dates in, numbers out, no DOM and no clock. `today` is always an
+// argument so the same inputs always give the same answer.
+
+const JC_PAY_FREQ = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 };
+
+// Paychecks you will actually receive in [from, yearEnd], counting only whole periods that
+// still lie ahead. This generalises moPeriodsLeft(), which answers the same question for
+// "today" and a single employer.
+function jcPeriodsRemaining(fromIso, yearEndIso, freq) {
+  const perYear = JC_PAY_FREQ[freq] || +freq || 24;
+  const from = new Date(fromIso + 'T00:00:00');
+  const end = new Date(yearEndIso + 'T00:00:00');
+  if (isNaN(from) || isNaN(end) || end < from) return 0;
+  const days = Math.floor((end - from) / 864e5) + 1;
+  const yearDays = 365;                     // period COUNT, not a calendar; leap day is noise here
+  return Math.max(0, Math.floor(perYear * days / yearDays));
+}
+
+// Months in the year for which HDHP coverage held. The HSA limit is monthly-prorated when
+// coverage lapses (the last-month rule can restore it in full, but commits you to a 13-month
+// testing period — a decision, so it is surfaced and never applied automatically).
+function jcHsaEligibleMonths(segments) {
+  // Eligibility is judged on the FIRST DAY of each month, not by counting covered days: cover
+  // 2 Jan to 30 Jan and January does not count; cover 1 Jan to 2 Jan and it does. Approximating
+  // this by day count gets the limit wrong in exactly the months a job change touches.
+  const months = new Set();
+  (segments || []).forEach(seg => {
+    const a = new Date(seg.from + 'T00:00:00'), b = new Date(seg.to + 'T00:00:00');
+    if (isNaN(a) || isNaN(b) || b < a) return;
+    for (let m = 0; m < 12; m++) {
+      const first = new Date(a.getFullYear(), m, 1);
+      if (first >= a && first <= b) months.add(m);
+    }
+  });
+  return months.size;
+}
+
+function jcHsaLimit(fullLimit, eligibleMonths) {
+  const m = Math.max(0, Math.min(12, Math.round(eligibleMonths)));
+  return m >= 12 ? fullLimit : Math.round(fullLimit * m / 12);
+}
+
+// The heart of it: can a target still be reached, and if so what would it take?
+//
+// Returns a verdict rather than a prescription, because after a contribution gap the cap is
+// often NOT reachable, and a tool that answers "elect 32%" when 32% is arithmetically
+// impossible is worse than one that says so.
+function jcFeasibility(o) {
+  const target = Math.max(0, +o.target || 0);
+  const already = Math.max(0, +o.already || 0);
+  const periods = Math.max(0, Math.round(+o.periodsRemaining || 0));
+  const perPeriodPay = Math.max(0, +o.perPeriodPay || 0);
+  const maxShare = o.maxShare == null ? 1 : Math.max(0, Math.min(1, +o.maxShare));   // payroll cap, usually 100%
+  const currentPerPeriod = Math.max(0, +o.currentPerPeriod || 0);
+
+  const room = target - already;
+  const ceiling = periods * perPeriodPay * maxShare;      // the most payroll can physically carry
+
+  if (room <= 0) {
+    return { status: 'already-there', room: 0, already, target, periods,
+             needPerPeriod: 0, needPct: 0, deltaPerPeriod: -currentPerPeriod,
+             reachable: already, shortfall: 0,
+             message: already > target
+               ? 'Already past this target — ' + Math.round(already - target) + ' over.'
+               : 'Already at this target.' };
+  }
+  if (periods === 0) {
+    return { status: 'no-periods', room, already, target, periods: 0,
+             needPerPeriod: 0, needPct: 0, deltaPerPeriod: -currentPerPeriod,
+             reachable: already, shortfall: room,
+             message: 'No paychecks left this year at the new job — nothing more can go in.' };
+  }
+
+  const needPerPeriod = room / periods;
+  const needPct = perPeriodPay > 0 ? needPerPeriod / perPeriodPay : Infinity;
+  const feasible = ceiling >= room - 0.005;
+
+  if (!feasible) {
+    const reachable = already + ceiling;
+    const extraPeriods = perPeriodPay > 0 && maxShare > 0
+      ? Math.ceil((room - ceiling) / (perPeriodPay * maxShare)) : Infinity;
+    return { status: 'unreachable', room, already, target, periods,
+             needPerPeriod, needPct, deltaPerPeriod: needPerPeriod - currentPerPeriod,
+             reachable, shortfall: room - ceiling, extraPeriods,
+             message: 'Out of reach: the most that fits is ' + Math.round(reachable) + '.' };
+  }
+
+  // Feasible, but is it plausible? Above ~60% of gross is legal at many payrolls and still a
+  // month you cannot pay rent in, so it is called out rather than quietly recommended.
+  const tight = needPct > 0.6;
+  return { status: tight ? 'tight' : 'reachable', room, already, target, periods,
+           needPerPeriod, needPct, deltaPerPeriod: needPerPeriod - currentPerPeriod,
+           reachable: target, shortfall: 0,
+           message: (tight ? 'Reachable, but it takes ' : 'Reachable at ') +
+                    Math.round(needPct * 100) + '% of each paycheck.' };
+}
+
+// Two employers each withhold Social Security independently up to the wage base, so a job
+// change usually over-withholds. It comes back as a refundable credit on the return, and
+// nobody tells you the number — the app already knows the base.
+function jcExcessSocialSecurity(wagesByEmployer, wageBase, ssRate) {
+  const base = +wageBase || 0, rate = +ssRate || 0;
+  const each = (wagesByEmployer || []).reduce((s, w) => s + Math.min(Math.max(0, +w || 0), base), 0);
+  const combined = Math.min((wagesByEmployer || []).reduce((s, w) => s + Math.max(0, +w || 0), 0), base);
+  return Math.max(0, (each - combined) * rate);
+}
+
+// Employer match you cannot get back. Most plans do NOT true up at year end, so match missed
+// during an eligibility wait is gone rather than deferred — usually the largest real number
+// in a job change, and the argument for front-loading once eligible.
+function jcMatchForgone(o) {
+  const perPeriodPay = Math.max(0, +o.perPeriodPay || 0);
+  const missedPeriods = Math.max(0, Math.round(+o.missedPeriods || 0));
+  const matchRate = Math.max(0, +o.matchRate || 0);          // e.g. 0.5 for 50%
+  const matchUpToPct = Math.max(0, +o.matchUpToPct || 0);    // e.g. 0.06 for "of the first 6%"
+  return perPeriodPay * missedPeriods * matchUpToPct * matchRate;
+}
+
+// The blended year, in the shape calculator.py already accepts — which is why the engine needs
+// no changes at all for any of this.
+function jcBlendedYear(a, b) {
+  const n = v => Math.max(0, +v || 0);
+  return {
+    salary: n(a.wages) + n(b.wages),
+    bonus: n(a.bonus) + n(b.bonus),
+    trad401k: n(a.trad401k) + n(b.trad401k),
+    roth401k: n(a.roth401k) + n(b.roth401k),
+    hsa: n(a.hsa) + n(b.hsa),
+    afterTax401k: n(a.afterTax401k) + n(b.afterTax401k),
+    employerMatch: n(a.employerMatch) + n(b.employerMatch),
+    rothIra: n(a.rothIra) + n(b.rothIra),
+  };
+}
+
 window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, householdCashSalary, sxHouseholdWages, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
-  rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange };
+  rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange,
+  jcPeriodsRemaining, jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
+  jcMatchForgone, jcBlendedYear };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
 // separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
 // would throw a ReferenceError at this statement and silently prevent window.__clientMath from
@@ -5149,7 +5697,7 @@ function reset() {
 // Client-side keys eligible for backup — a strict allowlist. Anything not listed here
 // (including the device-local itc.activetab and itc.whatif.* keys) can never be read into a
 // backup file or written back on restore, by construction — not by a denylist that could miss one.
-const BACKUP_CLIENT_KEYS = ['itc.v3', 'itc.tabs.v1', 'budgetBuilder_v1', 'itc.fire.v1', 'itc.categories.v1', 'itc.proj.accts.v1', 'itc.maxout.v1'];
+const BACKUP_CLIENT_KEYS = ['itc.v3', 'itc.tabs.v1', 'budgetBuilder_v1', 'itc.fire.v1', 'itc.categories.v1', 'itc.proj.accts.v1', 'itc.maxout.v1', 'itc.jobchange.v1'];
 
 // S1.2 (§4.0/§6.1 TM-44's seed-exclusion): captured ONCE, here, at true script-start — before ANY
 // app code has run, including the Manage-categories panel's first render (further down this same
@@ -6414,6 +6962,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       const d = await resp.json();
       renderBrackets('fedBrackets', d.fedBrackets, 'fed');
       renderBrackets('caBrackets',  d.caBrackets,  'ca');
+      if (typeof d.k401Limit       === 'number') LIMIT_401K         = d.k401Limit;
+      // …and repaint anything already computed against the fallback. jcInit runs on
+      // DOMContentLoaded, this hydration awaits first, so the Job-change screen's first paint
+      // quoted 24,500 while the server served the real figure — BUG-0028's own failure mode
+      // surviving inside the commit that fixed the `const`.
+      try { if (window.__jobChange) window.__jobChange.render(); } catch (e) {}
+      if (typeof d.iraLimit        === 'number') LIMIT_ROTH_IRA     = d.iraLimit;
       if (typeof d.hsaLimitSelf    === 'number') LIMIT_HSA_SELF     = d.hsaLimitSelf;
       if (typeof d.hsaLimitFamily  === 'number') LIMIT_HSA_FAMILY   = d.hsaLimitFamily;
       if (typeof d.rothIraPhaseIn  === 'number') ROTH_IRA_PHASE_IN  = d.rothIraPhaseIn;
@@ -6792,8 +7347,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         try { hpOnOpen(); } catch (e) {}
       }
       // Setup was a brand-new destination and never got an on-open hook at all, so its Accounts and
-      // Import panes rendered empty until the user happened to visit Actuals first.
-      if (t === 'setup') { try { acLoadAccounts(); } catch (e) {} }
+      // Import panes rendered empty until the user happened to visit Actuals first. Loading the
+      // DATA was only half of it — see acOnSetupOpen: the handlers were still unbound.
+      if (t === 'setup') { try { acOnSetupOpen(); } catch (e) {} }
       if (t === 'actuals') { acOnOpen(); try { vnLoad(); } catch (e) {} }   // ventures moved here with its card
     });
   });
@@ -7014,10 +7570,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // opts.endAge: optional age label for the RIGHT-hand endpoint ("age 65" instead of "+30y"),
     // set from getGlobalAges().ret by callers that have a canonical retirement age (Overview
     // forecast, Invest actual-vs-forecast overlay). Omitted (byte-identical) everywhere else.
-    [minT, Math.round((years + minT) / 2), years].forEach(yr => {
+    // The OUTER labels align to the axis ends; only the inner one centres on its tick. A centred
+    // "age 65" measured 30.4px wide against a 12px right pad, so its right edge landed at 723.2
+    // in a 720-wide viewBox and the glyph was clipped ("age 6"). Anchoring is length-independent
+    // — widening padR would only move the same failure to "age 100".
+    const xticks = [minT, Math.round((years + minT) / 2), years];
+    xticks.forEach((yr, i) => {
       const isEnd = yr === years && opts.endAge != null;
       const label = isEnd ? ('age ' + Math.round(opts.endAge)) : (yr === 0 ? 'now' : (yr > 0 ? '+' + Math.round(yr) + 'y' : Math.round(yr) + 'y'));
-      xlab += '<text x="' + x(yr) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="9" fill="var(--muted)">' + label + '</text>';
+      const anchor = i === 0 ? 'start' : (i === xticks.length - 1 ? 'end' : 'middle');
+      xlab += '<text x="' + x(yr) + '" y="' + (H - 6) + '" text-anchor="' + anchor + '" font-size="9" fill="var(--muted)">' + label + '</text>';
     });
     let realSvg = '';
     if (real.length) {
@@ -7326,7 +7888,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('#hp_house_chips .chip').forEach(c => c.classList.toggle('active', c.dataset.hphouse === hh));
     $('hp_pay_row').style.display = mode === 'payment_first' ? '' : 'none';
     document.querySelectorAll('#hp_card .hp-partner').forEach(r => r.style.display = hh === 'household' ? '' : 'none');
-    if (!rn($('hp_curhousing').value)) { const d = hpDetectHousing(); if (d) $('hp_curhousing').value = d; }
+    if (!rn($('hp_curhousing').value)) { const d = hpDetectHousing(); if (d) $('hp_curhousing').value = fmtUSD2val(d); }
     const inc = hpIncomeBase();
     $('hp_takehome_line').innerHTML = inc > 0 ? 'Your take-home: <b>' + hpMoney(inc) + '/mo</b> <span class="muted">(from Tax/Budget — recompute there to refresh)</span>' : 'Open the Tax tab once so we know your take-home.';
     hpRecompute();
@@ -8408,6 +8970,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const IV_GROUP_PRESETS = ['Cash savings', 'Current employer — 401(k)', 'Past employer rollovers', 'IRA / Roth', 'HSA', 'Brokerage', 'Other'];
   const IV_INVEST_TYPES = new Set(['savings', 'brokerage', 'retirement', 'hsa']);
   let ivAcct = { accounts: [], all: [], latest: {} };
+  // Singleton edit state (same shape as Setup's acEditAcctId): at most one row's editor is open
+  // at a time, so its fields never need a per-account id suffix to stay unambiguous.
+  let ivEditAcctId = null;
   // Registry membership is OPT-IN: only accounts the user filed into a group belong here.
   // Day-to-day Actuals accounts (checking, the savings buckets) stay out until included.
   const ivGroupOf = a => a.investGroup || null;
@@ -8538,6 +9103,72 @@ document.addEventListener('DOMContentLoaded', async () => {
     // and short enough that flagging it is not nagging.
     return { days, text: months + ' months ago', stale: days >= 90 };
   }
+  // "11 Jul 2026" -- the editor's "Last recorded … on …" note. jcHumanDate (job-change tab) does
+  // the same formatting but may live in a different closure by the time this file grows past it,
+  // so this is a small deliberate duplicate rather than a reach across the file.
+  const ivFmtDate = iso => {
+    if (!iso) return '';
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // The resting row -- `.mng-row`'s 2x2 grid (name|balance, type/flag|age+action) plus, only when
+  // this account is the one open for editing, a 5th full-width child (`.iv-edit`, grid-column
+  // 1/-1) carrying the editor. Singleton `ivEditAcctId` means at most one editor ever exists in
+  // the DOM, so its inputs need no per-row id/data suffix (mirrors Setup's acEditAcctId pattern).
+  function ivAcctRowHtml(a) {
+    const bal = ivBal(a), snap = ivAcct.latest[a.id];
+    // An age is only ever computed when a balance exists, and a balance only exists when a
+    // snapshot does -- so ivBalanceAge(snap.asOf) here is never null. The old markup carried an
+    // unreachable "never updated" fallback for exactly this branch (index.html, pre-redesign);
+    // it is deleted rather than kept, since there is no state left for it to render -- an account
+    // with no balance at all gets its own `.is-none`/`.is-never` branch below instead.
+    const age = bal != null ? ivBalanceAge(snap && snap.asOf) : null;
+    const isStale = !!(age && age.stale);
+    const isNever = bal == null;
+    const editing = ivEditAcctId === a.id;
+    let cls = 'mng-row iv-acct';
+    if (isStale) cls += ' is-stale';
+    if (isNever) cls += ' is-never';
+    if (editing) cls += ' is-editing';
+    const ageHtml = bal == null ? '' : '<span class="age-tag' + (isStale ? ' is-stale' : '') + '" title="last updated ' + esc((snap && snap.asOf) || '') + '">' + esc(age.text) + '</span>';
+    // A no-balance account was previously invisible twice: excluded from the total AND from the
+    // stale count, with nothing anywhere saying so. This flag + the registry-head note (below)
+    // are the fix -- surfaced on the row itself, not folded into the unrelated staleness banner.
+    const flagHtml = isNever ? '<span class="mng-flag">Not counted in your total</span>' : '';
+    const actLabel = isNever ? 'Record balance' : 'Update';
+    const trigger = editing ? '' : '<button type="button" class="ac-tool iv-act" data-iv-edit="' + a.id + '" aria-label="' + esc(actLabel + ' for ' + a.name) + '">' + esc(actLabel) + '</button>';
+    return '<div class="' + cls + '">'
+      + '<div class="mng-name" title="' + esc(a.name) + '">' + esc(a.name) + '</div>'
+      + '<div class="iv-amt' + (isNever ? ' is-none' : '') + '">' + (bal != null ? fmt$(bal) : 'No balance recorded') + '</div>'
+      + '<div class="mng-main"><span class="mng-meta">' + esc(a.type) + '</span>' + flagHtml + '</div>'
+      + '<div class="mng-actions iv-when">' + ageHtml + trigger + '</div>'
+      + (editing ? ivAcctEditPanelHtml(a, bal, snap) : '')
+      + '</div>';
+  }
+
+  // The editor. Balance + as-of + group all leave the resting row for here -- the as-of date is
+  // real and editable (defaulted to today), not the old hard-coded isoLocalDate() write, and the
+  // group move now rides along with the same Save rather than PATCHing on every dropdown change.
+  function ivAcctEditPanelHtml(a, bal, snap) {
+    const groupOpts = ivGroupNames().map(x => '<option value="' + esc(x) + '"' + (x === a.investGroup ? ' selected' : '') + '>' + esc(x) + '</option>').join('');
+    const title = (bal == null ? 'First dated snapshot for <b>' : 'New dated snapshot for <b>') + esc(a.name) + '</b>';
+    const note = bal == null
+      ? 'Nothing recorded yet, so this account adds nothing to your net worth. If you know last quarter’s figure, date it then rather than today.'
+      : 'Last recorded <b>' + fmt$(bal) + '</b> on ' + esc(ivFmtDate(snap && snap.asOf)) + '. Saving adds a new dated row; the old figure stays in your net-worth history.';
+    return '<div class="hb-editing iv-edit">'
+      + '<div class="hb-edit-title">' + title + '</div>'
+      + '<div class="iv-edit-grid">'
+      + '<label class="ac-field"><span class="ac-lbl">' + (bal == null ? 'Balance' : 'New balance') + '</span>'
+      + '<span class="input-pair"><input type="text" inputmode="decimal" data-fmt="usd" data-iv-bal placeholder="0" value="' + (bal != null ? fmtUSDval(bal) : '') + '"><span class="unit">$</span></span></label>'
+      + '<label class="ac-field"><span class="ac-lbl">As of</span><input type="date" data-iv-asof value="' + esc(isoLocalDate()) + '"></label>'
+      + '<label class="ac-field is-wide"><span class="ac-lbl">Group</span><select data-iv-grp>' + groupOpts + '</select></label>'
+      + '<span class="iv-edit-actions"><button type="button" class="primary" data-iv-save="' + a.id + '">Save snapshot</button>'
+      + '<button type="button" class="ac-tool" data-iv-cancel="' + a.id + '">Cancel</button></span>'
+      + '</div>'
+      + '<p class="iv-edit-note">' + note + '</p>'
+      + '</div>';
+  }
 
   function ivAcctRender() {
     const el = $('iv_acct_groups'); if (!el) return;
@@ -8551,8 +9182,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         : '<option value="">— all accounts are already included —</option>';
     }
     if (!ivAcct.accounts.length) {
-      el.innerHTML = '<span class="mini muted">No investment accounts yet — add one below, or include an existing account.</span>';
+      el.innerHTML = '<div class="iv-empty"><h3>Nothing in the registry yet.</h3>'
+        + '<p>This registry is what the Overview net-worth line and your FIRE progress count as yours. '
+        + 'Add a 401(k), an IRA, a brokerage or a savings account and record what is in it. Each update '
+        + 'writes a dated snapshot, so the trajectory gets built out of real figures instead of an assumption.</p></div>';
       $('iv_acct_summary').innerHTML = '';
+      // With no register to compete with, the lid starts open — there is exactly one thing to do
+      // here, so it should not be behind a click (mirrors the mockup's empty state).
+      const foot = $('iv_include_wrap'); if (foot) foot.open = true;
       // The empty path has to clear the derived readouts too. Returning early without touching
       // them left __ivSummary holding the PREVIOUS render's figures, so removing your last
       // registered account kept its count and its "N stale" on the tab strip indefinitely, and
@@ -8568,7 +9205,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const px = IV_GROUP_PRESETS.indexOf(x), py = IV_GROUP_PRESETS.indexOf(y);
       return (px < 0 ? 99 : px) - (py < 0 ? 99 : py) || x.localeCompare(y);
     });
-    let grand = 0, anyBal = false, h = '';
+    let grand = 0, anyBal = false, noBalN = 0, h = '<div class="iv-groups">';
     names.forEach(g => {
       const rows = groups[g];
       // Raw sum of balances: only asset types can enter this registry today. If a credit/loan
@@ -8576,26 +9213,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       // the isLiability sign here first. (The real net-worth cone already handles it server-side.)
       const tot = rows.reduce((s, a) => s + (ivBal(a) || 0), 0);
       grand += tot; if (rows.some(a => ivBal(a) != null)) anyBal = true;
-      // Capped to the same width as the table below it. The header used to span the whole card
-      // while the table stopped short, so a group's total sat ~700px right of the rows it was
-      // totalling, with nothing between them.
-      h += '<div class="subhead iv-acct-head"><span>' + esc(g) + '</span><span class="mono">' + fmt$(tot) + '</span></div>';
-      h += '<table class="res-table sc-tbl iv-acct-tbl" style="margin-bottom:6px">';
+      h += '<div class="iv-group"><div class="subhead iv-ghead"><span class="iv-gname" title="' + esc(g) + '">' + esc(g) + '</span><span class="iv-gtot">' + fmt$(tot) + '</span></div><div class="mng-list">';
       rows.sort((a, b) => a.name.localeCompare(b.name)).forEach(a => {
-        const bal = ivBal(a), snap = ivAcct.latest[a.id];
-        const age = ivBalanceAge(snap && snap.asOf);
-        const ageHtml = bal == null ? ''
-          : (age ? '<span class="age-tag' + (age.stale ? ' is-stale' : '') + '" title="last updated ' + esc((snap && snap.asOf) || '') + '">' + esc(age.text) + '</span>'
-                 : '<span class="age-tag is-stale">never updated</span>');
-        h += '<tr class="iv-row"><td class="iv-nm" title="' + esc(a.name) + '">' + esc(a.name) + '<small>' + esc(a.type) + '</small></td>'
-          + '<td class="num mono iv-bal">' + (bal != null ? fmt$(bal) : '<span class="muted">no balance yet</span>') + '</td>'
-          + '<td class="iv-when">' + ageHtml + '</td>'
-          + '<td class="num iv-upd"><input type="number" min="0" step="100" data-ivbal="' + a.id + '" placeholder="new balance" style="max-width:110px"/> <button type="button" class="ac-tool" data-ivupd="' + a.id + '">update</button></td>'
-          + '<td class="iv-grp"><select data-ivgrp="' + a.id + '" title="move to another group">' + ivGroupNames().map(x => '<option value="' + esc(x) + '"' + (x === a.investGroup ? ' selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></td></tr>';
+        if (ivBal(a) == null) noBalN++;
+        h += ivAcctRowHtml(a);
       });
-      h += '</table>';
+      h += '</div></div>';
     });
+    h += '</div>';
     el.innerHTML = h;
+    formatUSDFields();   // comma-format the freshly-rendered editor's balance input, if one is open
     try {
       const staleAccts = ivAcct.accounts.filter(a => {
         const sn = ivAcct.latest[a.id]; const ag = ivBalanceAge(sn && sn.asOf);
@@ -8606,7 +9233,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       ivStaleBanner(staleAccts);
     } catch (e) {}
     try { if (typeof renderTabIndex === 'function') renderTabIndex(); } catch (e) {}
-    $('iv_acct_summary').innerHTML = '<b>Total across ' + ivAcct.accounts.length + ' accounts: <span class="mono">' + fmt$(grand) + '</span></b>' + (anyBal ? '' : ' <span class="muted">(add balances to see totals)</span>');
+    // Surfaces the same "invisible twice" gap the row-level flag fixes, at the register's own
+    // level: a no-balance account contributes 0 to the total AND is excluded from the stale
+    // count above, so without this line nothing here says it isn't being counted.
+    const noteHtml = noBalN
+      ? '<span class="iv-reg-note">' + noBalN + (noBalN === 1 ? ' account has' : ' accounts have')
+        + ' no balance recorded, so ' + (noBalN === 1 ? 'it isn’t' : 'they aren’t') + ' counted here.</span>'
+      : '';
+    $('iv_acct_summary').innerHTML = '<div class="iv-reg-head"><span class="iv-reg-total">' + fmt$(grand) + '</span>'
+      + '<span class="iv-reg-sub">total across ' + ivAcct.accounts.length + (ivAcct.accounts.length === 1 ? ' account' : ' accounts')
+      + ' in ' + names.length + (names.length === 1 ? ' group' : ' groups') + (anyBal ? '' : ' — add balances to see totals') + '</span>'
+      + noteHtml + '</div>';
     ivAcctSuggest();
     pjAcctRender();   // the Projection section's account-picker shares this state
   }
@@ -8738,31 +9375,53 @@ document.addEventListener('DOMContentLoaded', async () => {
   {
     const sec = $('iv_acct_groups');
     if (sec) sec.addEventListener('click', async e => {
-      const upd = e.target.closest('[data-ivupd]');
-      if (upd) {
-        if (acWriteGuard()) return;
-        const id = +upd.dataset.ivupd;
-        const inp = sec.querySelector('[data-ivbal="' + id + '"]');
-        const v = rn(inp && inp.value);
-        if (!(v >= 0) || inp.value === '') { showToast('Enter the new balance first'); return; }
-        try {
-          await post('/api/tracking/snapshots', { accountId: id, asOf: isoLocalDate(), balance: v });
-          showToast('Balance updated — snapshot saved for today');
-          ivAcctLoad();
-          if (typeof renderNetWorth === 'function') { try { renderNetWorth(); } catch (e2) {} }   // trajectory reflects it
-          if (typeof ivNwRefresh === 'function') { try { ivNwRefresh(); } catch (e2) {} }         // …and the actual-vs-forecast card below
-        } catch (e2) { showToast('Could not save the balance: ' + (e2.message || '')); }
+      const openBtn = e.target.closest('[data-iv-edit]');
+      if (openBtn) {
+        ivEditAcctId = +openBtn.dataset.ivEdit;
+        ivAcctRender();
+        const balInp = sec.querySelector('.iv-edit [data-iv-bal]');
+        if (balInp) { balInp.focus(); balInp.select && balInp.select(); }
+        return;
       }
-    });
-    if (sec) sec.addEventListener('change', async e => {
-      const sel = e.target.closest('[data-ivgrp]');
-      if (sel) {
-        if (acWriteGuard()) { ivAcctRender(); return; }
+      const cancelBtn = e.target.closest('[data-iv-cancel]');
+      if (cancelBtn) {
+        const id = +cancelBtn.dataset.ivCancel;
+        ivEditAcctId = null;
+        ivAcctRender();
+        const trigger = sec.querySelector('[data-iv-edit="' + id + '"]');
+        if (trigger) trigger.focus();
+        return;
+      }
+      const saveBtn = e.target.closest('[data-iv-save]');
+      if (saveBtn) {
+        if (acWriteGuard()) return;
+        const id = +saveBtn.dataset.ivSave;
+        const balInp = sec.querySelector('.iv-edit [data-iv-bal]');
+        const asofInp = sec.querySelector('.iv-edit [data-iv-asof]');
+        const grpSel = sec.querySelector('.iv-edit [data-iv-grp]');
+        const v = rn(balInp && balInp.value);
+        if (!balInp || balInp.value.trim() === '' || !(v >= 0)) { showToast('Enter a balance first'); return; }
+        const asOf = (asofInp && asofInp.value) || isoLocalDate();
+        const acct = ivAcct.accounts.find(x => x.id === id);
         try {
-          // _fetchJSON throws on HTTP errors (raw fetch would swallow a 404/422 silently — review nit)
-          await _fetchJSON('/api/tracking/accounts/' + sel.dataset.ivgrp, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ investGroup: sel.value || '' }) });
-          ivAcctLoad();
-        } catch (e2) { showToast('Could not move the account: ' + (e2.message || '')); ivAcctRender(); }
+          await post('/api/tracking/snapshots', { accountId: id, asOf: asOf, balance: v });
+        } catch (e2) { showToast('Could not save the balance: ' + (e2.message || '')); return; }
+        // The group move rides along with the same Save rather than PATCHing on every dropdown
+        // change (that immediate-PATCH-on-change is what the old per-row select did) — moving an
+        // account happens once, not monthly, so it belongs to the deliberate act, not the field.
+        let moveErr = null;
+        if (grpSel && acct && grpSel.value && grpSel.value !== acct.investGroup) {
+          try {
+            // _fetchJSON throws on HTTP errors (raw fetch would swallow a 404/422 silently — review nit)
+            await _fetchJSON('/api/tracking/accounts/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ investGroup: grpSel.value }) });
+          } catch (e3) { moveErr = e3; }
+        }
+        showToast(moveErr ? ('Balance saved, but could not move the account: ' + (moveErr.message || ''))
+                           : ('Balance updated — snapshot saved for ' + asOf));
+        ivEditAcctId = null;
+        ivAcctLoad();
+        if (typeof renderNetWorth === 'function') { try { renderNetWorth(); } catch (e4) {} }   // trajectory reflects it
+        if (typeof ivNwRefresh === 'function') { try { ivNwRefresh(); } catch (e4) {} }         // …and the actual-vs-forecast card below
       }
     });
     const sg = $('iv_acct_suggest');
@@ -9241,7 +9900,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     ['bgb_cat_manage', 'ac_cat_manage'].forEach(id => {
       const el = $(id); if (!el) return;
       const cats = getCategories();
-      let h = '<div class="mng-list" style="margin-bottom:8px">';
+      // The five zones are COLUMNS, not a flex flow (see the .cat-list CSS): each cell is a
+      // direct child of the row and is placed by class, so an absent built-in chip leaves its
+      // column empty instead of sliding the select left. The header names the one control that
+      // never carried a visible label — a bare select offering Need/Want/Investment/Standalone.
+      let h = '<div class="mng-list cat-list" style="margin-bottom:8px">'
+        + '<div class="cat-head"><span class="ac-lbl">Category</span><span class="ac-lbl is-counts">Counts toward</span></div>';
       cats.forEach(c => {
         const resolved = categoryColor(c.key);
         if (c.key === catEditKey && c.locked) {
@@ -9250,7 +9914,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           // since <input type=color> can't accept a raw var(...) string).
           const seedHex = c.colorOverride || resolveCssColorToHex(c.color);
           h += '<div class="mng-row">'
-            + '<div class="mng-main">'
+            + '<div class="cat-edit">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(seedHex) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
             + '<span class="mng-name">' + esc(c.label) + '</span>'
             + '<span class="mng-meta">built-in — color only</span>'
@@ -9262,9 +9926,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             + '</div>';
         } else if (c.key === catEditKey && !c.locked) {
           h += '<div class="mng-row">'
-            + '<div class="mng-main">'
+            + '<div class="cat-edit">'
             + '<input id="' + esc(id) + '_editclr" type="color" value="' + esc(c.color) + '" style="height:24px;width:30px;padding:2px;cursor:pointer;border-radius:4px;flex-shrink:0">'
-            + '<input id="' + esc(id) + '_editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '" style="flex:1;min-width:120px">'
+            + '<input id="' + esc(id) + '_editlbl" class="cat-editlbl" type="text" value="' + esc(c.label) + '" data-editrow="' + esc(id) + '">'
             + '</div>'
             + '<div class="mng-actions">'
             + '<a href="#" class="gl-act gl-act-done" data-savecat="' + esc(id) + '" title="Save" aria-label="Save category">&#10003;</a>'
@@ -9273,20 +9937,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             + '</div>';
         } else {
           // "Counts toward" (0.3.4 batch): a compact select on EVERY category row — built-in or
-          // custom — that writes c.countsAs via setCategoryCountsAs(). It lives inside .mng-main
-          // (flex-wrap) so it drops to its own line under the name at narrow widths instead of
-          // clipping the swatch/label cluster (see technique_scgrid_inline_align_items_trap
-          // precedent: new elements in an existing row need an actual mobile-width check, not an
-          // assumption).
+          // custom — that writes c.countsAs via setCategoryCountsAs(). It owns column 4; below
+          // 900px the row folds to two lines and it drops under the name (the pane's content box
+          // is 613px at 901px of viewport, and the six tracks need ~550 of it).
           const caOpts = ['need', 'want', 'investment', ''].map(v =>
             '<option value="' + v + '"' + ((c.countsAs || '') === v ? ' selected' : '') + '>' + (v ? esc(KINDS[v].label) : 'Standalone') + '</option>').join('');
           h += '<div class="mng-row">'
-            + '<div class="mng-main">'
-            + '<span style="display:inline-block;width:13px;height:13px;border-radius:3px;flex-shrink:0;background:' + resolved + '"></span>'
-            + '<span class="mng-name">' + esc(c.label) + '</span>'
+            + '<span class="cat-swatch" style="background:' + resolved + '"></span>'
+            + '<span class="mng-name" title="' + esc(c.label) + '">' + esc(c.label) + '</span>'
             + (c.locked ? '<span class="mng-flag">built-in</span>' : '')
-            + '<select class="cat-countsas" data-countsas="' + esc(c.key) + '" title="counts toward the 50/30/20 framework" aria-label="' + esc(c.label) + ' counts toward" style="font-size:var(--fs-2xs);padding:1px 3px;border-radius:4px;width:116px;flex-shrink:0">' + caOpts + '</select>'
-            + '</div>'
+            + '<select class="cat-countsas" data-countsas="' + esc(c.key) + '" title="counts toward the 50/30/20 framework" aria-label="' + esc(c.label) + ' counts toward">' + caOpts + '</select>'
             + '<div class="mng-actions">'
             + (c.locked ? '<a href="#" class="gl-act gl-act-primary" data-editcat="' + esc(c.key) + '" title="Recolor ' + esc(c.label) + '" aria-label="Recolor ' + esc(c.label) + '">&#9998;</a>' : '')
             + (c.locked && c.colorOverride ? '<a href="#" class="gl-act" data-resetcat="' + esc(c.key) + '" title="Reset to default color" aria-label="Reset ' + esc(c.label) + ' to default color">&#8635;</a>' : '')
@@ -9297,8 +9957,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
       h += '</div>'
-        + '<div class="ac-row" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">'
-        + '<label class="ac-field" style="flex:1 1 140px"><span class="ac-lbl">Label</span>'
+        + '<div class="ac-row cat-add" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">'
+        + '<label class="ac-field is-label"><span class="ac-lbl">Label</span>'
         + '<input id="' + esc(id) + '_lbl" type="text" placeholder="e.g. Medical"></label>'
         + '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Color</span>'
         + '<input id="' + esc(id) + '_clr" type="color" value="#7aa7ff" style="height:34px;width:40px;padding:2px;cursor:pointer;border-radius:4px"></label>'
@@ -12544,9 +13204,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     names.forEach(name => {
       const t = customs[name];
       if (name === stratEditKey) {
-        h += '<div class="mng-row"><div class="mng-main">'
-          + '<input id="bgb_strat_editname" type="text" value="' + esc(name) + '" data-editrow="strat" style="flex:1 1 140px;min-width:120px">'
-          + '<span class="mini">Need <input class="mi" id="bgb_strat_editneed" type="number" min="0" max="100" step="1" value="' + Math.round(t.need * 100) + '">% &middot; Want <input class="mi" id="bgb_strat_editwant" type="number" min="0" max="100" step="1" value="' + Math.round(t.want * 100) + '">% &middot; Investment <output id="bgb_strat_editinv">' + Math.round(t.investment * 100) + '</output>%</span>'
+        // Same grammar as the composer below, same 34px control height throughout, so the name
+        // box and the three percentages sit on ONE centre line instead of the old mix of a
+        // 34px text field beside 26px `.mi` boxes inside a run of prose.
+        h += '<div class="mng-row"><div class="mng-main strat-edit">'
+          + '<input id="bgb_strat_editname" class="strat-editname" type="text" value="' + esc(name) + '" data-editrow="strat">'
+          + '<span class="strat-lbl">Need</span><span class="input-pair"><input class="mi" id="bgb_strat_editneed" type="number" min="0" max="100" step="1" value="' + Math.round(t.need * 100) + '" aria-label="Need percent"><span class="unit">%</span></span>'
+          + '<span class="strat-lbl">Want</span><span class="input-pair"><input class="mi" id="bgb_strat_editwant" type="number" min="0" max="100" step="1" value="' + Math.round(t.want * 100) + '" aria-label="Want percent"><span class="unit">%</span></span>'
+          + '<span class="strat-lbl">Investment</span><span class="input-pair is-locked"><output id="bgb_strat_editinv" aria-label="Investment percent (derived)">' + Math.round(t.investment * 100) + '</output><span class="unit">%</span></span>'
           + '</div><div class="mng-actions">'
           + '<a href="#" class="gl-act gl-act-done" data-stratsave title="Save" aria-label="Save strategy">&#10003;</a>'
           + '<a href="#" class="gl-act gl-act-del" data-stratcancel title="Cancel" aria-label="Cancel edit">&#10005;</a>'
@@ -12560,10 +13225,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           + '</div></div>';
       }
     });
+    // Four columns of the same shape — label over control — so the labels share one line and
+    // the controls share one centre line. Name was previously the only labelled field (49px
+    // tall) with the percentages centred beside it as prose, which is why nothing lined up.
+    // Investment is derived (100 − need − want), so it is a LOCKED field, not an editable one:
+    // `.input-pair.is-locked` says read-only with a fill rather than a subtle edge (§G).
     h += '</div>'
-      + '<div class="ac-row" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">'
-      + '<label class="ac-field" style="flex:1 1 140px"><span class="ac-lbl">Name</span><input id="bgb_strat_name" type="text" placeholder="e.g. After the raise"></label>'
-      + '<span class="mini" style="align-self:center">Need <input class="mi" id="bgb_strat_need" type="number" min="0" max="100" step="1" value="50">% &middot; Want <input class="mi" id="bgb_strat_want" type="number" min="0" max="100" step="1" value="30">% &middot; Investment <output id="bgb_strat_inv">20</output>%</span>'
+      + '<div class="ac-row strat-form" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:2px">'
+      + '<label class="ac-field is-name"><span class="ac-lbl">Name</span><input id="bgb_strat_name" type="text" placeholder="e.g. After the raise"></label>'
+      + '<label class="ac-field is-pct"><span class="ac-lbl">Need</span><span class="input-pair"><input class="mi" id="bgb_strat_need" type="number" min="0" max="100" step="1" value="50"><span class="unit">%</span></span></label>'
+      + '<label class="ac-field is-pct"><span class="ac-lbl">Want</span><span class="input-pair"><input class="mi" id="bgb_strat_want" type="number" min="0" max="100" step="1" value="30"><span class="unit">%</span></span></label>'
+      + '<label class="ac-field is-pct"><span class="ac-lbl">Investment</span><span class="input-pair is-locked"><output id="bgb_strat_inv">20</output><span class="unit">%</span></span></label>'
       + '<button class="seed-btn" data-stratadd type="button">+ Add strategy</button>'
       + '</div>'
       + '<div id="bgb_strat_err" class="mini bad-text" style="margin-top:4px;min-height:1em"></div>';
@@ -12991,6 +13663,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acMonthLabel(m) { const a = m.split('-').map(Number); return new Date(a[0], a[1] - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' }); }
   function acMonthShift(m, d) { let a = m.split('-').map(Number), y = a[0], mo = a[1] + d; y += Math.floor((mo - 1) / 12); mo = ((mo - 1) % 12 + 12) % 12 + 1; return y + '-' + String(mo).padStart(2, '0'); }
   function acMonthEnd(m) { const a = m.split('-').map(Number); return m + '-' + String(new Date(a[0], a[1], 0).getDate()).padStart(2, '0'); }
+
+  // Setup's "Accounts" and "Import & snapshots" panes are built from the same markup and the same
+  // handlers as Actuals — but acWire() only ever ran from acOnOpen(), the ACTUALS hook. On a
+  // session that went straight to Setup, every control in those panes was inert: "Save balance"
+  // did nothing at all, silently, and the as-of date had no default. Only acLoadAccounts() was
+  // called here, which fills the panes with data and so makes them look perfectly functional.
+  //
+  // Reported as "we cannot update the balance of the Accounts, as a one time thing", alongside
+  // "the normal in with the Actuals works fine" — which is the same fact from the other side:
+  // visiting Actuals is what wired the form. acWire() is idempotent (ACT.wired), so this is safe
+  // to call on either hook, in either order, however many times.
+  function acOnSetupOpen() {
+    if (!ACT.month) ACT.month = acNowMonth();
+    acWire();
+    const sd = $('ac_snap_date'); if (sd && !sd.value) sd.value = (ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month));
+    acLoadAccounts();
+  }
 
   function acOnOpen() {
     if (!ACT.month) ACT.month = acNowMonth();
@@ -13564,7 +14253,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (ACT.snapAccts.has(a.id)) {
       const ab = ACT.balances[a.id];
       const asOf = ACT.latestSnap[a.id];
-      if (ab && ab.balance != null) balanceHtml = fmt$(ab.balance) + (a.isLiability ? ' owed' : '') + (asOf ? ' (as of ' + acDateShort(asOf) + ')' : '');
+      if (ab && ab.balance != null) balanceHtml = fmt$(ab.balance) + (a.isLiability ? ' owed' : '')
+        + (asOf ? ' (as of ' + acDateShort(asOf) + ')' : '')
+        // A balance you cannot correct is a balance you stop trusting. The pencil edits
+        // type/liability/credit-limit only, and the "start tracking" link below appears solely
+        // when there is NO balance — so an account that had one was a dead end.
+        + ' <a href="#" class="gl-act gl-act-primary" data-set-balance="' + a.id + '"'
+        + ' title="Update the balance of ' + esc(a.name) + '"'
+        + ' aria-label="Update the balance of ' + esc(a.name) + '">Update</a>';
       else balanceHtml = '<span class="muted">—</span>';   // account-balances still loading/failed
     } else {
       balanceHtml = '<a href="#" class="gl-act gl-act-primary" data-set-balance="' + a.id + '">Set a balance to start tracking &rarr;</a>';
@@ -13595,9 +14291,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     const forced = acLiabForceFor(a.type);
     const typeOpts = ['checking', 'savings', 'brokerage', 'retirement', 'hsa', 'credit', 'loan', 'cash', 'other']
       .map(t => '<option value="' + t + '"' + (t === a.type ? ' selected' : '') + '>' + t + '</option>').join('');
+    // The balance this row currently shows, so the field opens on the real number rather than
+    // empty — an empty box beside "Balance" reads as "you have none", and typing over a figure
+    // you can see is the difference between correcting a balance and re-entering one.
+    const ab = ACT.balances[a.id];
+    const curBal = (ACT.snapAccts.has(a.id) && ab && ab.balance != null) ? ab.balance : null;
+    const asOf = ACT.latestSnap[a.id] || '';
+    const noBalance = a.type === 'credit';        // credit balances live in Pay-off-your-cards
     return '<div class="mng-row">'
       + '<div class="mng-main"><span class="mng-name">' + esc(a.name) + '</span></div>'
       + '<div class="ac-row" style="flex-wrap:wrap;grid-column:1 / -1;margin-top:6px">'
+      // Rename was excluded from this form when it was built ("still writes type/isLiability/
+      // creditLimit only"). The PATCH route has always accepted `name`, so the only thing
+      // stopping you fixing an account you called "test" was this missing input.
+      + '<label class="ac-field"><span class="ac-lbl">Name</span>'
+      + '<input type="text" data-acct-name="' + a.id + '" value="' + esc(a.name) + '" style="min-width:170px"></label>'
       + '<label class="ac-field"><span class="ac-lbl">Type</span><select data-acct-type="' + a.id + '">' + typeOpts + '</select></label>'
       + '<span class="ac-field"><span class="ac-lbl">Liability</span>'
       + '<span class="mng-flag" data-acct-liab-flag="' + a.id + '" style="display:' + (forced !== null ? '' : 'none') + '">Auto: ' + (forced ? 'liability' : 'asset') + '</span>'
@@ -13606,6 +14314,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '</span>'
       + '<span class="ac-field" data-acct-limit-wrap="' + a.id + '" style="display:' + (a.type === 'credit' ? '' : 'none') + '"><span class="ac-lbl">Credit limit</span>'
       + '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-fmt="usd" data-acct-limit="' + a.id + '" value="' + (a.creditLimit != null ? a.creditLimit : '') + '" placeholder="5,000"></span></span>'
+      // Balance edits WRITE A SNAPSHOT — they do not mutate the account — so the as-of date is
+      // part of the control, not hidden. Leaving the balance untouched writes nothing at all.
+      + (noBalance ? '' :
+          '<span class="ac-field" data-acct-bal-wrap="' + a.id + '"><span class="ac-lbl">Balance</span>'
+          + '<span class="input-pair"><input type="text" inputmode="decimal" data-fmt="usd" data-acct-bal="' + a.id + '"'
+          + ' value="' + (curBal != null ? fmtUSDval(curBal) : '') + '" placeholder="' + (curBal != null ? '' : 'not set yet') + '"><span class="unit">$</span></span></span>'
+        + '<label class="ac-field" data-acct-asof-wrap="' + a.id + '"><span class="ac-lbl">As of</span>'
+          + '<input type="date" data-acct-asof="' + a.id + '" value="' + esc(asOf || acToday()) + '"></label>')
       + '<button type="button" class="seed-btn" data-acct-save="' + a.id + '">Save</button>'
       + '<button type="button" class="ac-tool" data-acct-cancel="' + a.id + '">Cancel</button>'
       + '</div>'
@@ -13655,13 +14371,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // manage-panel-redesign.md §4b — the "Set a balance" nudge scrolls to and preselects the
   // existing snapshot composer rather than opening any new UI.
+  // Setup shows exactly ONE pane at a time (setup_nav above), and the balance form lives in
+  // "Import & snapshots" while the accounts list lives in "Accounts". Calling scrollIntoView()
+  // and focus() on an element inside a [hidden] section are both silent no-ops — so this link
+  // did nothing at all, the same dead-control failure as BUG-0023/BUG-0024. Switch the pane
+  // first, then scroll, then focus.
+  function acShowSetupPane(want) {
+    const nav = $('setup_nav'); if (!nav) return false;
+    const a = nav.querySelector('[data-setup="' + want + '"]'); if (!a) return false;
+    a.click();                       // reuse the nav's own handler rather than re-implementing it
+    return true;
+  }
   function acScrollToSnapshotForm(acctId) {
-    const sel = $('ac_snap_acct'); if (sel) sel.value = acctId;
     const bal = $('ac_snap_bal');
-    if (bal) {
+    if (!bal) return;
+    const pane = bal.closest('[data-setup-pane]');
+    if (pane && pane.hidden) acShowSetupPane(pane.getAttribute('data-setup-pane'));
+    // The select is repopulated on render, so set the value AFTER the pane is live.
+    const sel = $('ac_snap_acct'); if (sel && acctId != null) sel.value = acctId;
+    requestAnimationFrame(() => {
       bal.scrollIntoView({ behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'center' });
       bal.focus();
-    }
+    });
   }
 
   // A row's Type select changed (not yet saved) -- re-lock the Liability flag/checkbox and
@@ -13707,18 +14438,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     // action (acFixLiability). The decision itself lives in acSaveLiabValue() (not re-derived
     // here) so tests/test_client_math.js exercises the SAME production function.
     const body = { type: type, isLiability: acSaveLiabValue(type, liabEl ? liabEl.checked : false) };
+    // Rename. Sent only when it actually changed and is non-empty — an absent key means "don't
+    // touch" (AccountUpdateModel drops None), so a blank box can never wipe the name.
+    const nameEl = document.querySelector('[data-acct-name="' + id + '"]');
+    if (nameEl) {
+      const nm = nameEl.value.trim();
+      if (!nm) { showToast('An account needs a name'); return; }
+      body.name = nm;
+    }
     // creditLimit omitted (not sent as null) when not a credit account or left blank -- the
     // server treats an absent key as "don't touch" (AccountUpdateModel drops None fields), so
     // this never clears an existing limit as a side effect of an unrelated type/liability save.
     if (type === 'credit' && limitEl && limitEl.value.trim() !== '') body.creditLimit = rn(limitEl.value);
+    // The balance is NOT an account field — it is a snapshot, a dated observation, which is why
+    // it posts separately and why the as-of date sits beside it. Only written when the figure
+    // actually changed: re-saving an unrelated type edit must not stamp a duplicate snapshot
+    // dated today over a balance you set last week.
+    const balEl = document.querySelector('[data-acct-bal="' + id + '"]');
+    const asOfEl = document.querySelector('[data-acct-asof="' + id + '"]');
+    let snapshot = null;
+    if (balEl && balEl.value.trim() !== '') {
+      const want = rn(balEl.value);
+      const ab = ACT.balances[id];
+      const had = (ACT.snapAccts.has(+id) && ab && ab.balance != null) ? ab.balance : null;
+      const asOfWant = (asOfEl && asOfEl.value) || acToday();
+      const asOfHad = ACT.latestSnap[id] || '';
+      if (had == null || Math.abs(want - had) >= 0.005 || asOfWant !== asOfHad) {
+        snapshot = { accountId: +id, asOf: asOfWant, balance: want };
+      }
+    }
     try {
       await _fetchJSON('/api/tracking/accounts/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      showToast('Account updated');
+      // After the account itself, so a rejected PATCH never leaves a snapshot behind for an
+      // account whose edit failed.
+      if (snapshot) await post('/api/tracking/snapshots', snapshot);
+      showToast(snapshot ? 'Account and balance updated' : 'Account updated');
       acEditAcctId = null;   // back to the quiet view row on a successful save
       // Adversarial-review finding #3: a credit-limit change must reach the "Pay off your cards"
       // meter immediately -- acLoadAccounts() alone never calls acRenderCards; without this the
       // meter stayed absent/stale until the user switched tabs.
       await acLoadAccounts();
+      if (snapshot) { acLoadBalances(); try { ivNwRefresh(); } catch (e2) {} }
       acRefresh();
     } catch (e) {
       showToast('Could not update the account: ' + (e.message || ''));
@@ -15278,7 +16038,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (prefs.inflation != null) fireSetField('fire-inflation',  prefs.inflation);
     if (prefs.leanMult  != null) fireSetField('fire-lean-mult',  prefs.leanMult);
     if (prefs.fatMult   != null) fireSetField('fire-fat-mult',   prefs.fatMult);
-    if (prefs.currentNW) { const nwEl = $('fire-nw'); if (nwEl) nwEl.value = prefs.currentNW; }
+    if (prefs.currentNW) { const nwEl = $('fire-nw'); if (nwEl) nwEl.value = fmtUSDval(rn(prefs.currentNW)); }
   }
 
   async function fireGetLatestNW() {
@@ -15430,7 +16190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Pre-fill lever savings at +10% when the user hasn't touched it yet.
     const leverEl = $('fire-lever-savings');
     if (leverEl && !leverEl.dataset.touched && annualSavings > 0) {
-      leverEl.value = Math.round(annualSavings * 1.1);
+      leverEl.value = fmtUSDval(Math.round(annualSavings * 1.1));   // formatter, not a raw write
     }
 
     try {
@@ -15609,14 +16369,456 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nwEl = $('fire-nw');
     if (nwEl && !prefs.currentNW) {
       const snap = await fireGetLatestNW().catch(() => null);
-      if (snap != null && snap > 0) nwEl.value = Math.round(snap);
+      if (snap != null && snap > 0) nwEl.value = fmtUSDval(Math.round(snap));
       else if (window.__nwForecast && window.__nwForecast.anchorValue)
-        nwEl.value = Math.round(window.__nwForecast.anchorValue);
+        nwEl.value = fmtUSDval(Math.round(window.__nwForecast.anchorValue));
     }
 
     await fireCalc();
   }
 })();
+
+// ---------- Job change screen: wiring ----------
+// The math lives in the pure jc* functions above (tested in tests/test_client_math.js). This
+// block only reads the DOM, calls them, and paints. Nothing here writes to your real Tax inputs
+// until the Apply button is pressed.
+(function () {
+  const JC_KEY = 'itc.jobchange.v1';
+  // The app's `esc` is declared inside a later IIFE, so it is not in scope here — referencing
+  // it would throw and silently kill this whole block.
+  const jcEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const V = id => { const e = $(id); return e ? rn(e.value) : 0; };
+  const S = id => { const e = $(id); return e ? e.value : ''; };
+  const yearOf = iso => (iso && /^\d{4}-/.test(iso)) ? +iso.slice(0, 4) : new Date().getFullYear();
+
+  function jcEligibleDate(startIso, n, unit) {
+    if (!startIso) return '';
+    const d = new Date(startIso + 'T00:00:00');
+    if (isNaN(d)) return '';
+    const k = Math.max(0, Math.round(n) || 0);
+    if (unit === 'weeks') d.setDate(d.getDate() + k * 7);
+    else if (unit === 'months') {
+      // setMonth overflows rather than clamping: 31 Jan + 1 month lands on 3 Mar, so a "1 month"
+      // benefits wait from a month-end start date silently skipped the whole of February — and
+      // that date is what decides how many cheques the HSA has left. Clamp to the month's end.
+      const day = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + k);
+      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    }
+    else d.setDate(d.getDate() + k);
+    return isoLocalDate(d);
+  }
+
+  function jcHumanDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function jcInputs() {
+    const start = S('jc_start');
+    const year = yearOf(start || S('jc_a_last'));
+    const yearEnd = year + '-12-31';
+    const elig401k = jcEligibleDate(start, V('jc_wait_401k'), S('jc_wait_401k_unit'));
+    const eligHsa = jcEligibleDate(start, V('jc_wait_hsa'), S('jc_wait_hsa_unit'));
+    const freq = S('jc_b_freq') || 'semimonthly';
+    const perYear = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 }[freq] || 24;
+    const salary = V('jc_b_salary');
+    return {
+      year, yearEnd, start, freq, perYear,
+      elig401k, eligHsa,
+      perPeriodPay: perYear > 0 ? salary / perYear : 0,
+      salary,
+      a: {
+        last: S('jc_a_last'), wages: V('jc_a_wages'), bonus: V('jc_a_bonus'),
+        trad: V('jc_a_trad'), roth: V('jc_a_roth'), hsa: V('jc_a_hsa'),
+        mega: V('jc_a_mega'), match: V('jc_a_match'), ira: V('jc_a_ira'),
+      },
+      b: { bonus: V('jc_b_bonus'), mrate: V('jc_b_mrate') / 100, mpct: V('jc_b_mpct') / 100,
+           current: V('jc_b_current'), kind: S('jc_b_kind') || 'same' },
+      hsaCover: S('jc_hsa_cover'),
+    };
+  }
+
+  function jcHsaMonths(i) {
+    if (i.hsaCover !== 'lapses') return 12;
+    // Covered while at the old job (to its last day) and again from the new plan's start.
+    const segs = [];
+    if (i.a.last) segs.push({ from: i.year + '-01-01', to: i.a.last });
+    if (i.eligHsa) segs.push({ from: i.eligHsa, to: i.yearEnd });
+    return segs.length ? jcHsaEligibleMonths(segs) : 12;
+  }
+
+  function jcTarget(mode, custom, cap, matchTarget) {
+    if (mode === 'custom') return custom;
+    if (mode === 'match') return matchTarget;
+    return cap;
+  }
+
+  function jcCompute() {
+    const i = jcInputs();
+    const p401k = jcPeriodsRemaining(i.elig401k, i.yearEnd, i.freq);
+    const pHsa = jcPeriodsRemaining(i.eligHsa, i.yearEnd, i.freq);
+    const hsaMonths = jcHsaMonths(i);
+    const hsaCap = jcHsaLimit(currentHsaLimit(), hsaMonths);
+
+    // "Just the full match" — the deferral that captures every matched dollar for the periods
+    // you are actually eligible, not for a whole year you do not have.
+    const matchTarget = i.a.trad + i.a.roth + (i.perPeriodPay * p401k * i.b.mpct);
+
+    const f401k = jcFeasibility({
+      target: jcTarget(S('jc_t_401k_mode'), V('jc_t_401k'), LIMIT_401K, matchTarget),
+      already: i.a.trad + i.a.roth, periodsRemaining: p401k,
+      perPeriodPay: i.perPeriodPay, currentPerPeriod: i.b.current,
+    });
+    const fHsa = jcFeasibility({
+      target: jcTarget(S('jc_t_hsa_mode'), V('jc_t_hsa'), hsaCap, hsaCap),
+      already: i.a.hsa, periodsRemaining: pHsa, perPeriodPay: i.perPeriodPay,
+    });
+    // A Roth IRA is yours, not your employer's: no eligibility wait, and it can be funded in a
+    // lump right up to the filing deadline — so periods are months left, not paychecks.
+    const monthsLeft = Math.max(0, 12 - (new Date().getMonth() + (yearOf(i.start) === new Date().getFullYear() ? 1 : 0)) + 1);
+    const fIra = jcFeasibility({
+      target: jcTarget(S('jc_t_ira_mode'), V('jc_t_ira'), LIMIT_ROTH_IRA, LIMIT_ROTH_IRA),
+      already: i.a.ira, periodsRemaining: Math.max(1, monthsLeft),
+      perPeriodPay: LIMIT_ROTH_IRA,     // no payroll ceiling on a personal contribution
+    });
+
+    const newDeferral = Math.max(0, f401k.status === 'unreachable' ? f401k.reachable - (i.a.trad + i.a.roth)
+                                                                   : f401k.needPerPeriod * p401k);
+    // Pre-tax and Roth are ONE §402(g) limit, so feasibility is answered on the total — but they
+    // are not one tax answer, and the blended year has to say which it is. This was hardcoded to
+    // pre-tax, which silently converted a Roth-only saver to traditional and moved their taxable
+    // income by the whole deferral. 'same' reuses the split already typed in for job 1, and falls
+    // back to pre-tax when job 1 had no 401(k) at all — the app's own default elsewhere.
+    const priorDeferral = i.a.trad + i.a.roth;
+    const rothShare = i.b.kind === 'roth' ? 1 : i.b.kind === 'trad' ? 0
+                    : priorDeferral > 0 ? i.a.roth / priorDeferral : 0;
+    const newRoth = newDeferral * rothShare;
+    const newTrad = newDeferral - newRoth;
+    const newHsa = Math.max(0, fHsa.status === 'unreachable' ? fHsa.reachable - i.a.hsa
+                                                            : fHsa.needPerPeriod * pHsa);
+    const newMatch = i.perPeriodPay * p401k * Math.min(i.b.mpct, i.perPeriodPay > 0 ? (newDeferral / p401k) / i.perPeriodPay : 0) * i.b.mrate;
+
+    // Paychecks between starting and becoming eligible — match earned in them is gone, because
+    // most plans do not true up at year end.
+    const missed = Math.max(0, jcPeriodsRemaining(i.start, i.yearEnd, i.freq) - p401k);
+    const forgone = jcMatchForgone({ perPeriodPay: i.perPeriodPay, missedPeriods: missed,
+                                     matchRate: i.b.mrate, matchUpToPct: i.b.mpct });
+
+    const perNew = jcPeriodsRemaining(i.start, i.yearEnd, i.freq);
+    const wagesB = i.perPeriodPay * perNew;
+    // Read the wage base and rate from the Tax tab's own editable fields, exactly as
+    // buildPayload() does — they are inputs, not constants, and a user who edits them there
+    // must see the same numbers here.
+    const ssBase = V('ssBase'), ssRate = (+S('ssRate') || 0) / 100;
+    const excessSS = jcExcessSocialSecurity([i.a.wages + i.a.bonus, wagesB + i.b.bonus], ssBase, ssRate);
+
+    const blended = jcBlendedYear(
+      { wages: i.a.wages, bonus: i.a.bonus, trad401k: i.a.trad, roth401k: i.a.roth,
+        hsa: i.a.hsa, afterTax401k: i.a.mega, employerMatch: i.a.match, rothIra: i.a.ira },
+      { wages: wagesB, bonus: i.b.bonus, trad401k: newTrad, roth401k: newRoth,
+        hsa: newHsa, afterTax401k: 0, employerMatch: newMatch, rothIra: fIra.reachable - i.a.ira });
+
+    // §415(c) comes from the server's own limits when a calculation has run, with the statutory
+    // figure as the offline fallback — the same hydrate-or-fall-back shape as LIMIT_401K.
+    const lim415 = (window.__taxResult && window.__taxResult.limits
+                    && window.__taxResult.limits.sec415cLimit) || 72000;
+    return { i, p401k, pHsa, hsaMonths, hsaCap, f401k, fHsa, fIra, iraMonths: Math.max(1, monthsLeft),
+             newDeferral, newTrad, newRoth, rothShare, perNew, lim415,
+             missed, forgone, excessSS, wagesB, blended, ssBase };
+  }
+
+  const JC_TONE = { reachable: 'good', 'already-there': 'good', tight: 'warn',
+                    unreachable: 'bad', 'no-periods': 'bad' };
+  // The verdict WORD, shared by the tile and by the bucket's section heading so the two can
+  // never drift. Adding a status without a word here shows an empty verdict rather than a
+  // silently wrong one.
+  const JC_HEAD = { 'already-there': 'Done', reachable: 'Reachable', tight: 'Reachable, but tight',
+                    'no-periods': 'No room left', unreachable: 'Out of reach' };
+
+  // `showsPct`  — is payroll the constraint? (false for a personal IRA)
+  // `hasCurrent` — did the caller supply what the user elects today? (401(k) only)
+  function jcTile(name, f, periods, perLabel, showsPct, hasCurrent) {
+    const tone = JC_TONE[f.status] || '';
+    let head, sub;
+    if (f.status === 'already-there') {
+      head = JC_HEAD[f.status];
+      // Composed here rather than taken from f.message: the pure function has no fmt$, so its
+      // message carries a bare number, and "Already past this target — 1200 over." was the one
+      // figure on this screen not wearing a dollar sign.
+      const over = f.already - f.target;
+      sub = over > 0.5 ? 'Already ' + fmt$(Math.round(over)) + ' past this target.'
+                       : 'Already at this target.';
+    } else if (f.status === 'reachable' || f.status === 'tight') {
+      head = JC_HEAD[f.status];
+      // The "x% of each paycheck" clause is only meaningful where payroll is the constraint.
+      // A Roth IRA is funded from your own pocket to the filing deadline, so the percentage
+      // there was a fraction of the ANNUAL LIMIT wearing a paycheck's label — dropped.
+      // The delta is only shown where a current election was actually supplied; on HSA and
+      // Roth IRA nothing is passed, so it read as "$1,500 more than you elect today" against
+      // a 401(k)-only field the user never filled for this bucket.
+      const share = (f.status === 'tight' && f.needPct != null && isFinite(f.needPct) && showsPct)
+        ? ' That is ' + Math.round(f.needPct * 100) + '% of each paycheck.' : '';
+      const delta = !hasCurrent ? '.'
+        : f.deltaPerPeriod > 0.5 ? ' — ' + fmt$(Math.round(f.deltaPerPeriod)) + ' more than you elect today.'
+        : f.deltaPerPeriod < -0.5 ? ' — ' + fmt$(Math.round(-f.deltaPerPeriod)) + ' less than you elect today.'
+        : ' — the same as you elect today.';
+      sub = 'Put in ' + fmt$(Math.round(f.needPerPeriod)) + ' ' + perLabel + ' across the '
+          + periods + ' you have left' + delta + share;
+    } else if (f.status === 'no-periods') {
+      head = JC_HEAD[f.status];
+      sub = f.message + ' You finish the year at ' + fmt$(Math.round(f.already))
+          + ', ' + fmt$(Math.round(f.shortfall)) + ' short of ' + fmt$(Math.round(f.target)) + '.';
+    } else {
+      head = JC_HEAD[f.status] || '';
+      // extraPeriods is Infinity when there is no pay to contribute from; never print that.
+      const more = isFinite(f.extraPeriods)
+        ? ' It would have taken about ' + f.extraPeriods + ' more '
+          + perLabel.replace('per ', '') + (f.extraPeriods === 1 ? '.' : 's.')
+        : '';
+      sub = 'The most that fits is ' + fmt$(Math.round(f.reachable)) + ' — '
+          + fmt$(Math.round(f.shortfall)) + ' short of ' + fmt$(Math.round(f.target)) + '.' + more;
+    }
+    // .k / .v / .s is the tile's own anatomy — the name belongs in .k rather than being packed
+    // into the headline, and .v is left at the component's size instead of being inline-shrunk
+    // (this screen would have been the FOURTH surface to shrink .tile .v, a habit the element
+    // audit already objects to). The verdict WORD carries the state; the tone class reinforces
+    // it rather than being the only signal, and the glyphs are gone — ⚠ served three different
+    // statuses, so it never separated warn from bad anyway.
+    return '<div class="tile ' + tone + '"><div class="k">' + jcEsc(name) + '</div>'
+         + '<div class="v">' + jcEsc(head) + '</div>'
+         + '<div class="s" style="line-height:1.5">' + jcEsc(sub) + '</div></div>';
+  }
+
+  // The screen can only answer once it knows when the new job starts and what it pays. Before
+  // that, `jcPeriodsRemaining('')` is 0 — indistinguishable from a gap that really did eat the
+  // year — so the cold screen accused you of finishing $24,500 short of a target you had never
+  // set, in the `bad` tone, as the first thing on the card.
+  function jcUsable(r) { return !!(r.i.start && r.i.salary > 0); }
+
+  // Echo each bucket's verdict onto its section heading. The tiles say the same thing, but they
+  // scroll away — and by the time you are typing in the HSA section they are long gone, which is
+  // exactly when you want to know whether what you just typed changed the answer.
+  function jcHeads(r) {
+    [['jc_head_401k', r && r.f401k], ['jc_head_hsa', r && r.fHsa], ['jc_head_ira', r && r.fIra]]
+      .forEach(([id, f]) => {
+        const e = $(id); if (!e) return;
+        e.textContent = f ? '· ' + (JC_HEAD[f.status] || '') : '';
+        e.className = 'jc-verd' + (f ? ' ' + (JC_TONE[f.status] || '') : '');
+      });
+  }
+
+  // A bucket's running numbers, rendered into the rail beside its fields. These are the figures
+  // you would otherwise be doing in your head while typing — cap, what is already in, what is
+  // left, and what that works out to per cheque — and they are what fills the ~800px the form
+  // left empty. Every value here already existed in the compute result; none is new arithmetic.
+  function jcStatRows(rows) {
+    return rows.filter(Boolean).map(([k, v, sub, tone]) =>
+      '<div class="jc-stat' + (tone ? ' ' + tone : '') + '">'
+      + '<span class="k">' + jcEsc(k) + '</span>'
+      + '<span class="v">' + jcEsc(v) + '</span>'
+      + (sub ? '<span class="s">' + jcEsc(sub) + '</span>' : '') + '</div>').join('');
+  }
+
+  const JC_DASH = '\u2014';
+
+  function jcRenderStats(r) {
+    const set = (id, html) => { const e = $(id); if (e) e.innerHTML = html; };
+    if (!r) {
+      const blank = n => jcStatRows(Array.from({ length: n }, () => ['', JC_DASH]));
+      ['jc_stats_pay', 'jc_stats_401k', 'jc_stats_hsa', 'jc_stats_ira']
+        .forEach(id => set(id, blank(0)));
+      return;
+    }
+    const m = v => fmt$(Math.round(v));
+    const cheques = n => n + ' paycheck' + (n === 1 ? '' : 's');
+
+    set('jc_stats_pay', jcStatRows([
+      ['Wages for the year', m(r.blended.salary),
+       m(r.i.a.wages) + ' already earned + ' + m(r.wagesB) + ' at the new job'],
+      ['Bonus for the year', m(r.blended.bonus)],
+      ['Total comp', m(r.blended.salary + r.blended.bonus)],
+      ['Paychecks at the new job', String(r.perNew)],
+      r.excessSS > 0.5 && ['Social Security over-withheld', m(r.excessSS),
+        'Each employer withholds up to the ' + m(r.ssBase) + ' wage base on its own, so two in '
+        + 'one year takes too much. Claim it back on your return — nobody refunds it automatically.',
+        'good'],
+    ]));
+
+    const in401k = r.i.a.trad + r.i.a.roth;
+    set('jc_stats_401k', jcStatRows([
+      ['Elective cap §402(g)', m(r.f401k.target)],
+      ['In so far', m(in401k), r.i.a.roth > 0.5 && r.i.a.trad > 0.5
+        ? m(r.i.a.trad) + ' pre-tax + ' + m(r.i.a.roth) + ' Roth' : null],
+      ['Room left', m(Math.max(0, r.f401k.target - in401k))],
+      ['Paychecks once it opens', cheques(r.p401k)],
+      r.p401k > 0 && ['Needed per paycheck', m(r.f401k.needPerPeriod),
+        null, JC_TONE[r.f401k.status]],
+      r.forgone > 0.5 && ['Match you will not get', m(r.forgone),
+        cheques(r.missed) + ' pass before your 401(k) opens, and most plans do not true up at '
+        + 'year end — so that match is gone rather than delayed.', 'bad'],
+      ['After-tax room §415(c)', m(r.lim415),
+       'This one follows the EMPLOYER, so it resets at the new job even though the elective cap '
+       + 'above does not.'],
+    ]));
+
+    set('jc_stats_hsa', jcStatRows([
+      [r.hsaMonths < 12 ? 'Limit, prorated' : 'Annual limit', m(r.hsaCap),
+       r.hsaMonths < 12 ? 'Covered ' + r.hsaMonths + ' of 12 months. Eligibility is judged on the '
+         + 'FIRST of each month.' : null],
+      ['In so far', m(r.i.a.hsa)],
+      ['Room left', m(Math.max(0, r.hsaCap - r.i.a.hsa))],
+      ['Paychecks once it opens', cheques(r.pHsa)],
+      r.pHsa > 0 && ['Needed per paycheck', m(r.fHsa.needPerPeriod), null, JC_TONE[r.fHsa.status]],
+    ]));
+
+    set('jc_stats_ira', jcStatRows([
+      ['Annual limit', m(r.fIra.target)],
+      ['In so far', m(r.i.a.ira)],
+      ['Room left', m(Math.max(0, r.fIra.target - r.i.a.ira))],
+      ['Months left this year', String(r.iraMonths)],
+      ['Needed per month', m(r.fIra.needPerPeriod), null, JC_TONE[r.fIra.status]],
+    ]));
+  }
+
+  function jcRender() {
+    if (!$('jc_verdicts')) return;
+    const r = jcCompute();
+    const apply = $('jc_apply');
+    if (apply) apply.disabled = !jcUsable(r);
+    if (!jcUsable(r)) {
+      // Say what is missing instead of asserting a catastrophe. No tone class, so these take
+      // neither --good nor --bad — the same discipline as lidSum() returning null rather than
+      // announcing $0 for a section nobody has touched.
+      $('jc_verdicts').innerHTML = ['401(k)', 'HSA', 'Roth IRA'].map(name =>
+        '<div class="tile"><div class="k">' + name + '</div><div class="v">&mdash;</div>'
+        + '<div class="s">Fill in when the new job starts and what it pays.</div></div>').join('');
+      $('jc_blended').innerHTML = '<p class="mini muted" style="margin:0">Nothing to blend yet.</p>';
+      $('jc_elig_401k_out').textContent = '';
+      $('jc_elig_hsa_out').textContent = '';
+      jcHeads(null);
+      jcRenderStats(null);
+      jcSave();
+      return;
+    }
+
+    $('jc_elig_401k_out').textContent = r.i.elig401k ? '→ ' + jcHumanDate(r.i.elig401k)
+      + ' · ' + r.p401k + ' paycheck' + (r.p401k === 1 ? '' : 's') + ' left' : '';
+    $('jc_elig_hsa_out').textContent = r.i.eligHsa ? '→ ' + jcHumanDate(r.i.eligHsa)
+      + ' · ' + r.pHsa + ' paycheck' + (r.pHsa === 1 ? '' : 's') + ' left' : '';
+
+    $('jc_hsa_note').textContent = r.i.hsaCover === 'lapses'
+      ? 'Covered for ' + r.hsaMonths + ' month' + (r.hsaMonths === 1 ? '' : 's') + ' of the year, so the HSA limit '
+        + 'prorates to ' + fmt$(r.hsaCap) + '. Eligibility is judged on the FIRST of each month. '
+        + 'The last-month rule could restore the full limit, but it commits you to staying eligible '
+        + 'through next December — a decision, so it is not applied here.'
+      : 'Covered all year, so the full ' + fmt$(r.hsaCap) + ' limit applies.';
+
+    // 401(k) leads on its own row: it is the largest limit, the only one carrying the §402(g)
+    // rule this screen exists to explain, and the only one an eligibility wait can zero. The
+    // other two follow in a second row — which also removes the empty gutter a three-across
+    // grid leaves beside the third tile on a phone.
+    const monthsWord = r.iraMonths + ' month' + (r.iraMonths === 1 ? '' : 's');
+    // Written as real nested markup. It previously read `'</div><div class="tiles">'` mid-string,
+    // which only produced this layout because the parser silently discards a stray closing tag —
+    // the DOM it built was never the two sibling rows the code appeared to describe.
+    $('jc_verdicts').innerHTML =
+        jcTile('401(k)', r.f401k, r.p401k + ' paycheck' + (r.p401k === 1 ? '' : 's'),
+               'per paycheck', true, true)
+      + '<div class="tiles">'
+      + jcTile('HSA', r.fHsa, r.pHsa + ' paycheck' + (r.pHsa === 1 ? '' : 's'),
+               'per paycheck', true, false)
+      + jcTile('Roth IRA', r.fIra, monthsWord, 'per month', false, false)
+      + '</div>';
+    jcHeads(r);
+    jcRenderStats(r);
+
+    const b = r.blended;
+    $('jc_blended').innerHTML =
+      '<div class="tiles"><div class="tile"><div class="v" style="font-size:var(--fs-lg)">'
+      + fmt$(Math.round(b.salary + b.bonus)) + '</div><div class="s">wages + bonus for the year'
+      + ' <span class="muted">(' + fmt$(Math.round(r.i.a.wages)) + ' + ' + fmt$(Math.round(r.wagesB)) + ')</span>'
+      + '</div></div></div>'
+      + '<p style="margin:6px 0 0">401(k) ' + fmt$(Math.round(b.trad401k + b.roth401k))
+      + ' · HSA ' + fmt$(Math.round(b.hsa))
+      + ' · Roth IRA ' + fmt$(Math.round(b.rothIra))
+      + ' · match ' + fmt$(Math.round(b.employerMatch)) + '</p>';
+
+    jcSave();
+  }
+
+  // ---- apply: the ONLY thing here that touches your real numbers ----
+  function jcApply() {
+    const r = jcCompute();
+    // On an untouched form every figure is 0, so this used to overwrite eight real Tax fields
+    // with zeros and one fabricated Roth IRA number — while the copy beside it promised
+    // "nothing changes until you press it", which reads as a safety guarantee.
+    if (!jcUsable(r)) { showToast('Fill in when the new job starts and what it pays first.'); return; }
+    const b = r.blended;
+    // setAnnualOnField, NOT a raw write: these fields carry a cadence ($/yr, $/mo, $/pay) and
+    // some carry a $/% mode, and its whole job is "write an annual amount respecting them".
+    // Writing the raw number instead meant a $12,000 bonus typed into a field left in % mode
+    // resolved to $15,813,000 in the payload — and `bonus` is not in the clamped set, so
+    // nothing downstream caught it. Found by the finish review; the CDP test missed it because
+    // it only ever exercised the default annual/$ state.
+    const set = (id, v) => {
+      const e = $(id); if (!e) return;
+      setAnnualOnField(id, Math.round(v));
+      e.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    set('salary_yr', b.salary);
+    set('bonus', b.bonus);
+    set('trad401k', b.trad401k);
+    set('roth401k', b.roth401k);
+    set('hsa', b.hsa);
+    set('afterTax401k', b.afterTax401k);
+    set('emp_match', b.employerMatch);
+    set('rothIra', b.rothIra);
+    recompute();
+    showToast('Applied — your Tax tab now shows the blended year.');
+  }
+
+  const jcCollect = () => {
+    const o = {};
+    ['jc_a_last','jc_a_wages','jc_a_bonus','jc_a_trad','jc_a_roth','jc_a_hsa','jc_a_mega','jc_a_match',
+     'jc_a_ira','jc_start','jc_wait_401k','jc_wait_401k_unit','jc_wait_hsa','jc_wait_hsa_unit',
+     'jc_hsa_cover','jc_b_salary','jc_b_bonus','jc_b_freq','jc_b_mrate','jc_b_mpct','jc_b_current','jc_b_kind',
+     'jc_t_401k_mode','jc_t_401k','jc_t_hsa_mode','jc_t_hsa','jc_t_ira_mode','jc_t_ira']
+      .forEach(id => { const e = $(id); if (e) o[id] = e.value; });
+    return o;
+  };
+  const jcSave = () => { try { persist(JC_KEY, JSON.stringify(jcCollect())); } catch (e) {} };
+  function jcRestore() {
+    let o; try { o = JSON.parse(load(JC_KEY)); } catch (e) {}
+    if (!o) return;
+    Object.keys(o).forEach(id => { const e = $(id); if (e && o[id] != null) e.value = o[id]; });
+  }
+
+  function jcSyncTargetFields() {
+    [['jc_t_401k_mode','jc_t_401k_wrap'], ['jc_t_hsa_mode','jc_t_hsa_wrap'], ['jc_t_ira_mode','jc_t_ira_wrap']]
+      .forEach(([sel, wrap]) => { const s = $(sel), w = $(wrap); if (s && w) w.hidden = s.value !== 'custom'; });
+  }
+
+  function jcInit() {
+    if (!$('jc_card')) return;
+    jcRestore();
+    jcSyncTargetFields();
+    const root = $('jc_card');
+    root.addEventListener('input', () => { jcSyncTargetFields(); jcRender(); });
+    root.addEventListener('change', () => { jcSyncTargetFields(); jcRender(); });
+    const btn = $('jc_apply');
+    if (btn) btn.addEventListener('click', jcApply);
+    jcRender();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', jcInit);
+  else jcInit();
+
+  window.__jobChange = { compute: jcCompute, render: jcRender, apply: jcApply,
+                         eligibleDate: jcEligibleDate, heads: JC_HEAD, tones: JC_TONE };
+})();
+
 </script>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.7.0
+
+- **New — Job change (Tax tab).** A mid-year move breaks the app's assumption of one salary and
+  one election, and it breaks it unevenly: the $24,500 elective limit follows *you* across both
+  jobs, so what you already deferred eats the new job's room, while the total-plan limit follows
+  the *employer* and resets at an unrelated one — so after-tax and mega-backdoor room reopens
+  even though elective room does not. Getting those two the wrong way round is the classic
+  job-change mistake. Add the wait before you are eligible again and the useful question stops
+  being "what should I elect" and becomes "can I still get there at all", so the screen answers
+  with a verdict — reachable, tight, out of reach, or no paychecks left — and, when it is
+  reachable, tells you what to change from what you elect today. It also surfaces two numbers
+  nobody sends you: the employer match you forgo during the eligibility wait (most plans do not
+  true it up, so it is gone rather than delayed), and the Social Security tax over-withheld when
+  two employers each withhold to the wage base — refundable on your return. HSA months are
+  judged on the first of each month, the way the rule actually works, and the last-month rule is
+  flagged rather than applied, because it commits you to a 13-month testing period.
+  Nothing on the Tax tab moves until you press **Apply**.
+- **Your investment accounts, rebuilt.** Groups now sit side by side instead of stacking in one
+  narrow column, so the width carries more of your list rather than a wider row. The balance box
+  and group picker have left the resting row for an editor that opens in place — on the light
+  theme, an empty "new balance" box was the brightest thing in the row. Balances you have not
+  updated in a while carry a soft wash so they are findable at a glance, the as-of date is
+  visible and editable (it was silently stamped "today" before), and an account with no balance
+  at all now says so instead of quietly counting as zero.
+- **Setup's account controls work without visiting Actuals first.** Save balance, Add account and
+  CSV import were all dead on a fresh load — no message, no error, nothing — because the code
+  that wires them only ran when you opened the Actuals tab. Anyone who went straight to Setup
+  found a panel that looked complete and did nothing.
+- **Rename an account, and correct its balance, from the same row.** The pencil offered Type,
+  Liability and Credit limit only; there was no rename at all, and the only route to a balance
+  was a link to a different pane — which was itself dead. The row now opens on the account's real
+  name, balance and as-of date, prefilled.
+- **Categories reads as a table.** Swatch, name, built-in tag and "counts toward" now line up in
+  columns instead of shifting position on every row depending on how long the category's name
+  was, and the dropdown finally has a heading that says what it does.
+- **Budget strategies line up.** Name, Need, Want and Investment sit on one line as four matching
+  fields. Investment is worked out for you (100 minus the other two), so it now looks like the
+  read-only figure it is rather than an empty box you were meant to fill in.
+- **The net-worth forecast uses the whole card.** It was drawing at just over half the available
+  width, and the age label at the right-hand end was cut off mid-character.
+- **Money reads like money in more places, and more rows line up.** Four figures that were
+  written straight to the screen missed their thousands separators; one FIRE tile rendered
+  larger than the four beside it; and four panels — the Invest next-dollar results, the
+  projection table, and the Setup panes — were capped well short of the space they had.
+- **`/mo` and `/yr` are legible again.** In the narrowest rows the cadence marker was crushed
+  against the field border, and in a few places it looked like a button that did nothing. It is
+  now its own segment inside the field, and only the one you can actually click looks clickable.
+
 ## 0.6.2
 
 - **Money reads like money everywhere.** The tax-bracket boxes showed bare digits — `640600`
