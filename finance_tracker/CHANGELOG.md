@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.1
+
+Two fixes on the new **Job change** screen, both found by a QA pass over 0.7.0 before it was
+installed. Nothing else changed.
+
+- **It offered a Roth IRA contribution you may not be allowed to make.** The screen used the flat
+  $7,500 statutory limit and never looked at your income, so at a MAGI the rest of the app had
+  already phased out to $0 it still said *"Reachable — put in $1,500 per month"*, and **Apply
+  wrote $7,500 into your Tax tab**. It now reads the same income-aware limit every other screen
+  uses, says **"Backdoor only"** when your income is past the phase-out, names the backdoor route,
+  and Apply writes nothing you are not entitled to. Ticking the backdoor box on the Tax tab
+  restores the full limit here too, automatically.
+  One honest caveat, stated on the screen itself: that limit depends on your income for the
+  *blended* year, and until you press Apply the app only knows the year you are leaving. The row
+  says so, and the caveat disappears once Apply has run.
+- **"After-tax room §415(c)" showed the cap, not the room.** It read $72,000 — the total
+  annual-additions limit — where it should have shown what is left of that limit once your new
+  deferral and employer match are counted (~$60,875 in the case that found it). The figure is now
+  the actual room, and the note names the cap it comes from.
+
 ## 0.7.0
 
 - **New — Job change (Tax tab).** A mid-year move breaks the app's assumption of one salary and

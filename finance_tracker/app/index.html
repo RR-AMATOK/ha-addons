@@ -16479,11 +16479,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     // A Roth IRA is yours, not your employer's: no eligibility wait, and it can be funded in a
     // lump right up to the filing deadline — so periods are months left, not paychecks.
     const monthsLeft = Math.max(0, 12 - (new Date().getMonth() + (yearOf(i.start) === new Date().getFullYear() ? 1 : 0)) + 1);
-    const fIra = jcFeasibility({
-      target: jcTarget(S('jc_t_ira_mode'), V('jc_t_ira'), LIMIT_ROTH_IRA, LIMIT_ROTH_IRA),
+    // BUG-0036: the cap is MAGI-dependent and the SERVER owns that computation — the client
+    // READS limits.rothIraMax and never re-derives it (D2, 2026-07-26: a client-side shadow
+    // formula disagreed with the server near the boundary, Tax tab $81,300 vs Invest $79,848).
+    // This screen used the flat LIMIT_ROTH_IRA, which is only the right answer for someone below
+    // the phase-in: at $260k single the server says 0 and the tile still said "Reachable — put in
+    // $1,500 per month", then Apply wrote $7,500 into the Tax tab. currentRothIraMax() already
+    // honours the backdoor toggle, so checking that box restores the flat limit here too.
+    // null means no calculation has run yet: that is UNKNOWN, not zero, so fall back to the flat
+    // limit exactly as the Tax tab's own hint does — and say so in the stats rather than implying
+    // a cap we have not been told.
+    const iraCapKnown = currentRothIraMax();
+    const iraCap = iraCapKnown == null ? LIMIT_ROTH_IRA : iraCapKnown;
+    const fIraRaw = jcFeasibility({
+      target: jcTarget(S('jc_t_ira_mode'), V('jc_t_ira'), iraCap, iraCap),
       already: i.a.ira, periodsRemaining: Math.max(1, monthsLeft),
-      perPeriodPay: LIMIT_ROTH_IRA,     // no payroll ceiling on a personal contribution
+      perPeriodPay: Math.max(iraCap, LIMIT_ROTH_IRA),   // no payroll ceiling on a personal contribution
     });
+    // A zero cap is not "already there". jcFeasibility answers arithmetic — is there room — and
+    // zero room reads as done; this is an ELIGIBILITY answer, so it is said here rather than
+    // teaching the shared feasibility function about tax law. `reachable` is left alone: it still
+    // carries whatever was already contributed, so the blended year neither invents a
+    // contribution nor erases a real one that now needs fixing.
+    const fIra = (iraCapKnown === 0)
+      ? Object.assign({}, fIraRaw, { status: 'ineligible', needPerPeriod: 0, needPct: 0,
+          message: 'Your income is past the direct Roth IRA limit this year — the backdoor route '
+                 + 'is not income-capped (toggle it in the Tax tab\'s Roth IRA section).' })
+      : fIraRaw;
 
     const newDeferral = Math.max(0, f401k.status === 'unreachable' ? f401k.reachable - (i.a.trad + i.a.roth)
                                                                    : f401k.needPerPeriod * p401k);
@@ -16499,7 +16521,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const newTrad = newDeferral - newRoth;
     const newHsa = Math.max(0, fHsa.status === 'unreachable' ? fHsa.reachable - i.a.hsa
                                                             : fHsa.needPerPeriod * pHsa);
-    const newMatch = i.perPeriodPay * p401k * Math.min(i.b.mpct, i.perPeriodPay > 0 ? (newDeferral / p401k) / i.perPeriodPay : 0) * i.b.mrate;
+    // Guarded on p401k as well as pay: with no eligible periods `newDeferral / p401k` is 0/0 =
+    // NaN, which made the whole expression NaN. It was invisible only because jcBlendedYear's
+    // `n()` coerces NaN to 0 — and 0 happens to be the right answer when you are never eligible.
+    // Now that §415(c) room below SUBTRACTS this figure, an unguarded NaN would surface as a
+    // NaN on screen, so the guard is load-bearing rather than defensive.
+    const newMatch = (p401k > 0 && i.perPeriodPay > 0)
+      ? i.perPeriodPay * p401k * Math.min(i.b.mpct, (newDeferral / p401k) / i.perPeriodPay) * i.b.mrate
+      : 0;
 
     // Paychecks between starting and becoming eligible — match earned in them is gone, because
     // most plans do not true up at year end.
@@ -16525,18 +16554,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     // figure as the offline fallback — the same hydrate-or-fall-back shape as LIMIT_401K.
     const lim415 = (window.__taxResult && window.__taxResult.limits
                     && window.__taxResult.limits.sec415cLimit) || 72000;
+    // BUG-0037: §415(c) is the TOTAL annual-additions cap, not the after-tax room. What is left
+    // for after-tax money at the NEW employer is the cap minus what has already gone in THERE —
+    // and because this limit follows the employer, "already gone in there" is exactly the new
+    // deferral plus the new match, never anything from job 1. Showing the bare limit overstated
+    // the room by that much (measured: $72,000 shown against ~$60,875 real).
+    const room415 = Math.max(0, lim415 - (newDeferral + newMatch));
     return { i, p401k, pHsa, hsaMonths, hsaCap, f401k, fHsa, fIra, iraMonths: Math.max(1, monthsLeft),
-             newDeferral, newTrad, newRoth, rothShare, perNew, lim415,
-             missed, forgone, excessSS, wagesB, blended, ssBase };
+             iraCapKnown, iraCap, newDeferral, newTrad, newRoth, newMatch, rothShare, perNew,
+             lim415, room415, missed, forgone, excessSS, wagesB, blended, ssBase,
+             iraMagi: (window.__taxResult && window.__taxResult.limits
+                       && window.__taxResult.limits.rothIraMagi) || 0 };
+  }
+
+  // WHICH YEAR the Roth cap is answered for. The phase-out is a function of MAGI, the server owns
+  // that computation (D2), and the server only ever computes it for whatever the Tax tab is
+  // currently holding. Before Apply that is the year you are LEAVING, not the blended one this
+  // screen is projecting — so the cap shown is an estimate, and it says so. After Apply the Tax
+  // tab IS the blended year, the estimate becomes exact, and the note stops appearing.
+  // (jcApply -> recompute() refreshes __taxResult, and jcRender re-runs off it.)
+  // Detecting "the Tax tab already holds the blended year" is a plain synchronous comparison of
+  // the eight fields Apply writes — deliberately NOT a second /api/calculate on the blended
+  // payload, which would put an async round trip in a per-keystroke render path. See BUG-0039.
+  function jcTaxTabHoldsBlended(r) {
+    try {
+      const b = r.blended, near = (a, c) => Math.abs((+a || 0) - (+c || 0)) <= 1;
+      return near(resolveAnnual('salary_yr') || annualSalary(), b.salary)
+          && near(resolveAnnual('trad401k'), b.trad401k)
+          && near(resolveAnnual('roth401k'), b.roth401k)
+          && near(resolveAnnual('hsa'), b.hsa);
+    } catch (e) { return false; }
+  }
+  function jcIraBasisNote(r) {
+    return jcTaxTabHoldsBlended(r) ? ''
+      : 'This is read from Your taxes as it stands now, not the blended year below — press Apply '
+        + 'and it resolves against the year you will actually file.';
   }
 
   const JC_TONE = { reachable: 'good', 'already-there': 'good', tight: 'warn',
-                    unreachable: 'bad', 'no-periods': 'bad' };
+                    unreachable: 'bad', 'no-periods': 'bad', ineligible: 'warn' };
   // The verdict WORD, shared by the tile and by the bucket's section heading so the two can
   // never drift. Adding a status without a word here shows an empty verdict rather than a
   // silently wrong one.
+  // `ineligible` is not a failure — there is a legal route, it just is not this one, so it reads
+  // as the instruction rather than as a refusal.
   const JC_HEAD = { 'already-there': 'Done', reachable: 'Reachable', tight: 'Reachable, but tight',
-                    'no-periods': 'No room left', unreachable: 'Out of reach' };
+                    'no-periods': 'No room left', unreachable: 'Out of reach',
+                    ineligible: 'Backdoor only' };
 
   // `showsPct`  — is payroll the constraint? (false for a personal IRA)
   // `hasCurrent` — did the caller supply what the user elects today? (401(k) only)
@@ -16571,6 +16635,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       head = JC_HEAD[f.status];
       sub = f.message + ' You finish the year at ' + fmt$(Math.round(f.already))
           + ', ' + fmt$(Math.round(f.shortfall)) + ' short of ' + fmt$(Math.round(f.target)) + '.';
+    } else if (f.status === 'ineligible') {
+      // Its own branch, not the fall-through: with a $0 cap the "out of reach" copy below
+      // composes "the most that fits is $0 — $0 short of $0", which is arithmetically true and
+      // useless. Ineligibility is not a shortfall, so it says what the route is instead. Anything
+      // already contributed is still named, because that is now an excess to deal with.
+      head = JC_HEAD[f.status];
+      sub = f.message
+          + (f.already > 0.5 ? ' You have ' + fmt$(Math.round(f.already))
+             + ' in for this year already — that is over the direct limit and needs recharacterising '
+             + 'or withdrawing before the filing deadline.' : '');
     } else {
       head = JC_HEAD[f.status] || '';
       // extraPeriods is Infinity when there is no pay to contribute from; never print that.
@@ -16659,9 +16733,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       r.forgone > 0.5 && ['Match you will not get', m(r.forgone),
         cheques(r.missed) + ' pass before your 401(k) opens, and most plans do not true up at '
         + 'year end — so that match is gone rather than delayed.', 'bad'],
-      ['After-tax room §415(c)', m(r.lim415),
-       'This one follows the EMPLOYER, so it resets at the new job even though the elective cap '
-       + 'above does not.'],
+      ['After-tax room §415(c)', m(r.room415),
+       'The ' + m(r.lim415) + ' cap follows the EMPLOYER, so it resets at the new job even though '
+       + 'the elective cap above does not — this is what is left of it once your new deferral and '
+       + 'match are counted.'],
     ]));
 
     set('jc_stats_hsa', jcStatRows([
@@ -16674,12 +16749,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       r.pHsa > 0 && ['Needed per paycheck', m(r.fHsa.needPerPeriod), null, JC_TONE[r.fHsa.status]],
     ]));
 
+    // The limit row carries WHY it is what it is: a $0 cap with no explanation reads as a bug,
+    // and a flat cap shown before any calculation has run would imply a MAGI answer we do not
+    // have yet.
     set('jc_stats_ira', jcStatRows([
-      ['Annual limit', m(r.fIra.target)],
+      ['Annual limit', m(r.fIra.target),
+       r.iraCapKnown === 0
+         ? 'The DIRECT limit is $0 at the MAGI currently on Your taxes (' + m(r.iraMagi) + '). '
+           + 'The backdoor route is not income-capped — toggle it in the Roth IRA section there. '
+           + jcIraBasisNote(r)
+         : r.iraCapKnown == null
+           ? 'No calculation has run yet, so this is the flat limit. Your real cap depends on '
+             + 'MAGI — open Your taxes and it will resolve.'
+           : r.iraCapKnown < LIMIT_ROTH_IRA
+             ? 'Reduced from ' + m(LIMIT_ROTH_IRA) + ' — the MAGI on Your taxes (' + m(r.iraMagi)
+               + ') is inside the phase-out band. ' + jcIraBasisNote(r)
+             : jcIraBasisNote(r) || null,
+       r.iraCapKnown === 0 ? 'warn' : null],
       ['In so far', m(r.i.a.ira)],
       ['Room left', m(Math.max(0, r.fIra.target - r.i.a.ira))],
       ['Months left this year', String(r.iraMonths)],
-      ['Needed per month', m(r.fIra.needPerPeriod), null, JC_TONE[r.fIra.status]],
+      r.fIra.status !== 'ineligible'
+        && ['Needed per month', m(r.fIra.needPerPeriod), null, JC_TONE[r.fIra.status]],
     ]));
   }
 
