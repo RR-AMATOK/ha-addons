@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.7.2
+
+**Install this one.** It repairs a defect that has been silently switching off multi-device sync
+since 0.7.0.
+
+- **Opening the Job change screen killed that device's sync — silently.** The server keeps a list
+  of which saved sections it will accept. When Job change was added it started saving its own
+  section, and the server's list was never updated to include it. From the first moment you
+  touched that screen, every attempt that device made to save your data to the Home Assistant
+  server was rejected — **all of it, not just the Job change part** — with no message, no error,
+  and nothing on screen to suggest anything was wrong. The device kept working perfectly on its
+  own; it just stopped sharing anything with your other devices. Fixed, and the two lists are now
+  checked against each other by a test so they cannot drift apart again.
+  **Nothing was lost.** The app never marked the data as saved, so it kept trying — the moment you
+  update, the queued data goes up on its own.
+- **An edit made right after opening the app on a new device could be silently overwritten.** If a
+  device had already pulled your data down once and you then changed something, the next sync
+  could replace your change with the older server copy instead of sending it — no warning, and the
+  change was simply gone. The app now tells the difference between "this device has never synced,
+  so the server's copy should win" and "this device is up to date and you have just edited
+  something, so your edit must win". Longstanding, not new to 0.7.x.
+- **Job change now shows every figure per month and per paycheck.** Each amount carries its own
+  rate underneath — and each one is worked out over the period that actually applies to it, not a
+  flat division. Your elective cap shows what an uninterrupted year would have taken; "room left"
+  shows what it takes across only the paychecks you have left after the waiting period; the
+  prorated HSA limit shows the monthly allowance the proration is built from. Where a per-paycheck
+  figure would be invented rather than known — your old job's pay frequency is never asked for —
+  the screen says so instead of showing one.
+
 ## 0.7.1
 
 Two fixes on the new **Job change** screen, both found by a QA pass over 0.7.0 before it was

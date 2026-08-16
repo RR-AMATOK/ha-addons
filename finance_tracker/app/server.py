@@ -2861,9 +2861,19 @@ def revert_scenario_endpoint(scenario_id: int, request: Request = None) -> dict:
 # source of truth on both sides. Structural exclusion, not a denylist: `itc.whatif.*`
 # and `itc.activetab` are simply never members of this set, so a crafted/corrupt blob
 # can never smuggle them in — the PUT validator below rejects any unknown key.
+#
+# DRIFT (found 2026-08-15 while widening the S1.2 test harness to production's real key
+# count): `itc.jobchange.v1` was added to index.html's BACKUP_CLIENT_KEYS by 75acae4 and
+# never added here, so from that commit on, the FIRST profile flush of any device whose
+# user had touched the Job change card carried a key this allowlist rejects -- 422, no
+# mutation, `meta.dirty` never clears, and that device's profile stops syncing entirely
+# (the retry re-sends the same rejected blob forever). Restored to a true mirror. The
+# harness now pins both sides against the live production list (TM-H6) so the two lists
+# cannot silently diverge again.
 _PROFILE_BACKUP_CLIENT_KEYS = frozenset({
     "itc.v3", "itc.tabs.v1", "budgetBuilder_v1", "itc.fire.v1",
     "itc.categories.v1", "itc.proj.accts.v1", "itc.maxout.v1",
+    "itc.jobchange.v1",
 })
 
 

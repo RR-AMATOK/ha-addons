@@ -1090,6 +1090,11 @@
   .jc-stat .k { color:var(--muted); font-size:var(--fs-xs); }
   .jc-stat .v { font-variant-numeric:tabular-nums; font-weight:var(--fw-semibold); text-align:right;
                 white-space:nowrap; }
+  /* The per-month / per-paycheck rate, under its own value in column 2 so it reads as a
+     continuation of the number rather than a new fact. Muted and a step down, because it is
+     derived from the figure above it and must never compete with it. */
+  .jc-stat .cad { grid-column:2; text-align:right; color:var(--muted); font-size:var(--fs-2xs);
+                  font-variant-numeric:tabular-nums; white-space:nowrap; }
   .jc-stat .s { grid-column:1 / -1; color:var(--muted); font-size:var(--fs-2xs); line-height:1.45; }
   .jc-stat.good .v { color:var(--good); }
   .jc-stat.warn .v { color:var(--warn); }
@@ -4193,6 +4198,26 @@ function jcPeriodsRemaining(fromIso, yearEndIso, freq) {
   return Math.max(0, Math.floor(perYear * days / yearDays));
 }
 
+// How many months a span covers, as a FRACTION — it is only ever used as a divisor to turn a
+// total into a monthly rate, so 5.95 months is more honest than rounding to 6 and then quoting a
+// rate that does not multiply back. 365-day year like jcPeriodsRemaining; leap day is noise here.
+//
+// Counted in UTC on purpose. Two LOCAL midnights either side of a DST change are not a whole
+// number of days apart: measured in America/Chicago, 2026-01-01 to 2026-06-30 comes out at
+// 179.958 days, so `Math.floor(...) + 1` silently loses a day and every rate divided by that span
+// reads ~0.5% high ($2,535/mo instead of $2,521/mo). Date.UTC has no DST to trip over.
+// NOTE: jcPeriodsRemaining above still counts local midnights and has the same latent off-by-one.
+// It is left alone deliberately — it feeds shipped paycheck COUNTS with tests pinned to them, and
+// changing it moves real numbers, so it wants its own entry and its own counterfactual rather
+// than a fix smuggled in beside a display change.
+function jcMonthsBetween(fromIso, toIso) {
+  const p = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+                     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; };
+  const a = p(fromIso), b = p(toIso);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return ((b - a) / 864e5 + 1) / 365 * 12;
+}
+
 // Months in the year for which HDHP coverage held. The HSA limit is monthly-prorated when
 // coverage lapses (the last-month rule can restore it in full, but commits you to a 13-month
 // testing period — a decision, so it is surfaced and never applied automatically).
@@ -4313,7 +4338,7 @@ window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, 
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange,
   jcPeriodsRemaining, jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
-  jcMatchForgone, jcBlendedYear };
+  jcMatchForgone, jcBlendedYear, jcMonthsBetween };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
 // separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
 // would throw a ReferenceError at this statement and silently prevent window.__clientMath from
@@ -5701,7 +5726,7 @@ const BACKUP_CLIENT_KEYS = ['itc.v3', 'itc.tabs.v1', 'budgetBuilder_v1', 'itc.fi
 
 // S1.2 (§4.0/§6.1 TM-44's seed-exclusion): captured ONCE, here, at true script-start — before ANY
 // app code has run, including the Manage-categories panel's first render (further down this same
-// script), which calls getCategories()'s read-path default-seed (@~5085) and materializes
+// script), which calls getCategories()'s read-path default-seed (@~9731) and materializes
 // itc.categories.v1 into localStorage as a normal side effect of painting the page. Without this
 // snapshot, the boot/sync engine's local-state derivation (further down) would see that
 // seed-materialized key and misread a genuinely brand-new browser as "present-no-meta" instead of
@@ -5796,8 +5821,35 @@ function setProfileMeta(patch) {
 // A scopeId mismatch (shared browser, different household member) collapses to 'empty' regardless
 // of meta.dirty, and so does a corrupted "meta says dirty but zero keys present at boot"
 // combination (no special-casing needed — the literal rule already resolves it).
-function deriveLocalProfileState(meta, scopeId) {
-  const anyKeyPresent = __profileBootKeysSnapshot.size > 0;
+function deriveLocalProfileState(meta, scopeId, liveKeyFallback) {
+  let anyKeyPresent = __profileBootKeysSnapshot.size > 0;
+  // BUG-0012: the snapshot above is frozen at true script-start and NEVER updated, so a session
+  // that BOOTED with zero keys reads 'empty' for its whole lifetime -- even after an H1 hydrate
+  // has written all eight keys and the user has since edited one. `liveKeyFallback` is passed
+  // true by exactly ONE caller (doHydrate's F1 guard) and only for a device that has PROVABLY
+  // completed a sync round-trip (meta.lastSyncedAt != null -- written only by doHydrate @~6040
+  // and doProfileFlush @~5959), which is precisely the population whose snapshot is known stale.
+  // It can only ever turn 'empty' INTO a non-empty state, never the reverse, so no existing
+  // caller's outcome can change; the two-arg call at ~:6394 gets `undefined` and is unaffected
+  // (TM-44). The scopeId shared-browser rule below still runs -- do NOT lift this test above it,
+  // or a real second household member on a shared browser is refused their own plan (TM-13b/
+  // TM-40c; measured, and NOT caught by TM-40c as currently seeded).
+  //
+  // READ THIS BEFORE TRUSTING THE RE-READ BELOW: `lastSyncedAt` is the discriminator, NOT key
+  // presence. The effective guard at the F1 call site is `!isCrashRecovery && dirty &&
+  // lastSyncedAt != null && the scopeId rule below`. By the time any LIVE session reaches here,
+  // itc.categories.v1 is already back in localStorage (getCategories' read-path seed @~9731), so
+  // the BACKUP_CLIENT_KEYS.some(...) below is constant-true in practice -- a mutant replacing the
+  // whole try/catch with `anyKeyPresent = true` SURVIVES all 81 matrix cases, deliberately. The
+  // re-read is defence-in-depth: its only practical contribution today is the fail-closed default
+  // in the catch, and it is kept because it is the correct shape the day that seed goes away.
+  if (!anyKeyPresent && liveKeyFallback === true) {
+    // FAIL CLOSED, unlike the boot snapshot at ~:5711 which fails open: that one is a
+    // classifier, this one guards a destructive write. If we cannot read localStorage we
+    // cannot prove local is safe to destroy, so assume present and let the guard refuse.
+    try { anyKeyPresent = BACKUP_CLIENT_KEYS.some(k => localStorage.getItem(k) != null); }
+    catch (e) { anyKeyPresent = true; }
+  }
   if (!anyKeyPresent) return 'empty';
   if (meta && meta.scopeId != null && meta.scopeId !== scopeId) return 'empty';   // shared-browser guard
   if (!meta) return 'present-no-meta';
@@ -5976,22 +6028,22 @@ async function doHydrate(server, scopeId, isCrashRecovery) {
   // data behind that flag to lose, and H1 hydrating over it is the existing, deliberately-tested
   // behavior (TM-11/TM-13a/TM-13b/TMH1/TMH1b). Re-deriving the SAME localState here (instead of
   // trusting the raw flag) means this guard refuses a hydrate whenever localState resolves
-  // present-dirty — the known F1 defect at the H1/S2 call sites. It is NOT a complete guarantee
-  // against every present-dirty edit ever: a session that booted against a genuinely empty
-  // browser keeps `__profileBootKeysSnapshot` (which this derivation keys off) permanently empty
-  // for its whole lifetime, so a LATER first-ever edit in that same session can still land as a
-  // false 'empty' here — a separate, pre-existing gap (filed separately), not something this
-  // guard closes.
+  // present-dirty — the known F1 defect at the H1/S2 call sites. BUG-0012 closed the hole that
+  // used to sit here: a session that booted against a genuinely empty browser keeps
+  // `__profileBootKeysSnapshot` empty for its whole lifetime, so a later edit read as a false
+  // 'empty'. The third argument below opts THIS call site (only) into a live key re-read, and
+  // only for a device whose `lastSyncedAt` proves it already completed a sync round-trip — see
+  // deriveLocalProfileState's own note for why provenance, not key presence alone, is the test.
   //
   // MUST-FIX (review, 2026-08-07): this guard must NEVER run for the crash-recovery call site —
   // isCrashRecovery below opts it out entirely. Local there is a PRIOR crash's half-cleared
   // leftovers, not intact data; refusing to complete the recovery doesn't protect whatever edit
-  // landed on top of that corruption, it stalls `hydrating` forever (this function is the ONLY
-  // place that clears it) and lets the next flush PUT the half-cleared blob over the server's
-  // good one — the exact server-side clobber this whole fix pass exists to prevent, reintroduced
-  // through a different door.
+  // landed on top of that corruption, it stalls `hydrating` forever (the ONLY other clearer is
+  // the §8 recovery site's `!server.hasState` fallback @~6390, which cannot run on the path that
+  // got here) and lets the next flush PUT the half-cleared blob over the server's good one — the
+  // exact clobber this whole fix pass exists to prevent, reintroduced through a different door.
   const meta = getProfileMeta();
-  if (!isCrashRecovery && meta && meta.dirty === true && deriveLocalProfileState(meta, scopeId) !== 'empty') return false;
+  if (!isCrashRecovery && meta && meta.dirty === true && deriveLocalProfileState(meta, scopeId, meta.lastSyncedAt != null) !== 'empty') return false;
   const fromVersion = meta ? (meta.stateVersion || 0) : 0;
   const toVersion = server.stateVersion || 0;
   const seqAtEntry = meta ? meta.editSeq : undefined;   // Fix F2: same compare-and-clear guard as doProfileFlush
@@ -16560,9 +16612,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // deferral plus the new match, never anything from job 1. Showing the bare limit overstated
     // the room by that much (measured: $72,000 shown against ~$60,875 real).
     const room415 = Math.max(0, lim415 - (newDeferral + newMatch));
+    // The month spans each stat rail divides by (see jcCadence). Named per span rather than one
+    // "months" number, because "the months you already worked" and "the months your 401(k) is
+    // open" are different denominators for figures that sit two rows apart.
+    const monthsAtA = i.a.last ? jcMonthsBetween(i.year + '-01-01', i.a.last) : 0;
+    const monthsAtB = i.start ? jcMonthsBetween(i.start, i.yearEnd) : 0;
+    const months401k = i.elig401k ? jcMonthsBetween(i.elig401k, i.yearEnd) : 0;
+    const monthsHsa = i.eligHsa ? jcMonthsBetween(i.eligHsa, i.yearEnd) : 0;
     return { i, p401k, pHsa, hsaMonths, hsaCap, f401k, fHsa, fIra, iraMonths: Math.max(1, monthsLeft),
              iraCapKnown, iraCap, newDeferral, newTrad, newRoth, newMatch, rothShare, perNew,
              lim415, room415, missed, forgone, excessSS, wagesB, blended, ssBase,
+             monthsAtA, monthsAtB, months401k, monthsHsa,
              iraMagi: (window.__taxResult && window.__taxResult.limits
                        && window.__taxResult.limits.rothIraMagi) || 0 };
   }
@@ -16689,11 +16749,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   // left, and what that works out to per cheque — and they are what fills the ~800px the form
   // left empty. Every value here already existed in the compute result; none is new arithmetic.
   function jcStatRows(rows) {
-    return rows.filter(Boolean).map(([k, v, sub, tone]) =>
+    return rows.filter(Boolean).map(([k, v, sub, tone, cad]) =>
       '<div class="jc-stat' + (tone ? ' ' + tone : '') + '">'
       + '<span class="k">' + jcEsc(k) + '</span>'
       + '<span class="v">' + jcEsc(v) + '</span>'
+      + (cad ? '<span class="cad">' + jcEsc(cad) + '</span>' : '')
       + (sub ? '<span class="s">' + jcEsc(sub) + '</span>' : '') + '</div>').join('');
+  }
+
+  // Every money figure on this card is a total over SOME period, and the period is different per
+  // row: a statutory cap spans the year, "in so far" spans the months already worked, "room left"
+  // spans only the paychecks you have left. Dividing all of them by 12 and by the pay frequency
+  // would put a column of confidently-wrong rates on a tax screen — the exact class of defect
+  // BUG-0036 was. So each caller passes ITS OWN denominators, and a denominator that is zero or
+  // unknown yields NO rate rather than a fabricated one (also the 0/0 = NaN guard: `> 0` on both).
+  //   months — how many months the total is spread across; 0/absent => no /mo
+  //   pays   — how many paychecks it is spread across;    0/absent => no /pay
+  function jcCadence(total, months, pays) {
+    const t = +total || 0, out = [];
+    if (t === 0) return '';        // a column of "$0/mo · $0/pay" is noise, not information
+    if (months > 0 && isFinite(months)) out.push(fmt$(Math.round(t / months)) + '/mo');
+    if (pays > 0 && isFinite(pays)) out.push(fmt$(Math.round(t / pays)) + '/pay');
+    return out.join(' · ');
   }
 
   const JC_DASH = '\u2014';
@@ -16709,44 +16786,79 @@ document.addEventListener('DOMContentLoaded', async () => {
     const m = v => fmt$(Math.round(v));
     const cheques = n => n + ' paycheck' + (n === 1 ? '' : 's');
 
+    // Year-spanning totals divide by the whole year; the new job's own pay divides by ITS span,
+    // which is the rate you actually see on a payslip. The two are deliberately different rows —
+    // averaging a split year into one "per paycheck" would describe a paycheck nobody receives.
+    const perYear = r.i.perYear;
     set('jc_stats_pay', jcStatRows([
       ['Wages for the year', m(r.blended.salary),
-       m(r.i.a.wages) + ' already earned + ' + m(r.wagesB) + ' at the new job'],
-      ['Bonus for the year', m(r.blended.bonus)],
-      ['Total comp', m(r.blended.salary + r.blended.bonus)],
-      ['Paychecks at the new job', String(r.perNew)],
+       m(r.i.a.wages) + ' already earned + ' + m(r.wagesB) + ' at the new job',
+       null, jcCadence(r.blended.salary, 12, perYear)],
+      ['Bonus for the year', m(r.blended.bonus), null, null,
+       jcCadence(r.blended.bonus, 12, perYear)],
+      ['Total comp', m(r.blended.salary + r.blended.bonus), null, null,
+       jcCadence(r.blended.salary + r.blended.bonus, 12, perYear)],
+      r.i.salary > 0 && ['Pay at the new job', m(r.i.salary),
+        'The rate you are actually on now, before the year is blended.', null,
+        jcCadence(r.i.salary, 12, perYear)],
+      ['Paychecks at the new job', String(r.perNew),
+       r.monthsAtB > 0 ? 'Across ' + r.monthsAtB.toFixed(1) + ' months left in the year' : null],
       r.excessSS > 0.5 && ['Social Security over-withheld', m(r.excessSS),
         'Each employer withholds up to the ' + m(r.ssBase) + ' wage base on its own, so two in '
-        + 'one year takes too much. Claim it back on your return — nobody refunds it automatically.',
+        + 'one year takes too much. Claim it back on your return — nobody refunds it automatically. '
+        + 'This one is a lump at filing, not a rate, so it carries no per-month figure.',
         'good'],
     ]));
 
     const in401k = r.i.a.trad + r.i.a.roth;
+    const room401k = Math.max(0, r.f401k.target - in401k);
     set('jc_stats_401k', jcStatRows([
-      ['Elective cap §402(g)', m(r.f401k.target)],
-      ['In so far', m(in401k), r.i.a.roth > 0.5 && r.i.a.trad > 0.5
-        ? m(r.i.a.trad) + ' pre-tax + ' + m(r.i.a.roth) + ' Roth' : null],
-      ['Room left', m(Math.max(0, r.f401k.target - in401k))],
-      ['Paychecks once it opens', cheques(r.p401k)],
+      // The cap is a whole-year allowance, so its rate is the even-year one — what it would have
+      // taken per paycheck if the year had never been interrupted. That contrast against "needed
+      // per paycheck" below is the whole point of the screen.
+      ['Elective cap §402(g)', m(r.f401k.target), 'Spread evenly across an uninterrupted year',
+       null, jcCadence(r.f401k.target, 12, perYear)],
+      // Job 1's pay frequency is never asked for, so there is no honest per-paycheck figure for
+      // what went in there — only a monthly rate over the months actually worked.
+      ['In so far', m(in401k),
+       (r.i.a.roth > 0.5 && r.i.a.trad > 0.5
+         ? m(r.i.a.trad) + ' pre-tax + ' + m(r.i.a.roth) + ' Roth. ' : '')
+       + (in401k > 0.5 && r.monthsAtA > 0
+         ? 'Monthly only — the old job’s pay frequency is not one of the questions above, so '
+           + 'there is no honest per-paycheck figure for what went in there.' : '') || null,
+       null, jcCadence(in401k, r.monthsAtA, 0)],
+      ['Room left', m(room401k), null, null, jcCadence(room401k, r.months401k, r.p401k)],
+      ['Paychecks once it opens', cheques(r.p401k),
+       r.months401k > 0 ? 'Across ' + r.months401k.toFixed(1) + ' months of eligibility' : null],
       r.p401k > 0 && ['Needed per paycheck', m(r.f401k.needPerPeriod),
-        null, JC_TONE[r.f401k.status]],
+        null, JC_TONE[r.f401k.status],
+        jcCadence(r.f401k.needPerPeriod * r.p401k, r.months401k, 0)],
       r.forgone > 0.5 && ['Match you will not get', m(r.forgone),
         cheques(r.missed) + ' pass before your 401(k) opens, and most plans do not true up at '
-        + 'year end — so that match is gone rather than delayed.', 'bad'],
+        + 'year end — so that match is gone rather than delayed.', 'bad',
+        jcCadence(r.forgone, r.missed > 0 ? r.missed / perYear * 12 : 0, r.missed)],
       ['After-tax room §415(c)', m(r.room415),
        'The ' + m(r.lim415) + ' cap follows the EMPLOYER, so it resets at the new job even though '
        + 'the elective cap above does not — this is what is left of it once your new deferral and '
-       + 'match are counted.'],
+       + 'match are counted.', null,
+       jcCadence(r.room415, r.months401k, r.p401k)],
     ]));
 
+    const roomHsa = Math.max(0, r.hsaCap - r.i.a.hsa);
     set('jc_stats_hsa', jcStatRows([
+      // A prorated limit divides by the months it was PRORATED OVER, not by 12 — that is the
+      // monthly allowance the proration is built from, so it is the one figure here that is
+      // exact rather than derived.
       [r.hsaMonths < 12 ? 'Limit, prorated' : 'Annual limit', m(r.hsaCap),
        r.hsaMonths < 12 ? 'Covered ' + r.hsaMonths + ' of 12 months. Eligibility is judged on the '
-         + 'FIRST of each month.' : null],
-      ['In so far', m(r.i.a.hsa)],
-      ['Room left', m(Math.max(0, r.hsaCap - r.i.a.hsa))],
-      ['Paychecks once it opens', cheques(r.pHsa)],
-      r.pHsa > 0 && ['Needed per paycheck', m(r.fHsa.needPerPeriod), null, JC_TONE[r.fHsa.status]],
+         + 'FIRST of each month.' : null, null,
+       jcCadence(r.hsaCap, r.hsaMonths || 12, 0)],
+      ['In so far', m(r.i.a.hsa), null, null, jcCadence(r.i.a.hsa, r.monthsAtA, 0)],
+      ['Room left', m(roomHsa), null, null, jcCadence(roomHsa, r.monthsHsa, r.pHsa)],
+      ['Paychecks once it opens', cheques(r.pHsa),
+       r.monthsHsa > 0 ? 'Across ' + r.monthsHsa.toFixed(1) + ' months of coverage' : null],
+      r.pHsa > 0 && ['Needed per paycheck', m(r.fHsa.needPerPeriod), null, JC_TONE[r.fHsa.status],
+        jcCadence(r.fHsa.needPerPeriod * r.pHsa, r.monthsHsa, 0)],
     ]));
 
     // The limit row carries WHY it is what it is: a $0 cap with no explanation reads as a bug,
@@ -16765,12 +16877,25 @@ document.addEventListener('DOMContentLoaded', async () => {
              ? 'Reduced from ' + m(LIMIT_ROTH_IRA) + ' — the MAGI on Your taxes (' + m(r.iraMagi)
                + ') is inside the phase-out band. ' + jcIraBasisNote(r)
              : jcIraBasisNote(r) || null,
-       r.iraCapKnown === 0 ? 'warn' : null],
-      ['In so far', m(r.i.a.ira)],
-      ['Room left', m(Math.max(0, r.fIra.target - r.i.a.ira))],
-      ['Months left this year', String(r.iraMonths)],
+       r.iraCapKnown === 0 ? 'warn' : null,
+       jcCadence(r.fIra.target, 12, 0)],
+      ['In so far', m(r.i.a.ira), null, null, jcCadence(r.i.a.ira, r.monthsAtA, 0)],
+      ['Room left', m(Math.max(0, r.fIra.target - r.i.a.ira)), null, null,
+       jcCadence(Math.max(0, r.fIra.target - r.i.a.ira), r.iraMonths, 0)],
+      ['Months left this year', String(r.iraMonths),
+       'An IRA is funded from your own pocket up to the filing deadline, so it counts in months, '
+       + 'not paychecks'
+       // Only promise a row that is actually going to render — the needed-per-month row below is
+       // dropped entirely when the direct route is closed.
+       + (r.fIra.status !== 'ineligible'
+          ? ' — the per-paycheck figure below is only there if you would rather fund it out of '
+            + 'payroll.' : '.')],
       r.fIra.status !== 'ineligible'
-        && ['Needed per month', m(r.fIra.needPerPeriod), null, JC_TONE[r.fIra.status]],
+        && ['Needed per month', m(r.fIra.needPerPeriod), null, JC_TONE[r.fIra.status],
+            // The only /pay on this rail, and it is a convenience framing rather than a payroll
+            // fact: what the monthly figure works out to if you split it across paychecks instead.
+            jcCadence(r.fIra.needPerPeriod * r.iraMonths, 0,
+                      r.iraMonths > 0 ? r.iraMonths / 12 * perYear : 0)],
     ]));
   }
 
