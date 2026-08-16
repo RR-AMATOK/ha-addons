@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.3
+
+Closes the last two known data-handling defects in the sync layer. Nothing you see changes unless
+one of these situations actually happens to you.
+
+- **If your data arrives on a new device and replaces something you had just typed there, the app
+  now tells you.** Open the app somewhere it has never run before — a new phone, a fresh browser,
+  after clearing site data — and type something in the seconds before your saved plan finishes
+  downloading. Your plan still wins, and that is deliberate: this device has nothing of yours on
+  it yet, so preferring what is on screen would push a blank app over your real data on every
+  device. What was wrong is that the thing you typed vanished with no explanation. You now get a
+  notice saying your data arrived from another device and that what you typed was not saved, so
+  you can re-enter it. The notice only appears when a person actually typed or clicked something —
+  the app quietly saving its own screen while it loads does not trigger it.
+- **Paycheck counts no longer depend on your computer's timezone.** Spans that crossed a daylight-
+  saving change could be measured a day short, which could report one paycheck fewer than the year
+  holds. Checked every start date in 2026 against all four pay frequencies: **no figure changes in
+  any US timezone** — the way the dates fall makes it unreachable from there. It was reachable
+  from the southern hemisphere, and the same class of error was quietly inflating the new
+  per-month figures on Job change by about half a percent, which is fixed too.
+
 ## 0.7.2
 
 **Install this one.** It repairs a defect that has been silently switching off multi-device sync

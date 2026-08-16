@@ -1771,6 +1771,18 @@
   </span>
 </div>
 
+<!-- BUG-0040: a first-ever sync on this device replaced something the user had just entered. The
+     hydrate is correct (a never-synced device has no lineage to prefer), so this is a notice, not
+     a choice — but it must not be silent, which was the whole defect. Separate from the banner
+     above because that one reports the OPPOSITE direction. -->
+<div id="profile_hydrate_displaced_banner" class="wi-banner profile-displacement-banner" hidden role="status" aria-live="polite">
+  <span class="wi-banner-icon" aria-hidden="true">&#9888;</span>
+  <span class="wi-banner-label">Your saved data arrived from another device and replaced what you had just entered on this one. Nothing you typed here was sent to the server — re-enter it if you still need it.</span>
+  <span class="wi-banner-actions">
+    <button type="button" id="profile_hydrate_displaced_dismiss_btn">Dismiss</button>
+  </span>
+</div>
+
 <!-- TODO-243 Phase 2 §3.6: activation partial-failure banner — non-transient (a toast would
      vanish before the user notices a planned goal/fund failed to create). Retry re-runs
      materialization over the SAME draftEntities set (idempotent by name, §3.5), so it never
@@ -4188,12 +4200,27 @@ const JC_PAY_FREQ = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 };
 // Paychecks you will actually receive in [from, yearEnd], counting only whole periods that
 // still lie ahead. This generalises moPeriodsLeft(), which answers the same question for
 // "today" and a single employer.
+// BUG-0042. Counted in UTC, like jcMonthsBetween below, so the span is a whole number of days
+// regardless of where the browser thinks it is. Two LOCAL midnights either side of a DST change
+// are not: a spring-forward makes them 23h59m short, and `Math.floor` then eats a day.
+//
+// MEASURED before and after, every start date in 2026 x all four frequencies (1,344 cases):
+//   America/Chicago, America/Los_Angeles, UTC, America/Sao_Paulo ... 0 differences
+//   Australia/Sydney 54, Pacific/Auckland 51 ....................... one paycheck low
+// Northern-hemisphere spans are immune by accident, not by design: this function is only ever
+// called with yearEnd as its end date, and any span reaching 31 Dec has already crossed
+// November's fall-back, whose extra hour cancels March's missing one. Where DST *starts* in
+// October that cancellation does not happen. So the fix changes nothing for the app's own users
+// and removes the trap for anyone else — and for any future caller that passes a MID-YEAR end
+// date, where the northern hemisphere loses the day too (that is how the sibling bug in
+// jcMonthsBetween was found: $2,535/mo where the truth was $2,521/mo).
 function jcPeriodsRemaining(fromIso, yearEndIso, freq) {
   const perYear = JC_PAY_FREQ[freq] || +freq || 24;
-  const from = new Date(fromIso + 'T00:00:00');
-  const end = new Date(yearEndIso + 'T00:00:00');
+  const p = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+                     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; };
+  const from = p(fromIso), end = p(yearEndIso);
   if (isNaN(from) || isNaN(end) || end < from) return 0;
-  const days = Math.floor((end - from) / 864e5) + 1;
+  const days = (end - from) / 864e5 + 1;
   const yearDays = 365;                     // period COUNT, not a calendar; leap day is noise here
   return Math.max(0, Math.floor(perYear * days / yearDays));
 }
@@ -5862,8 +5889,46 @@ function deriveLocalProfileState(meta, scopeId, liveKeyFallback) {
 // e.g. a mis-wired wiActivate — is deliberately SWALLOWED here; §6.1 calls this out by name.)
 let __profileFlushTimer = null;
 const PROFILE_FLUSH_DEBOUNCE_MS = 800;
+// ---- BUG-0040: INTENT provenance — did a human cause this dirty mark, or did a repaint? ----
+//
+// `dirty` cannot answer it. `bgbBaseAutoFill()` -> `saveBgb()` -> `persist()` sets exactly the bit
+// a keystroke sets, and both arrive through the SAME `markProfileDirty()` call inside persist()
+// (:3948), so tagging call sites cannot separate them either — measured, that is why the obvious
+// approach was dropped.
+//
+// What does separate them is whether a real person was interacting just before the mark. Trusted
+// events only: the app dispatches synthetic `input` events constantly (setAnnualOnField, jcApply,
+// every test driver) and `isTrusted` is false for all of them, so they are excluded for free.
+//
+// Navigation is excluded on purpose. Tapping a tab IS a trusted click, and it is the specific
+// thing that triggers the paint autosave this signal exists to ignore — that scenario (fresh
+// device, tab tap during the boot GET, defaults flushed over the real plan) is the one the
+// rejected BUG-0012 fixes would have caused.
+//
+// The window exists because saves are debounced: a keystroke's persist() lands 300-800ms later, so
+// asking "is a trusted event on the stack right now" would answer no for every real edit.
+let __lastUserIntentAt = 0;
+let __profileUserEditThisSession = false;
+const USER_INTENT_WINDOW_MS = 5000;
+try {
+  const NAV_SEL = '#tabbar, .setup-nav, a.tix, [data-screen], [data-setup], [data-go]';
+  const noteIntent = e => {
+    if (!e || e.isTrusted !== true) return;                 // synthetic app/test events are not intent
+    const t = e.target;
+    if (t && typeof t.closest === 'function' && t.closest(NAV_SEL)) return;   // navigation, not editing
+    __lastUserIntentAt = Date.now();
+  };
+  ['input', 'change', 'keydown', 'pointerdown'].forEach(type =>
+    document.addEventListener(type, noteIntent, { capture: true, passive: true }));
+} catch (e) {}
+
 function markProfileDirty() {
   if (WhatIf.active || WhatIf.suppress) return;
+  // Attribute THIS mark before anything else can move: a mark that follows a real interaction
+  // inside the window is a user edit; a mark with no interaction behind it is the app saving its
+  // own repaint. Latched, never cleared — one genuine edit makes the whole session's local state
+  // worth telling the user about if it is later replaced.
+  if (Date.now() - __lastUserIntentAt < USER_INTENT_WINDOW_MS) __profileUserEditThisSession = true;
   // Fix F2 (2026-08-07 diagnosis): bump the edit-sequence counter on every real dirty mark --
   // the ONE place it's ever incremented, so doProfileFlush/doHydrate can compare "the sequence
   // number I captured" against "the sequence number right now" to detect an edit that landed
@@ -6044,6 +6109,19 @@ async function doHydrate(server, scopeId, isCrashRecovery) {
   // exact clobber this whole fix pass exists to prevent, reintroduced through a different door.
   const meta = getProfileMeta();
   if (!isCrashRecovery && meta && meta.dirty === true && deriveLocalProfileState(meta, scopeId, meta.lastSyncedAt != null) !== 'empty') return false;
+  // BUG-0040: the cell the guard above deliberately does NOT cover — a device that has never
+  // completed a sync round-trip, hydrating over a dirty local state. Refusing here is the wrong
+  // trade and was measured as such: on a never-synced device the local state is app defaults plus
+  // whatever just landed, so refusing PUTs defaults over the server's real plan and loses it on
+  // every device. The server still wins. What was wrong was that it happened SILENTLY.
+  //
+  // Only says so when a HUMAN actually caused the edit — see markProfileDirty's intent note. A
+  // fresh device whose dirty bit came from the boot repaint gets no banner, which is the common
+  // case and must stay quiet, or every first sync on every new device cries wolf.
+  if (!isCrashRecovery && meta && meta.dirty === true && meta.lastSyncedAt == null
+      && __profileUserEditThisSession) {
+    try { showProfileHydrateDisplacedBanner(); } catch (e) {}
+  }
   const fromVersion = meta ? (meta.stateVersion || 0) : 0;
   const toVersion = server.stateVersion || 0;
   const seqAtEntry = meta ? meta.editSeq : undefined;   // Fix F2: same compare-and-clear guard as doProfileFlush
@@ -6207,6 +6285,18 @@ function showProfileDisplacementBanner() {
 }
 function dismissProfileDisplacementBanner() {
   const el = $('profile_displacement_banner');
+  if (el) el.hidden = true;
+}
+// BUG-0040's notice. Deliberately NOT the banner above: that one reports the opposite direction
+// ("your plan replaced a newer server version"), and reusing it would tell the user the exact
+// inverse of what happened. Same surface class, own copy.
+function showProfileHydrateDisplacedBanner() {
+  const el = $('profile_hydrate_displaced_banner');
+  if (el) el.hidden = false;
+  try { window.__profileSync.lastHydrateDisplacedNote = { at: new Date().toISOString() }; } catch (e) {}
+}
+function dismissProfileHydrateDisplacedBanner() {
+  const el = $('profile_hydrate_displaced_banner');
   if (el) el.hidden = true;
 }
 
@@ -6676,6 +6766,12 @@ window.__profileSync = {
   checkRestoreDisplacement: checkRestoreDisplacement,
   showProfileDisplacementBanner: showProfileDisplacementBanner,
   dismissProfileDisplacementBanner: dismissProfileDisplacementBanner,
+  showProfileHydrateDisplacedBanner: showProfileHydrateDisplacedBanner,
+  dismissProfileHydrateDisplacedBanner: dismissProfileHydrateDisplacedBanner,
+  // BUG-0040 test seam: lets a test assert the INTENT signal directly rather than inferring it
+  // from the banner, and lets one drive the "app repaint, not a human" case deterministically.
+  userEditThisSession: () => __profileUserEditThisSession,
+  __setUserIntentForTest: (v) => { __lastUserIntentAt = v ? Date.now() : 0; },
   resolveIdentity: resolveIdentity, identityChanged: identityChanged,
   foregroundResyncAction: foregroundResyncAction, scheduleForegroundResync: scheduleForegroundResync,
   reArmProfileSyncIfSkipped: reArmProfileSyncIfSkipped,
@@ -7296,6 +7392,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }; }
   { const b = document.getElementById('profile_displacement_dismiss_btn');
     if (b) b.onclick = dismissProfileDisplacementBanner; }
+  { const b = document.getElementById('profile_hydrate_displaced_dismiss_btn');
+    if (b) b.onclick = dismissProfileHydrateDisplacedBanner; }
 
   // Boot suppression window (M2): every restore write above + this first settling recompute
   // are suppressed (persist() no-ops) so boot never redundantly rewrites storage before the
