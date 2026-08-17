@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.4
+
+One fix, to a lid that would not stay shut.
+
+- **"Framework targets" on the Budget tab now starts collapsed, and stays however you leave it.**
+  It is a guide — the 50/30/20 split and its variants — not something you need in front of you to
+  read your plan, so it opens as a closed heading you can expand when you want it. Previously it was
+  expanded every time you arrived, and closing it did not stick: switching tabs, switching between
+  Plan and Basis, or reloading brought it straight back open. Now closing it keeps it closed and
+  opening it keeps it open, until you say otherwise.
+
 ## 0.7.3
 
 Closes the last two known data-handling defects in the sync layer. Nothing you see changes unless

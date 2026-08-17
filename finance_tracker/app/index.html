@@ -3597,7 +3597,14 @@ function applyScreens(tab) {
     // screen named "Tax tables" and then being asked to click "Tax tables" open is the lid
     // outliving its reason to exist: you already made the choice it exists to offer. Any section
     // that becomes a screen opens with it, and this generalises to whatever gets promoted next.
-    if (el.tagName === 'DETAILS' && show.has(id)) el.open = true;
+    //
+    // ONLY when the lid is the WHOLE screen, though. Unqualified, this force-opened every lid that
+    // merely SAT ON an active screen, which is the opposite of what a lid is for — Budget ▸ Plan
+    // carries three sections and re-opened "Framework targets" on every render, so a reader who
+    // shut it got it back on the next reload and could never keep it shut. (Tax tables, the case
+    // this rule was written for, is a <section> now, so the sole-section arm currently matches
+    // nothing — it is kept for the next promotion rather than deleted.)
+    if (el.tagName === 'DETAILS' && show.has(id) && active.sections.length === 1) el.open = true;
   });
   // A one-card screen in a two-column tab would render in half the width with an empty column
   // beside it, so a solo screen collapses the panel to a single column.
