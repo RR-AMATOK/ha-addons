@@ -4,7 +4,7 @@
   "meta": {
     "description": "IRS / SSA inflation-adjusted figures for tax year 2026 (single filer).",
     "lastVerified": "2026-06-16",
-    "note": "Editable estimates. Verify against the primary IRS/SSA sources below before relying for filing or withholding. Refresh with: python scripts/update_tax_values.py --year 2026 --write",
+    "note": "Editable estimates. Verify against the primary IRS/SSA sources below before relying for filing or withholding. Refresh with: python scripts/update_tax_values.py --year 2026 --write Healthcare figures (FPL, ACA applicable percentages, benchmark premium, IRMAA) added 2026-08-20; the 2026 ACA cliff is CURRENT LAW but extension legislation was under discussion, so treat acaSubsidyCliffFplPct as live policy rather than a settled constant.",
     "generatedBy": "researched + verified against IRS Rev. Proc. 2025-32, the 2026 retirement-limit release, Rev. Proc. 2025-19, and the SSA 2026 wage-base announcement"
   },
   "values": {
@@ -24,14 +24,78 @@
     "rothIraPhaseIn": 153000,
     "rothIraPhaseOut": 168000,
     "fedBrackets": [
-      { "upper": 12400, "rate": 0.10 },
-      { "upper": 50400, "rate": 0.12 },
-      { "upper": 105700, "rate": 0.22 },
-      { "upper": 201775, "rate": 0.24 },
-      { "upper": 256225, "rate": 0.32 },
-      { "upper": 640600, "rate": 0.35 },
-      { "upper": null, "rate": 0.37 }
-    ]
+      {
+        "upper": 12400,
+        "rate": 0.1
+      },
+      {
+        "upper": 50400,
+        "rate": 0.12
+      },
+      {
+        "upper": 105700,
+        "rate": 0.22
+      },
+      {
+        "upper": 201775,
+        "rate": 0.24
+      },
+      {
+        "upper": 256225,
+        "rate": 0.32
+      },
+      {
+        "upper": 640600,
+        "rate": 0.35
+      },
+      {
+        "upper": null,
+        "rate": 0.37
+      }
+    ],
+    "fplSingle": 15650,
+    "fplPerAdditionalPerson": 5500,
+    "acaApplicablePct": [
+      {
+        "fplPct": 133,
+        "startPct": 2.1,
+        "endPct": 2.1
+      },
+      {
+        "fplPct": 150,
+        "startPct": 3.14,
+        "endPct": 4.19
+      },
+      {
+        "fplPct": 200,
+        "startPct": 4.19,
+        "endPct": 6.6
+      },
+      {
+        "fplPct": 250,
+        "startPct": 6.6,
+        "endPct": 8.44
+      },
+      {
+        "fplPct": 300,
+        "startPct": 8.44,
+        "endPct": 9.96
+      },
+      {
+        "fplPct": 400,
+        "startPct": 9.96,
+        "endPct": 9.96
+      }
+    ],
+    "acaSubsidyCliffFplPct": 400,
+    "acaBenchmarkMonthlyAge40": 545,
+    "acaAgeFactor40": 1.278,
+    "acaAgeFactor64": 3.0,
+    "medicaidExpandedTX": false,
+    "medicarePartBStandardMonthly": 202.9,
+    "irmaaFirstTierMagiSingle": 109000,
+    "irmaaLookbackYears": 2,
+    "medicareEligibilityAge": 65
   },
   "sources": {
     "fedStd": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
@@ -46,6 +110,13 @@
     "hsaLimitSelf": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
     "hsaLimitFamily": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
     "hsaCatchUp": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf",
-    "ssBase": "https://www.ssa.gov/oact/cola/cbb.html"
+    "ssBase": "https://www.ssa.gov/oact/cola/cbb.html",
+    "fplSingle": "https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines",
+    "acaApplicablePct": "https://www.irs.gov/pub/irs-drop/rp-25-25.pdf",
+    "acaSubsidyCliffFplPct": "https://www.congress.gov/crs-product/R48290",
+    "acaBenchmarkMonthlyAge40": "https://www.moneygeek.com/insurance/health/aca-premiums-2026/",
+    "medicaidExpandedTX": "https://coveredusa.org/en/qa/state-medicaid-expansion-status",
+    "medicarePartBStandardMonthly": "https://www.kiplinger.com/retirement/medicare/medicare-premiums-2026-irmaa-brackets-and-surcharges-for-parts-b-and-d",
+    "irmaaFirstTierMagiSingle": "https://www.kiplinger.com/retirement/medicare/medicare-premiums-2026-irmaa-brackets-and-surcharges-for-parts-b-and-d"
   }
 }

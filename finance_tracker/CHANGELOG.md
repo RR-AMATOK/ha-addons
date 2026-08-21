@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.7.5
+
+The FIRE tab grew up, the app stopped hardcoding the tax year, and three defects went with them.
+
+**FIRE**
+
+- **Your FI targets are now yours to define.** Lean and Fat used to be fixed multiples of your own
+  spending — which is not how anyone actually uses those words. A target called "Fat FI" that works
+  out to $61,000 a year of spending is not fat by any published definition. You can now set each
+  target as a multiple of your spending **or** as an absolute figure, rename them, add your own
+  (Chubby, Barista, anything), and give any one of them its own withdrawal rate. Each tile now
+  shows the spending level it represents, so the label and the number can't disagree.
+- **Barista FI.** Give a target some part-time income and it only asks the portfolio to cover the
+  rest.
+- **"Coast to age" is now separate from "Target FI age."** They were one field answering two
+  different questions. Coasting to 45 and coasting to 65 differ by more than double, and only you
+  can say which you meant.
+- **The withdrawal rate says where it came from.** Instead of a bare 3.5%, pick a published basis —
+  Morningstar, Bengen, the Trinity shorthand, Early Retirement Now, and others — and see the
+  conditions attached to each one: what horizon it assumes, what chance of success it targets, and
+  that every one of them is quoted before fees and taxes. Plus a line telling you what your own
+  retirement age implies, since almost every published rate assumes a 30-year retirement.
+- **Healthcare and income thresholds.** Before 65 there is no Medicare, and the credit that pays
+  most of a marketplace premium vanishes entirely one dollar past 400% of the poverty line. The tab
+  now shows what a given retirement income costs you: the premium, the credit, how much room you
+  have before the cliff — and, because Texas has not expanded Medicaid, a warning if you plan your
+  income *too low* as well as too high. It also shows how much you can realise in long-term capital
+  gains at 0%, which here is 0% all-in.
+- **The tab now tells you what it does not model** — the pre-65 healthcare gap, retirement taxes,
+  sequence-of-returns risk — instead of computing those notes and discarding them, which it had
+  been doing since the tab shipped.
+- The projection cone is now labelled a **sensitivity range, not a probability**. It re-runs one
+  projection at plus or minus two points of return. It is not a chance of success.
+
+**Fixes**
+
+- A spend of $0 no longer reports that you are 100% financially independent.
+- Budget "Framework targets" and the assumptions lid now show the numbers they actually computed.
+- The tax year is no longer written into the app. When next year's IRS figures are dropped in, every
+  label and every figure moves together — and a new line under the tax tables tells you which year's
+  figures you are looking at and when they were last checked.
+- A saved what-if can now use budget strategies you created after starting it.
+- **Recurring bills have a "Log it" button.** For a bill that has not arrived yet, it fills the form
+  below with the payee, amount, category and date. It never submits — the amount often differs from
+  the plan, so you get the last word.
+
 ## 0.7.4
 
 One fix, to a lid that would not stay shut.

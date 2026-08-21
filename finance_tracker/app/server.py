@@ -40,6 +40,7 @@ import affordability
 import calculator as calc
 import budgeting
 import fire as _fire
+import retirement_tax as _rtax
 import goals
 import state_compare
 import ventures
@@ -598,6 +599,27 @@ class NetWorthModel(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class FireVariantModel(BaseModel):
+    """One FIRE variant. Every named variant (lean / chubby / fat / barista / custom) is a
+    parameterisation of the same three axes -- what spend counts, what rate is safe, and what
+    part-time income offsets the draw -- so they are DATA rather than three hardcoded branches.
+
+    `spend` (absolute $/yr) and `mult` (x the user's own spend) are both offered because the
+    community defines lean/chubby/fat by ABSOLUTE spending while the app previously used
+    multipliers, and the two genuinely disagree: fatMult 1.5 on a $40,966 spend yields a "Fat
+    FIRE" of $61,449/yr, below every published fat floor. Which convention applies is a value
+    judgement, so the caller chooses.
+    """
+    key: str = Field(..., min_length=1, max_length=32)
+    label: str | None = Field(None, max_length=64)
+    mult: float | None = Field(None, gt=0, le=20)
+    spend: float | None = Field(None, ge=0, le=100_000_000)
+    swr: float | None = Field(None, ge=0, le=0.2)
+    part_time_income: float | None = Field(None, ge=0, le=100_000_000, alias="partTimeIncome")
+
+    model_config = {"populate_by_name": True}
+
+
 class FireModel(BaseModel):
     current_net_worth: float = Field(0.0, alias="currentNetWorth")
     annual_spend: float = Field(0.0, alias="annualSpend")
@@ -611,7 +633,29 @@ class FireModel(BaseModel):
     fat_mult: float = Field(1.5, gt=0, le=5, alias="fatMult")
     band: float = Field(0.02, ge=0, le=0.2, alias="band")
     income: float | None = Field(None, alias="income")  # savingsRate = annual_savings / income; use a consistent basis (gross, or take-home + pre-tax savings) so the rate stays 0–1
-    current_year: int = Field(2026, ge=1900, le=3000, alias="currentYear")
+    # None => fire.compute_fire anchors fiWindowYears to today's year. A literal here was a
+    # dated time bomb: every FI window would have read a year stale from 1 Jan 2027 with
+    # nothing on screen admitting it.
+    current_year: int | None = Field(None, ge=1900, le=3000, alias="currentYear")
+    # Defaults to target_fi_age in the engine. Separate because coastFIRE asks "stop saving now,
+    # retire at a traditional age" while target_fi_age answers "when can I fully retire" -- one
+    # field was answering both, and the coast horizon moves the answer 2.1x across defensible ages.
+    coast_target_age: float | None = Field(None, ge=0, le=120, alias="coastTargetAge")
+    # ── Retirement threshold inputs (retirement_tax.py) ───────────────────────────────────
+    # MAGI is asked for rather than derived, and that is a deliberate admission: MAGI is NOT
+    # spending. $60k drawn from a Roth is ~$0 of MAGI; the same $60k from a traditional IRA is
+    # $60k; from a taxable account it is only the GAIN portion. Deriving it needs per-account
+    # balances with cost basis, which this app does not model yet. Asking is honest; guessing
+    # would put a subsidy cliff warning on a number the engine invented.
+    retirement_magi: float | None = Field(None, ge=0, le=100_000_000, alias="retirementMagi")
+    retirement_ordinary_income: float | None = Field(None, ge=0, le=100_000_000, alias="retirementOrdinaryIncome")
+    household_size: int = Field(1, ge=1, le=12, alias="householdSize")
+    # The 2026 ACA cliff is CURRENT LAW, but extension legislation was under discussion. A
+    # constant would make the app wrong the day that changes.
+    aca_cliff_in_effect: bool = Field(True, alias="acaCliffInEffect")
+    state_taxes_income: bool = Field(False, alias="stateTaxesIncome")
+    # Bounded: this is a display list, and an unbounded one is an unbounded loop over _band_years.
+    variants: list[FireVariantModel] | None = Field(None, max_length=12)
 
     model_config = {"populate_by_name": True}
 
@@ -1060,6 +1104,17 @@ def _load_tax_year_overlay() -> dict:
     Lets the annual IRS/SSA refresh be a data change (run scripts/update_tax_values.py)
     rather than a code edit. Returns {} when no data file ships, so the literals in
     defaults() remain the fallback. Picks the newest year file (clock-independent).
+
+    BUG-0048 — this used to return `data["values"]` and nothing else, dropping `year`,
+    `filingStatus` and `meta.lastVerified` on the floor. That single omission is why the client
+    could not name the tax year it was rendering, and therefore why SIX user-visible year
+    literals existed in index.html (the <title> among them). The refresh mechanism was already
+    correct: drop in tax_data/2027.json and every FIGURE updates. Every LABEL would still have
+    said 2026 — the app computing one year while telling you another, which is worse than being
+    wrong, because it is right while claiming not to be.
+
+    The three provenance keys are namespaced (`taxYear`, not `year`) so they cannot collide with
+    anything in `values` now or after a future IRS refresh adds a field.
     """
     import json
     tdir = ROOT / "tax_data"
@@ -1072,7 +1127,49 @@ def _load_tax_year_overlay() -> dict:
         data = json.loads(files[-1].read_text())
     except Exception:
         return {}
-    return dict(data.get("values", {}))
+    out = dict(data.get("values", {}))
+    if data.get("year") is not None:
+        out["taxYear"] = int(data["year"])
+    if data.get("filingStatus"):
+        out["taxFilingStatus"] = str(data["filingStatus"])
+    verified = (data.get("meta") or {}).get("lastVerified")
+    if verified:
+        out["taxDataVerified"] = str(verified)
+    return out
+
+
+def _retirement_thresholds_for(*, magi: float, age: float, ordinary_income: float,
+                               household_size: int, cliff_in_effect: bool,
+                               state_taxes_income: bool) -> dict:
+    """Bridge tax_data/<year>.json into retirement_tax.compute_retirement_thresholds().
+
+    Every threshold is READ, never written here — the module has no literals of its own, so a
+    figure missing from the data file degrades to "no answer" rather than to a stale 2026 one.
+    """
+    d = defaults()
+    single = (d.get("filingStatusDefaults") or {}).get("single") or {}
+    return _rtax.compute_retirement_thresholds(
+        magi,
+        age,
+        fpl_single=d.get("fplSingle", 0.0),
+        fpl_per_additional=d.get("fplPerAdditionalPerson", 0.0),
+        household_size=household_size,
+        aca_applicable_pct=d.get("acaApplicablePct") or [],
+        aca_cliff_fpl_pct=d.get("acaSubsidyCliffFplPct", 400.0),
+        aca_benchmark_monthly_age40=d.get("acaBenchmarkMonthlyAge40", 0.0),
+        aca_age_factor_40=d.get("acaAgeFactor40", 1.0),
+        aca_age_factor_64=d.get("acaAgeFactor64", 1.0),
+        medicaid_expanded=bool(d.get("medicaidExpandedTX", False)),
+        cliff_in_effect=cliff_in_effect,
+        medicare_age=d.get("medicareEligibilityAge", 65.0),
+        part_b_standard_monthly=d.get("medicarePartBStandardMonthly", 0.0),
+        irmaa_first_tier_magi=d.get("irmaaFirstTierMagiSingle", 0.0),
+        niit_threshold=single.get("niitThreshold", 0.0),
+        ltcg_0pct_upper=single.get("ltcg0pctUpper", 0.0),
+        std_deduction=single.get("fedStd", d.get("fedStd", 0.0)),
+        ordinary_income=ordinary_income,
+        state_taxes_income=state_taxes_income,
+    )
 
 
 @app.get("/api/defaults")
@@ -1269,7 +1366,7 @@ def networth_endpoint(inp: NetWorthModel) -> dict:
 
 @app.post("/api/fire")
 def fire_endpoint(inp: FireModel) -> dict:
-    return _fire.compute_fire(
+    out = _fire.compute_fire(
         current_net_worth=inp.current_net_worth,
         annual_spend=inp.annual_spend,
         current_age=inp.current_age,
@@ -1283,7 +1380,24 @@ def fire_endpoint(inp: FireModel) -> dict:
         band=inp.band,
         income=inp.income,
         current_year=inp.current_year,
+        coast_target_age=inp.coast_target_age,
+        variant_specs=([v.model_dump(by_alias=True, exclude_none=True) for v in inp.variants]
+                       if inp.variants is not None else None),
     )
+    # The endpoint COMPOSES two engines rather than fire.py depending on retirement_tax.py: the
+    # FIRE maths is complete without a healthcare model, and coupling them would make every FIRE
+    # test carry an ACA fixture it does not need.
+    if inp.retirement_magi is not None:
+        out["retirementThresholds"] = _retirement_thresholds_for(
+            magi=inp.retirement_magi,
+            age=inp.target_fi_age,
+            ordinary_income=(inp.retirement_ordinary_income
+                             if inp.retirement_ordinary_income is not None else inp.retirement_magi),
+            household_size=inp.household_size,
+            cliff_in_effect=inp.aca_cliff_in_effect,
+            state_taxes_income=inp.state_taxes_income,
+        )
+    return out
 
 
 class FlexBucketModel(BaseModel):

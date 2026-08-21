@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Income Tax Calculator — 2026 (Single)</title>
+<!-- The year here is the pre-hydration FALLBACK only; applyTaxYearLabels() rewrites it from
+     /api/defaults (tax_data/<year>.json) the moment the backend answers. Do not add another. -->
 <style>
   :root {
     /* Native form-control chrome (select dropdowns, the <datalist> autocomplete popup,
@@ -208,6 +210,14 @@
     border: 1px solid var(--field-border); border-radius: 6px; overflow: hidden;
     background: var(--field); box-shadow: var(--field-shadow); }
   .input-pair:focus-within { border-color: var(--accent); box-shadow: var(--field-focus-ring); }
+  /* A <select> in a form row is a field like any other and belongs on the same column unit.
+     Nothing ever said so, so every one of them sized to its longest option instead: measured
+     across the app they ran 120px (Compare to strategy), 152px (Pay frequency), 172px (Spend
+     basis), 200px (Money source) and 377px (Published basis) against .input-pair's 192px --
+     five controls, five widths, in columns that are supposed to line up. `max-width` rather
+     than `width` so the narrow-viewport rule below can still take them full-width, and so a
+     select inside a grid cell that sets its own width (the FIRE target editor) is unaffected. */
+  .row > select { width: 192px; max-width: 100%; }
   .input-pair input {
     background: transparent; border: none; box-shadow: none; color: var(--text); outline: none;
     padding: 6px 8px; flex: 1 1 auto; width: auto; min-width: 0; font: inherit; text-align: right;
@@ -320,6 +330,11 @@
      UA link-blue is near-invisible on the dark theme. */
   .gl-act { text-decoration: none; display: inline-block; padding: 2px 6px; border-radius: 6px; line-height: 1.3; color: var(--muted); }
   .gl-act:hover { color: var(--text); background: var(--chip); }
+  /* The family shipped as anchors, so the base rule assumes link chrome. A destructive row
+     action is more honestly a <button> -- it is not a destination, and an <a href="#"> asks
+     every assistive technology to announce it as one -- so the class resets button chrome
+     rather than the markup downgrading to match. Purely additive: no existing anchor changes. */
+  button.gl-act { background: none; border: 0; font: inherit; cursor: pointer; }
   .gl-act-primary { color: var(--accent); }
   .gl-act-primary:hover { color: var(--text); background: var(--chip); }
   .gl-act-done { color: var(--muted); }
@@ -360,6 +375,41 @@
      left, beside the name it describes. Every track was measured, not guessed: the tag fits the
      one chip this list has ("built-in", 50.4px), the select fits its own shrink-to-fit width
      (120px, identical on both themes). Re-measure if either's content changes. */
+  /* FIRE variant editor. Same rule as .cat-list and for the same reason: each row is its own
+     grid container, so an `auto` track aligns nothing BETWEEN rows -- fixed tracks, every cell
+     placed explicitly, and an empty optional cell leaves its column empty rather than letting
+     the next cell auto-place into it (DESIGN.md 4.4). */
+  .fv-list  { --fv-c-name: 128px; --fv-c-basis: 124px; --fv-c-amt: 112px; --fv-c-swr: 88px; --fv-c-pt: 112px; --fv-c-act: 30px; }
+  .fv-head,
+  .fv-list .fv-row { display: grid; align-items: center; column-gap: var(--space-2);
+                grid-template-columns: var(--fv-c-name) var(--fv-c-basis) var(--fv-c-amt) var(--fv-c-swr) var(--fv-c-pt) 1fr var(--fv-c-act); }
+  .fv-head  { padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+  .fv-head .ac-lbl:nth-child(1) { grid-column: 1; }
+  .fv-head .ac-lbl:nth-child(2) { grid-column: 2; }
+  .fv-head .ac-lbl:nth-child(3) { grid-column: 3; }
+  .fv-head .ac-lbl:nth-child(4) { grid-column: 4; }
+  .fv-head .ac-lbl:nth-child(5) { grid-column: 5; }
+  .fv-list .fv-row { padding: var(--space-2) 0; border-bottom: 1px solid var(--line-faint); }
+  .fv-list .fv-row:last-child { border-bottom: 0; }
+  .fv-name  { grid-column: 1; }
+  .fv-basis { grid-column: 2; }
+  .fv-amt   { grid-column: 3; }
+  .fv-swr   { grid-column: 4; }
+  .fv-pt    { grid-column: 5; }
+  .fv-del   { grid-column: 7; }
+  /* The editor's fields are narrower than the app's 168px column unit because five of them share
+     one row; the .input-pair surface itself is unchanged. */
+  .fv-row .input-pair { width: 100%; min-width: 0; }
+  .fv-row select.fv-basis-sel { width: 100%; }
+  /* Below the point where five tracks stop fitting, each row becomes its own labelled stack --
+     the same fold .cat-list makes, rather than a horizontal scroll. */
+  @media (max-width: 780px) {
+    .fv-head { display: none; }
+    .fv-list .fv-row { grid-template-columns: 1fr 1fr; row-gap: var(--space-2); }
+    .fv-name, .fv-basis, .fv-amt, .fv-swr, .fv-pt, .fv-del { grid-column: auto; }
+    .fv-name { grid-column: 1 / -1; }
+  }
+
   .cat-list   { --cat-c-name: 210px; --cat-c-tag: 64px; --cat-c-sel: 124px; --cat-c-act: 56px; }
   .cat-head,
   .cat-list .mng-row { display: grid; align-items: center; column-gap: var(--space-2);
@@ -1947,8 +1997,14 @@
           <div class="mini muted" id="fire-target-age-note" style="margin:-4px 0 8px"></div>
           <div class="row">
             <label>SWR</label>
-            <span class="input-pair"><input id="fire-swr" type="number" step="0.1" value="3.5" min="2" max="6"/><span class="unit">%</span></span>
+            <span class="input-pair"><input id="fire-swr" type="number" step="0.01" value="3.5" min="2" max="6"/><span class="unit">%</span></span>
           </div>
+          <div class="row">
+            <label>Published basis <span class="mini muted">(sets the rate)</span></label>
+            <select id="fire-swr-preset"></select>
+          </div>
+          <div class="mini muted" id="fire-swr-note" style="margin:-2px 0 10px;line-height:1.5"></div>
+          <div class="mini muted" id="fire-horizon-note" style="margin:-4px 0 10px;line-height:1.5"></div>
           <div class="row">
             <label>Nominal return</label>
             <span class="input-pair"><input id="fire-nom-return" type="number" step="0.5" value="7" min="0" max="20"/><span class="unit">%</span></span>
@@ -1958,16 +2014,26 @@
             <span class="input-pair"><input id="fire-inflation" type="number" step="0.25" value="3" min="0" max="10"/><span class="unit">%</span></span>
           </div>
           <div class="row">
+            <label>Coast to age <span class="mini muted">(stop saving, retire then)</span></label>
+            <span class="input-pair"><input id="fire-coast-age" type="number" step="1" value="65" min="20" max="90"/></span>
+          </div>
+          <div class="row">
             <label>Real return <span class="mini muted">(computed)</span></label>
             <span id="fire-real-return" style="font-size:var(--fs-md);color:var(--muted)">—</span>
           </div>
-          <div class="row">
-            <label>Lean multiplier</label>
-            <span class="input-pair"><input id="fire-lean-mult" type="number" step="0.05" value="0.7" min="0.3" max="1"/><span class="unit">&times;</span></span>
+          <h3 style="font-size:var(--fs-sm);margin:16px 0 4px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">Targets</h3>
+          <p class="mini muted" style="margin:0 0 8px;line-height:1.5">Each target is a spending level and a withdrawal rate. Set the level as a multiple of your own spending, or as an absolute figure &mdash; the FIRE community defines lean, chubby and fat by absolute annual spending, so a multiple of <em>your</em> spending can carry a name it has not earned. Part-time income is the barista&nbsp;FI lever: it reduces what the portfolio has to cover.</p>
+          <div class="fv-head">
+            <span class="ac-lbl">Name</span>
+            <span class="ac-lbl">Level</span>
+            <span class="ac-lbl">Amount</span>
+            <span class="ac-lbl">Withdrawal</span>
+            <span class="ac-lbl">Part-time</span>
           </div>
-          <div class="row">
-            <label>Fat multiplier</label>
-            <span class="input-pair"><input id="fire-fat-mult" type="number" step="0.05" value="1.5" min="1" max="3"/><span class="unit">&times;</span></span>
+          <div class="fv-list" id="fire-variants"></div>
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="seed-btn" id="fire-var-add">Add a target</button>
+            <button type="button" class="ac-tool" id="fire-var-reset">Reset to defaults</button>
           </div>
         </div>
       </details>
@@ -1979,7 +2045,7 @@
       <div id="fire-fi-warning" class="warn-box" style="display:none;margin-bottom:10px"></div>
       <div id="fire-chart" class="mini">Loading&#8230;</div>
       <div id="fire-window" class="mini muted" style="margin-top:8px"></div>
-      <div class="mini muted" style="margin-top:6px;line-height:1.5">Cone is in today&rsquo;s real (inflation-adjusted) dollars. Snapshot dots, if shown, are current-dollar values. Pre-tax-of-withdrawals &middot; excludes pre-65 healthcare &middot; ignores sequence-of-returns risk. Cone = &plusmn;2 pp return band.</div>
+      <div class="mini muted" style="margin-top:6px;line-height:1.5">Cone is in today&rsquo;s real (inflation-adjusted) dollars. <b>The cone is a sensitivity range, not a probability.</b> It re-runs the same projection at &plusmn;2 percentage points on your real return &mdash; it is not a chance of success, and it does not model sequence-of-returns risk, which explains most of the variation in what a portfolio can actually sustain. Pre-tax-of-withdrawals &middot; excludes pre-65 healthcare.</div>
     </section>
 
     <!-- 5. Savings lever -->
@@ -1993,25 +2059,47 @@
       <div id="fire-lever-result" class="mini" style="margin-top:8px"></div>
     </section>
 
-    <!-- 6. Lean / FI / Fat tiles -->
-    <div class="subhead">Lean &middot; Full &middot; Fat FI targets</div>
-    <div class="tiles" id="fire-lean-fi-fat" style="margin-top:6px">
-      <div class="tile">
-        <div class="k">Lean FI</div>
-        <div class="v" id="fire-lean-num">—</div>
-        <div class="s" id="fire-lean-sub">—</div>
+    <!-- 6. Healthcare and income thresholds -- the cliffs that make EARLY retirement different
+         from ordinary retirement. Income tax is a curve; these are step changes, and the app is
+         unusually well placed to model them because calculator.py already carries this filer's
+         capital-gains breakpoints and surtax thresholds. -->
+    <section class="card" id="fire_thresholds_card" style="margin-bottom:14px">
+      <h2>Healthcare &amp; income thresholds</h2>
+      <p class="mini muted" style="margin:0 0 10px;line-height:1.5">Before 65 there is no Medicare, and the premium tax credit that pays most of a marketplace plan disappears entirely one dollar past 400% of the poverty line. Below the poverty line in a state that has not expanded Medicaid there is nothing either. Both edges are worth knowing before you pick a retirement income.</p>
+      <div class="row">
+        <label>Taxable income in retirement <span class="mini muted">(MAGI)</span></label>
+        <span class="input-pair"><input id="fire-rt-magi" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span>
       </div>
-      <div class="tile good">
-        <div class="k">Full FI</div>
-        <div class="v" id="fire-fi-num">—</div>
-        <div class="s" id="fire-fi-num-sub">—</div>
+      <p class="mini muted" style="margin:-2px 0 10px;line-height:1.5">This is <b>not</b> your spending. Drawing $60,000 from a Roth is about $0 of taxable income; the same $60,000 from a traditional 401(k) is $60,000; from a taxable account only the <em>gain</em> counts. Working that out from your actual balances needs per-account cost basis, which this app does not model yet &mdash; so it asks rather than guessing.</p>
+      <div class="row">
+        <label>Household size</label>
+        <span class="input-pair"><input id="fire-rt-household" type="number" value="1" min="1" max="12"/></span>
       </div>
-      <div class="tile">
-        <div class="k">Fat FI</div>
-        <div class="v" id="fire-fat-num">—</div>
-        <div class="s" id="fire-fat-sub">—</div>
+      <div class="row">
+        <label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="fire-rt-cliff" checked style="width:auto"> Apply the 400%-of-poverty subsidy cliff <span class="muted">(current law; extension was under discussion)</span></label>
       </div>
-    </div>
+      <div id="fire-rt-out" class="mini" style="margin-top:10px">&mdash;</div>
+    </section>
+
+    <!-- 7. What the model leaves out -- rendered from the engine's own `notes`.
+         These six strings were computed by fire.py from the day the tab shipped and thrown
+         away by fireRender(); every other tab in the app renders `r.notes`. They are exactly
+         the omissions the FIRE literature complains calculators hide (pre-65 healthcare, the
+         ordinary-income treatment of tax-deferred withdrawals, sequence-of-returns risk),
+         so discarding them was the tab's least defensible habit. -->
+    <section class="card" id="fire_notes_card" style="margin-bottom:14px">
+      <h2>What this model leaves out</h2>
+      <div id="fire-notes" class="mini muted">&mdash;</div>
+    </section>
+
+    <!-- 8. FI target tiles -- rendered from the variant list, not hardcoded to three.
+         Each tile's sub-line names the SPENDING LEVEL it represents, which is the whole point:
+         a target called "Fat FI" that resolves to $61k/yr of spending is visibly not fat, and
+         no amount of labelling fixes that. Showing the level costs nothing and says it. -->
+    <section class="card" id="fire_targets_card" style="margin-bottom:14px">
+      <h2>FI targets</h2>
+      <div class="tiles" id="fire-lean-fi-fat"></div>
+    </section>
 
   </div>
 </div>
@@ -2248,16 +2336,20 @@
     <section class="card" id="tax_tables_wrap">
       <h2>Tax tables &amp; rates</h2>
       <div class="body tt-body measure">
-        <p class="muted" style="margin-top:0">Editable. Defaults come from the Python backend (<code>/api/defaults</code>) — 2026 federal IRS projections. Brackets always stay in annual dollars regardless of entry cadence.</p>
+        <p class="muted" style="margin-top:0">Editable. Defaults come from the Python backend (<code>/api/defaults</code>) — <span data-tax-year>2026</span> federal IRS projections. Brackets always stay in annual dollars regardless of entry cadence.</p>
+        <!-- Filled by paintTaxDataProvenance(). Empty in markup on purpose: an unhydrated
+             placeholder here would be a claim about data freshness made before the data arrives,
+             which is the one thing this line exists to avoid. -->
+        <p id="tax_data_provenance" class="mini muted" style="margin:-6px 0 12px"></p>
 
-        <h3 style="font-size:var(--fs-sm);margin:10px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">Federal — Single 2026</h3>
+        <h3 style="font-size:var(--fs-sm);margin:10px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">Federal — Single <span data-tax-year>2026</span></h3>
         <div class="row">
           <label>Standard deduction</label>
           <span class="input-pair"><input id="fedStd" type="text" inputmode="decimal" data-fmt="usd" value="16,100" /><span class="unit">$</span></span>
         </div>
         <div id="fedBrackets"></div>
 
-        <h3 style="font-size:var(--fs-sm);margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">FICA 2026</h3>
+        <h3 style="font-size:var(--fs-sm);margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:var(--ls-caps)">FICA <span data-tax-year>2026</span></h3>
         <div class="row">
           <label>Social Security wage base</label>
           <span class="input-pair"><input id="ssBase" type="text" inputmode="decimal" data-fmt="usd" value="184,500" /><span class="unit">$</span></span>
@@ -2325,7 +2417,7 @@
     <!-- Max-out planner: hit the annual limits + see the budget impact -->
     <section class="card" id="maxoutCard">
       <h2>Max out your accounts</h2>
-      <div class="mini muted" style="margin:-2px 0 10px">Plan to hit the 2026 annual limits on your tax-advantaged accounts, see the per-paycheck cost, and how much take-home is left for your budget.</div>
+      <div class="mini muted" style="margin:-2px 0 10px">Plan to hit the <span data-tax-year>2026</span> annual limits on your tax-advantaged accounts, see the per-paycheck cost, and how much take-home is left for your budget.</div>
       <div class="row" style="align-items:center;gap:8px"><label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="mo_401k" checked style="width:auto"> Max 401(k) <span class="muted" id="mo_401k_lim"></span></label></div>
       <div class="row" id="mo_401k_split_row" style="margin:-2px 0 4px 22px"><label class="mini" style="display:flex;align-items:center;gap:6px">Roth share <input id="mo_roth_pct" type="number" min="0" max="100" step="1" value="0" style="width:54px"> % <span class="muted" id="mo_split_lab"></span></label></div>
       <div class="row"><label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="mo_hsa" checked style="width:auto"> Max HSA <span class="muted" id="mo_hsa_lim"></span></label></div>
@@ -3178,7 +3270,7 @@
 </div>
 
 <footer>
-  Not financial, tax, or legal advice — educational estimates. Figures use 2026 IRS projections; verify with a CPA before relying on them.
+  Not financial, tax, or legal advice — educational estimates. Figures use <span data-tax-year>2026</span> IRS projections; verify with a CPA before relying on them.
 </footer>
 
 <script>
@@ -3685,6 +3777,8 @@ function tabIndexModel(tab) {
       { id: 'fire_assumptions_card', label: 'Assumptions', value: null },
       { id: 'fire_traj_card',        label: 'Trajectory',  value: null },
       { id: 'fire_lever_card',       label: 'Savings lever', value: null },
+      { id: 'fire_notes_card',       label: 'Caveats',
+        value: (() => { const n = (window.__fireResult && window.__fireResult.notes) || []; return n.length ? n.length + ' listed' : null; })() },
     ]; break;
 
     case 'invest': {
@@ -4049,8 +4143,30 @@ let   LIMIT_401K = 24_500;       // elective deferral (Trad + Roth 401k combined
 let   LIMIT_ROTH_IRA = 7_500;    // Roth IRA contribution
 let   LIMIT_HSA_SELF = 4_400;
 let   LIMIT_HSA_FAMILY = 8_750;
+// BUG-0050: this was `const LIMIT_415C = 72_000` down in the Max-out planner, carrying a
+// comment that said "backend tax_data stays authoritative" while never reading it. `sec415cLimit`
+// has been in /api/defaults all along. Exactly BUG-0028's shape, one scope down and still open:
+// the year tax_data/2027.json lands, every server figure moves and the mega-backdoor headroom
+// keeps quoting 72,000.
+let   LIMIT_415C = 72_000;       // §415(c) overall defined-contribution limit
 let   hsaCoverage = 'self';      // 'self' | 'family'
 function currentHsaLimit() { return hsaCoverage === 'family' ? LIMIT_HSA_FAMILY : LIMIT_HSA_SELF; }
+
+// The tax YEAR is data too, and treating it as anything else is what produced six hardcoded
+// "2026"s in user-visible copy -- including the <title>. It rides the same overlay every figure
+// above rides (tax_data/<year>.json -> /api/defaults), so the labels move when the numbers do.
+let   __defaultsHydrated = false;   // did /api/defaults actually answer? (rides the event's detail)
+let   TAX_YEAR = 2026;           // FALLBACK only, matching the baked-in FALLBACK_FED brackets
+let   TAX_DATA_VERIFIED = null;  // meta.lastVerified from the data file, when it ships one
+
+// Every user-visible mention of the tax year is a [data-tax-year] node, so there is exactly one
+// place that knows how to say the year and nowhere left to hardcode it.
+function applyTaxYearLabels() {
+  try {
+    document.querySelectorAll('[data-tax-year]').forEach(el => { el.textContent = String(TAX_YEAR); });
+    document.title = 'Income Tax Calculator \u2014 ' + TAX_YEAR + ' (Single)';
+  } catch (e) {}
+}
 
 // Roth IRA MAGI phase-out (filing-status dependent; updated by setFilingStatus()).
 let   ROTH_IRA_PHASE_IN = 153_000;
@@ -5250,7 +5366,12 @@ const LID_SCENT = [
       const r = document.getElementById('fire-real-return'), w = document.getElementById('fire-swr');
       if (!r && !w) return null;
       const bits = [];
-      if (r && String(r.value).trim() !== '') bits.push(rn(r.value) + '% real');
+      // BUG-0045: `#fire-real-return` is a <span>, not an input, so `.value` is undefined --
+      // and `String(undefined).trim()` is the non-empty string "undefined", which sails through
+      // the guard, while `rn(undefined)` is 0. The collapsed lid therefore advertised "0% real"
+      // permanently, against a real return that was actually 3.88%. Read what is rendered.
+      const rTxt = r ? (r.value != null ? r.value : r.textContent) : '';
+      if (String(rTxt).trim() !== '' && String(rTxt).trim() !== '—') bits.push(rn(rTxt) + '% real');
       if (w && String(w.value).trim() !== '') bits.push(rn(w.value) + '% withdrawal');
       return bits.length ? bits.join(' · ') : null;
     } },
@@ -5309,6 +5430,38 @@ function paintAllLidScent() {
 // that default from the HTML.
 // ---------------------------------------------------------------------------
 const TAX_TABLE_SCALARS = ['fedStd', 'ssBase', 'ssRate', 'medRate', 'addlMedThresh', 'addlMedRate'];
+
+// BUG-0049. These six were NEVER hydrated -- grepping `d.fedStd|d.ssBase|d.addlMedThresh` across
+// the whole file returned zero. /api/defaults has served all six all along (they come straight
+// out of tax_data/<year>.json), and the client used its baked-in `value=` attributes instead and
+// then POSTED THOSE BACK in buildPayload(). So the standard deduction the server computed with
+// was the client's HTML literal, not the server's own data file. They agree today; they stop
+// agreeing the day tax_data/2027.json lands, and nothing anywhere would have said so.
+//
+// This matters more than the year labels it was found next to: fedStd moves every single figure
+// the app displays.
+//
+// Units differ by field and that is the trap. The wire is CANONICAL -- rates are fractions
+// (0.062) -- while the inputs are HUMAN -- percent (6.2), dollars comma-formatted. Hydrating
+// without converting would have set the Social Security rate to 0.062%, quietly zeroing FICA.
+const TAX_SCALAR_IS_PCT = { ssRate: true, medRate: true, addlMedRate: true };
+
+// Runs INSIDE the /api/defaults block and therefore BEFORE captureShippedTax(), which is
+// load-bearing: "shipped" must mean what the backend ships, not what the markup happens to say,
+// or BUG-0022's is-this-still-the-shipped-figure banner compares against the wrong baseline.
+// It also runs before restoreState(), so a value the user edited still wins.
+function hydrateTaxScalars(d) {
+  TAX_TABLE_SCALARS.forEach(id => {
+    const v = d[id];
+    if (typeof v !== 'number') return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = TAX_SCALAR_IS_PCT[id]
+      ? +(v * 100).toFixed(4)
+      : (typeof fmtUSDval === 'function' ? fmtUSDval(v) : String(v));
+  });
+}
+
 let SHIPPED_TAX = null;
 
 // Accessors rather than the bare binding: `SHIPPED_TAX` is a `let`, and a `let` at top level is
@@ -5375,7 +5528,57 @@ function resetTaxTablesToShipped() {
 }
 
 // The scent itself, on the lid, where it can be read without opening anything.
+// Provenance for the tax tables: whose figures these are, when they were last checked against
+// the IRS/SSA sources, and whether what is on screen is still them.
+//
+// BUG-0048 left `meta.lastVerified` hydrated and displayed NOWHERE, so the one question a reader
+// actually has each spring -- "are these numbers still current?" -- had no answer anywhere in the
+// UI. The year now reaches the labels; this is where the freshness reaches a human.
+const _MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Formatted from the ISO STRING, never through a Date object. `new Date('2026-06-16')` parses as
+// UTC midnight, so toLocaleDateString() in any negative-offset zone renders it as the 15th --
+// which is exactly BUG-0042, and this is the cheapest possible place to not repeat it.
+function fmtISODateShort(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso));
+  if (!m) return null;
+  const mon = _MONTHS_SHORT[+m[2] - 1];
+  return mon ? (+m[3]) + ' ' + mon + ' ' + m[1] : null;
+}
+
+function paintTaxDataProvenance() {
+  const el = document.getElementById('tax_data_provenance');
+  if (!el) return;
+
+  // The backend never answered, so every figure on screen is a baked-in fallback. The app used to
+  // fall back in complete silence; a wrong-year fallback is precisely the case where silence
+  // costs the most, so this is the one state that gets a warning colour.
+  if (!__defaultsHydrated) {
+    el.textContent = 'Showing built-in fallback figures — the backend did not answer, so these may not be current.';
+    el.style.color = 'var(--warn)';
+    return;
+  }
+  el.style.color = '';
+
+  const bits = [TAX_YEAR + ' IRS/SSA figures'];
+  const when = fmtISODateShort(TAX_DATA_VERIFIED);
+  // "verification date not recorded" rather than omitting the clause: an absent date and a recent
+  // one must not look the same, for the same reason taxTablesEditedCount() refuses to report an
+  // unknown state as "shipped figures".
+  bits.push(when ? 'verified ' + when : 'verification date not recorded');
+
+  const n = taxTablesEditedCount();
+  if (n > 0) bits.push(n + (n === 1 ? ' value edited since' : ' values edited since'));
+  el.textContent = bits.join(' · ');
+}
+
+// Rides the same triggers as the lid scent rather than wiring its own: both answer the same
+// question -- is what I am looking at still the data that shipped? -- so they must never be able
+// to disagree by being repainted at different moments.
+document.addEventListener('itc:defaults-hydrated', () => { try { paintTaxDataProvenance(); } catch (e) {} });
+
 function paintTaxTablesScent() {
+  try { paintTaxDataProvenance(); } catch (e) {}
   const wrap = document.getElementById('tax_tables_wrap');
   if (!wrap) return;
   // The header is a <summary> while this is a lid and an <h2> once it is a plain card. Resolving
@@ -5389,7 +5592,7 @@ function paintTaxTablesScent() {
   // lid carries its value. Only the CLASSES differ here, because only this one is a correctness
   // signal rather than a convenience.
   if (n == null) { setLidValue('tax_tables_wrap', null); return; }
-  if (n === 0) { setLidValue('tax_tables_wrap', 'shipped 2026 figures', 'is-shipped'); return; }
+  if (n === 0) { setLidValue('tax_tables_wrap', 'shipped ' + TAX_YEAR + ' figures', 'is-shipped'); return; }
   setLidValue('tax_tables_wrap', n + (n === 1 ? ' value edited' : ' values edited'), 'is-edited');
   if (!sum.querySelector('.tax-reset')) {
     const b = document.createElement('button');
@@ -7126,6 +7329,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (typeof d.iraLimit        === 'number') LIMIT_ROTH_IRA     = d.iraLimit;
       if (typeof d.hsaLimitSelf    === 'number') LIMIT_HSA_SELF     = d.hsaLimitSelf;
       if (typeof d.hsaLimitFamily  === 'number') LIMIT_HSA_FAMILY   = d.hsaLimitFamily;
+      if (typeof d.sec415cLimit    === 'number') LIMIT_415C         = d.sec415cLimit;
+      hydrateTaxScalars(d);   // must precede captureShippedTax() below — see its own comment
+      __defaultsHydrated = true;
+      if (typeof d.taxYear         === 'number') { TAX_YEAR = d.taxYear; applyTaxYearLabels(); }
+      if (typeof d.taxDataVerified === 'string') TAX_DATA_VERIFIED  = d.taxDataVerified;
       if (typeof d.rothIraPhaseIn  === 'number') ROTH_IRA_PHASE_IN  = d.rothIraPhaseIn;
       if (typeof d.rothIraPhaseOut === 'number') ROTH_IRA_PHASE_OUT = d.rothIraPhaseOut;
       if (d.filingStatusDefaults) {
@@ -7138,6 +7346,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderBrackets('fedBrackets', FALLBACK_FED, 'fed');
     renderBrackets('caBrackets',  FALLBACK_CA,  'ca');
   }
+  // BUG-0050. Every module that paints a hydrated limit at init painted it from the FALLBACK: the feature
+  // IIFE runs at parse time and this fetch resolves later. BUG-0028 fixed exactly one of them by
+  // hand (`window.__jobChange.render()` above) — and the Max-out planner had the same defect the
+  // whole time, quoting "up to $47,500/yr (§415c)" from frozen constants. Nobody saw it because
+  // the fallbacks are correct for the shipped year, which is the only year anyone has run.
+  //
+  // A one-off call per module does not survive the next module, so this is an announcement
+  // instead: hydrate, then say so, and let anything that cares subscribe. Fired on the FAILURE
+  // path too — a module that repaints from unchanged fallbacks is a no-op, whereas one that never
+  // hears anything stays stale, and the whole point is that staleness be impossible.
+  try { document.dispatchEvent(new CustomEvent('itc:defaults-hydrated', { detail: { ok: __defaultsHydrated } })); } catch (e) {}
 
   // BUG-0022: the ONE moment the DOM holds shipped values for both the backend brackets and the
   // HTML-defaulted scalars -- after the block above, before restoreState() below can overwrite
@@ -9614,7 +9833,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- Max-out planner (Tax tab): Trad/Roth split + catch-up + budget impact ----
-  const LIMIT_415C = 72_000;   // §415(c) overall DC limit (2026); backend tax_data stays authoritative
   function moEmpMatch() { const e = $('emp_match'); return e ? rn(e.value) : 0; }
   function moRothPct() { return Math.min(100, Math.max(0, rn($('mo_roth_pct') ? $('mo_roth_pct').value : 0))) / 100; }
   function moPeriodsLeft() {
@@ -9738,6 +9956,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Applied — take-home dropped, and your budget base now reflects the extra contributions');
   }
   wire('mo_go', calcMaxout); wire('mo_apply', applyMaxout);
+  // Repaint once /api/defaults lands: these labels quote LIMIT_401K / LIMIT_HSA_* / LIMIT_ROTH_IRA
+  // / LIMIT_415C, all of which are fallbacks at the moment this module initialises.
+  document.addEventListener('itc:defaults-hydrated', renderMaxoutLabels);
   ['mo_hsa', 'mo_mega'].forEach(id => { const e = $(id); if (e) e.addEventListener('change', renderMaxoutLabels); });
   { const rp = $('mo_roth_pct'); if (rp) rp.addEventListener('input', renderMaxoutLabels); }
   { const em = $('emp_match'); if (em) em.addEventListener('input', renderMaxoutLabels); }
@@ -12283,9 +12504,40 @@ document.addEventListener('DOMContentLoaded', async () => {
   // reloadStateFromStorage() is therefore called UNCONDITIONALLY by repaintAfterHydrate, even when
   // the paint below is skipped; repopulateFromStorage() (used by every OTHER caller: What-If
   // enter/exit/resume/peek, which always want the full DOM repaint too) just runs both in order.
+  // BUG-0052: `customStrategies` is a LIBRARY of reusable definitions, not plan data — and a
+  // What-If session snapshots `budgetBuilder_v1` wholesale. So a strategy created AFTER a
+  // scenario was started did not exist inside it: resuming that scenario dropped the "Your
+  // strategies" optgroup entirely and left only the four presets, while the strategy sat in live
+  // storage the whole time.
+  //
+  // Categories are the precedent for what a shared library is: What-If blocks editing them
+  // outright (`wiBlockIfActive('manage categories')`). Strategies stay editable in-mode
+  // deliberately — trying one out IS the point of a scenario — so instead of blocking, the live
+  // library is merged in on every session transition.
+  //
+  // The scenario's OWN definition of a name wins, because that is an in-mode edit and in-mode
+  // edits are the thing a scenario exists to hold. Every live name the scenario does not define
+  // is added. A no-op in live mode, where `bgb` already IS the library.
+  function bgbMergeLiveCustomStrategies() {
+    if (!WhatIf.active) return;
+    let live = null;
+    // Raw read on purpose: load() is What-If-aware and would hand back the session copy, which
+    // is precisely the copy that is missing the strategy.
+    try { live = JSON.parse(localStorage.getItem(BGB_KEY)); } catch (e) { live = null; }
+    const lib = live && live.customStrategies;
+    if (!lib || typeof lib !== 'object') return;
+    if (!bgb.customStrategies || typeof bgb.customStrategies !== 'object') bgb.customStrategies = {};
+    Object.keys(lib).forEach(name => {
+      if (!Object.prototype.hasOwnProperty.call(bgb.customStrategies, name)) {
+        bgb.customStrategies[name] = lib[name];
+      }
+    });
+  }
+
   function reloadStateFromStorage() {
     try { const b = JSON.parse(load(BGB_KEY)); bgb = (b && Array.isArray(b.buckets)) ? b : bgbDefault(); } catch (e) { bgb = bgbDefault(); }
     bgbNormalize();
+    bgbMergeLiveCustomStrategies();
     // TODO-250: a session-vs-live transition can swap in a `bgb` with different custom
     // strategies (or a different active selection) — clear the in-progress strategy-editor key
     // so a deferred paint never reopens an editor against a strategy that no longer exists.
@@ -15083,13 +15335,58 @@ document.addEventListener('DOMContentLoaded', async () => {
         const where = esc(r.direction === 'in' ? 'income' : (KINDS[r.bucket] ? KINDS[r.bucket].label : r.bucket || '—'));
         const amt = m.count > 0 ? acAmt(m.actual) : (planned ? acAmt(planned) : '—');
         const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
+        // A bill that has not arrived yet is the only row with anything to DO, so it is the only
+        // row that gets an action. Putting a "log it" button on one that already came through
+        // would invite double-entry, which is the failure this whole panel exists to catch.
+        const canLog = m.count === 0;
         rows += '<tr><td><span class="' + cls + '">' + icon + '</span> ' + esc(r.category) + ' <span class="mini muted">' + where + '</span></td>'
-          + '<td class="num">' + amt + sub + '</td><td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td></tr>';
+          + '<td class="num">' + amt + sub + '</td><td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td>'
+          + '<td style="text-align:right">' + (canLog
+              ? '<button type="button" class="ac-tool" data-reclog="' + esc(r.id) + '" title="Fill the form below from this bill">Log&nbsp;it</button>'
+              : '') + '</td></tr>';
       });
       el.innerHTML = '<div class="mini" style="margin-bottom:6px"><span class="good-text">✓ ' + recv + '</span> came through · <span class="muted">⏳ ' + pend + '</span> pending · <span class="bad-text">⚠ ' + miss + '</span> missing</div>'
         + '<table class="res-table">' + rows + '</table>';
     }
     acRenderRecurringSetup();
+  }
+
+  // "Log it" — prefill the composer from a recurring bill that has not arrived yet.
+  //
+  // Routed through acApplyTemplate() rather than writing the six fields by hand: that function
+  // already sets the direction chips AND calls acSyncDirUI() and acFillCatList(), so a hand-rolled
+  // prefill would drift from it the first time either of those gains a step. The recurring row is
+  // simply shaped into the template record it already knows how to consume.
+  //
+  // It deliberately does NOT submit. The panel's own copy says the amount can vary ("e.g.
+  // electricity"), and this month's screen proves it — Electricity planned $94.50 and came through
+  // $159.74. Auto-adding would log a figure the user never saw.
+  function acLogFromRecurring(id) {
+    const r = (ACT.recurring || []).find(x => String(x.id) === String(id));
+    if (!r) return;
+    acApplyTemplate({
+      name: r.category,
+      direction: r.direction || 'out',
+      amount: r.expected || 0,
+      bucket: r.direction === 'in' ? null : (r.bucket || null),
+      category: r.category || '',
+      description: r.category || '',
+    });
+    // Date: today when you are looking at the current month (you are logging it because it just
+    // happened), otherwise the bill's own due day inside the month on screen (you are filling in
+    // history). Either way the field stays editable.
+    const dateEl = $('ac_tx_date');
+    if (dateEl) {
+      if (ACT.month === acNowMonth()) {
+        dateEl.value = new Date().toISOString().slice(0, 10);
+      } else if (r.dueDay) {
+        const [y, mo] = ACT.month.split('-').map(Number);
+        const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();   // day 0 of next month = last of this
+        dateEl.value = ACT.month + '-' + String(Math.min(r.dueDay, last)).padStart(2, '0');
+      }
+    }
+    const amtEl = $('ac_tx_amt');
+    if (amtEl) { try { amtEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {} amtEl.focus(); amtEl.select && amtEl.select(); }
   }
 
   // Setup: pick which budget lines are recurring + set a due day (seeded from the budget line items).
@@ -15888,6 +16185,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     acComboInit($('ac_tx_tags_in'), 'ac_tags_list', { selectEvent: 'change', label: 'Tag suggestions' });
     const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
+      // Prefill the composer from a recurring bill that has not arrived yet. First in the chain
+      // because it neither writes nor navigates -- it just fills the form -- so it must not be
+      // shadowed by a later handler that calls preventDefault for a different reason.
+      { const lg = ev.target.closest('[data-reclog]');
+        if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
       // Card row expand/collapse
       const ct = ev.target.closest('[data-card-toggle]');
       if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open)); } return; }
@@ -16142,6 +16444,241 @@ document.addEventListener('DOMContentLoaded', async () => {
   let _fireInputTimer = null;
   let _fireLeverTimer = null;
 
+  // ---- Retirement thresholds (healthcare, surtaxes, capital-gains room) --------------------
+  // Seeded from the standard target's spending the first time, because for someone drawing
+  // entirely from tax-deferred accounts that IS their taxable income -- the conservative end of
+  // the range, and the right default for a warning. Touching the field stops the seeding, so a
+  // deliberate number is never overwritten by a recompute.
+  function fireRetirementMagi(annualSpend) {
+    const el = $('fire-rt-magi');
+    if (!el) return null;
+    if (!el.dataset.touched) {
+      const seeded = Math.max(0, Math.round(annualSpend || 0));
+      el.value = fmtUSDval(seeded);
+      return seeded;
+    }
+    return Math.max(0, rn(el.value));
+  }
+
+  const RT_SEVERITY_CLASS = { high: 'warn-box', medium: 'warn-box', info: 'note-box' };
+
+  function fireRenderThresholds(rt) {
+    const host = $('fire-rt-out'); if (!host) return;
+    if (!rt) { host.innerHTML = '<div class="mini muted">Enter a taxable income to see the thresholds it lands in.</div>'; return; }
+    const a = rt.aca, m = rt.medicare;
+    const tiles = [];
+    if (rt.preMedicare) {
+      tiles.push({ k: 'Health premium, net', v: f$(a.netPremiumAnnual) + '/yr',
+                   s: a.premiumTaxCredit > 0 ? f$(a.premiumTaxCredit) + '/yr of credit' : 'no credit at this income',
+                   cls: a.state === 'cliff' || a.state === 'coverage-gap' ? 'warn' : (a.premiumTaxCredit > 0 ? 'good' : '') });
+      // Which edge is showing depends on which one you are near. Below the poverty line the
+      // ceiling is irrelevant and quoting "room to the cliff" there names the wrong hazard --
+      // the thing that will hurt you is the FLOOR, and it is $3,650 away, not $50,600.
+      if (a.state === 'coverage-gap' || a.state === 'medicaid') {
+        const shortfall = Math.max(0, rt.fpl - rt.magi);
+        tiles.push({ k: 'Below the poverty line', v: '\u2212' + f$(shortfall),
+                     s: a.state === 'coverage-gap' ? 'no credit and no Medicaid here' : 'Medicaid territory',
+                     cls: a.state === 'coverage-gap' ? 'warn' : '' });
+      } else {
+        tiles.push({ k: 'Room to the subsidy cliff',
+                     v: a.headroomToCliff >= 0 ? f$(a.headroomToCliff) : '\u2212' + f$(Math.abs(a.headroomToCliff)),
+                     s: a.headroomToCliff >= 0 ? 'before the credit goes to zero' : 'over the line',
+                     cls: a.headroomToCliff < 0 ? 'warn' : '' });
+      }
+    } else {
+      tiles.push({ k: 'Medicare Part B', v: f$(m.partBStandardAnnual) + '/yr',
+                   s: m.irmaaApplies ? 'plus an income surcharge' : 'standard premium', cls: m.irmaaApplies ? 'warn' : 'good' });
+    }
+    tiles.push({ k: '0% capital-gains room', v: f$(rt.ltcg.zeroPctRoom) + '/yr',
+                 s: rt.ltcg.allInZero ? 'federal and state' : 'federal only', cls: rt.ltcg.zeroPctRoom > 0 ? 'good' : '' });
+
+    let h = '<div class="tiles">' + tiles.map(t =>
+      '<div class="tile' + (t.cls ? ' ' + t.cls : '') + '"><div class="k">' + esc(t.k) + '</div>'
+      + '<div class="v">' + esc(t.v) + '</div><div class="s">' + esc(t.s) + '</div></div>').join('') + '</div>';
+    const hh = Math.max(1, Math.min(12, +($('fire-rt-household') || {}).value || 1));
+    h += '<div class="mini muted" style="margin-top:8px">At ' + f$(rt.magi) + '/yr you are at <b>'
+      + rt.fplPct.toFixed(0) + '%</b> of the federal poverty line for a household of ' + hh
+      + ' (' + f$(rt.fpl) + '/yr).</div>';
+    (rt.warnings || []).forEach(w => {
+      h += '<div class="' + (RT_SEVERITY_CLASS[w.severity] || 'note-box') + '" style="margin-top:8px">' + esc(w.text) + '</div>';
+    });
+    if (rt.aca && rt.aca.benchmarkIsApproximate && rt.preMedicare) {
+      h += '<div class="mini muted" style="margin-top:8px;line-height:1.5">The benchmark premium is interpolated from a single quoted age-40 figure along the federal 3:1 age curve, so treat it as a planning estimate rather than a quote. Your real premium depends on your county and the plans actually offered there.</div>';
+    }
+    host.innerHTML = h;
+  }
+
+  // ---- Withdrawal-rate provenance ---------------------------------------------------------
+  // The tab shipped one rate field, defaulting to 3.5%, bounded 2-6%, with nothing on screen
+  // saying where any of that came from. The credible published range is 2.26% to 5.7% -- a 2.5x
+  // spread -- and almost NONE of it is disagreement about markets. It comes from four
+  // methodological choices: a fixed 30-year horizon versus stochastic joint longevity, US-only
+  // versus international data, fixed-real versus dynamic spending, and whether fees and taxes
+  // are netted out. On a $60k spend that is a 2.08x difference in the target portfolio.
+  //
+  // No tool can pick that for someone, which is exactly why widening the slider would have been
+  // the wrong fix. A bare "3.5%" is a number you cannot defend; a named basis is a choice you can.
+  // Each entry therefore carries its own CONDITIONS, because the conditions are the disagreement.
+  const SWR_PRESETS = [
+    { v: 2.26, name: 'Cederburg et al. (2025)',
+      note: 'Block bootstrap over 38 developed markets, 1890\u20132019, with stochastic joint longevity for a couple retiring at 65 and a 5% chance of ruin. The lowest credible published figure, and the one least like a 30-year US backtest \u2014 on US-only data the same authors get 4.22%.' },
+    { v: 2.50, name: 'Finke / Pfau / Blanchett (2013), low-yield',
+      note: 'Maximum sustainable rate over 30 years at a 10% accepted failure rate, computed at the depressed real bond yields of the time. Assumes zero fees, so the real-world figure is lower still.' },
+    { v: 3.25, name: 'Early Retirement Now, 50 years with a bequest',
+      note: '75/25, 50-year horizon, leaving 25% of the starting capital. The community\u2019s most-cited technical source, and roughly where people actually living off a portfolio report sitting.' },
+    { v: 3.50, name: 'Modal early-retiree number',
+      note: 'Not a study \u2014 the number people drawing down a portfolio most often report using, and the rate that survived every historical start year at every horizon from 30 to 60 years in the backtest behind this work.' },
+    { v: 3.90, name: 'Morningstar, 2025 edition',
+      note: '30-year horizon, 90% of 1,000 simulated paths ending with money left, optimal allocation 30\u201350% equities. Their 40-year figure is 3.3%. The move from 3.7% to 3.9% was a change in their capital-market assumptions, not news about markets.' },
+    { v: 4.00, name: 'Trinity shorthand',
+      note: 'The familiar 4% rule. Bengen\u2019s 1994 SAFEMAX was actually 4.15% over 30 years on a 50/50 portfolio \u2014 and the same paper gave ~3.5% as the safe rate for horizons past 50 years.' },
+    { v: 4.70, name: 'Bengen \u201cUniversal SAFEMAX\u201d (2025)',
+      note: 'His own upward revision, using seven asset classes over a 30-YEAR horizon. His framework drops to about 4.1% across 40\u201360 years, which is the horizon most early retirees actually face.' },
+    { v: 5.20, name: 'Guyton-Klinger guardrails (Morningstar)',
+      note: 'Only valid if you accept spending CUTS when markets fall. The rules historically demanded reductions of 28% after 2008, 36% after the dot-com crash and 54% through the 1970s. You are trading a small risk of ruin for a moderate risk of a large pay cut.' },
+  ];
+
+  function fireRenderSwrPresets() {
+    const sel = $('fire-swr-preset'); if (!sel || sel.options.length) return;
+    sel.innerHTML = '<option value="">Custom \u2014 my own number</option>'
+      + SWR_PRESETS.map(p => '<option value="' + p.v + '">' + esc(p.name) + ' \u2014 ' + p.v.toFixed(2) + '%</option>').join('');
+  }
+
+  // Horizon is the input that moves the answer most, and the tab never mentioned it. Retiring at
+  // 55 is not a 30-year retirement, which is what almost every published rate assumes.
+  function fireHorizonGuidance(fiAge) {
+    const PLAN_TO = 90;                       // stated in the copy rather than hidden in the maths
+    const yrs = Math.max(1, Math.round(PLAN_TO - fiAge));
+    let band;
+    if (yrs <= 25)      band = 'about 5.1\u20135.5%';
+    else if (yrs <= 34) band = 'about 4.1%';
+    else if (yrs <= 45) band = 'about 3.3\u20133.5%';
+    else                band = 'about 3.5%, which is where it stops falling';
+    return 'Retiring at ' + Math.round(fiAge) + ' is a ' + yrs + '-year horizon (planning to '
+      + PLAN_TO + '). Published guidance for that length is ' + band
+      + '. Almost every rate in the list above assumes 30 years.';
+  }
+
+  function firePaintRateNotes() {
+    const swrEl = $('fire-swr'), sel = $('fire-swr-preset'), noteEl = $('fire-swr-note');
+    if (!swrEl || !sel || !noteEl) return;
+    const cur = +swrEl.value;
+    const match = SWR_PRESETS.find(p => Math.abs(p.v - cur) < 0.005);
+    sel.value = match ? String(match.v) : '';
+    // The caveat is appended to EVERY basis rather than shown once somewhere else, because it
+    // applies to every one of them and the whole point of this control is that the conditions
+    // travel with the number.
+    const universal = ' <b>Every published rate here is gross of fees and taxes.</b>';
+    noteEl.innerHTML = match
+      ? esc(match.note) + universal
+      : 'Your own number, not a published one. The credible published range runs 2.26% to 5.2%, and the spread is mostly methodology \u2014 horizon, US-only versus global data, fixed versus flexible spending, and whether fees and taxes are netted out.' + universal;
+    const hEl = $('fire-horizon-note');
+    if (hEl) hEl.textContent = fireHorizonGuidance(+($('fire-target-age') || {}).value || 55);
+  }
+
+  // ---- Variant targets -------------------------------------------------------------------
+  // Every named FIRE variant is the same three axes with different numbers: what spend counts,
+  // what rate is safe, what part-time income offsets the draw. Holding them as DATA is what lets
+  // chubby / barista / anything-the-user-names exist without an engine change.
+  //
+  // `basis` is per-row on purpose. The community defines lean / chubby / fat by ABSOLUTE annual
+  // spending (lean under ~$40k, chubby ~$100-200k, fat $200k+), while this app had only
+  // multipliers -- and 1.5x a $40,966 spend is a "Fat FI" of $61,449/yr, which is below every
+  // published fat floor. Neither convention is wrong; which one applies is a value judgement, so
+  // the row says which it is using and the user decides.
+  const FIRE_VARIANT_ADDABLE = [
+    // Absolute figures are the community's midpoints, offered as a STARTING POINT and editable.
+    // Hardcoding a fat threshold would be exactly the mistake the multiplier version made.
+    { key: 'chubby',  label: 'Chubby FI',  basis: 'abs',  amount: 150000 },
+    { key: 'barista', label: 'Barista FI', basis: 'mult', amount: 1,      partTime: 20000 },
+    { key: 'custom',  label: 'New target', basis: 'mult', amount: 1 },
+  ];
+
+  let fireVariants = null;   // [{key,label,basis:'mult'|'abs',amount,swr|null,partTime|null}]
+
+  // Migration, and the reason it is a migration rather than a new default set: an upgrade must
+  // not silently change what someone's plan says. A user who set leanMult 0.6 keeps 0.6x. The
+  // absolute mode and the new targets are OFFERED, never imposed.
+  function fireVariantsFromPrefs(prefs) {
+    if (Array.isArray(prefs.variants) && prefs.variants.length) {
+      return prefs.variants.map(v => ({
+        key: String(v.key || 'custom').slice(0, 32),
+        label: String(v.label || 'Target').slice(0, 64),
+        basis: v.basis === 'abs' ? 'abs' : 'mult',
+        amount: +v.amount || 0,
+        swr: (v.swr == null || v.swr === '') ? null : +v.swr,
+        partTime: (v.partTime == null || v.partTime === '') ? null : +v.partTime,
+      }));
+    }
+    const lean = (prefs.leanMult != null) ? +prefs.leanMult : 0.7;
+    const fat  = (prefs.fatMult  != null) ? +prefs.fatMult  : 1.5;
+    return [
+      { key: 'lean',     label: 'Lean FI', basis: 'mult', amount: lean, swr: null, partTime: null },
+      { key: 'standard', label: 'Full FI', basis: 'mult', amount: 1,    swr: null, partTime: null },
+      { key: 'fat',      label: 'Fat FI',  basis: 'mult', amount: fat,  swr: null, partTime: null },
+    ];
+  }
+
+  function fireVariantRowHtml(v, i) {
+    const isAbs = v.basis === 'abs';
+    const amt = isAbs ? fmtUSDval(v.amount || 0) : (v.amount != null ? v.amount : '');
+    // `standard` anchors pctToFi, the coast maths and the FI window, so its level is fixed at
+    // 1x your own spending and its controls say so rather than pretending to be editable.
+    const lockAmt = v.key === 'standard';
+    return '<div class="fv-row" data-fvi="' + i + '">'
+      + '<span class="input-pair fv-name"><input type="text" data-fv="label" value="' + esc(v.label) + '" maxlength="64" aria-label="Target name"/></span>'
+      + '<select class="fv-basis fv-basis-sel" data-fv="basis" aria-label="How the level is set"' + (lockAmt ? ' disabled' : '') + '>'
+        + '<option value="mult"' + (isAbs ? '' : ' selected') + '>&times; my spend</option>'
+        + '<option value="abs"'  + (isAbs ? ' selected' : '') + '>$ per year</option>'
+      + '</select>'
+      + '<span class="input-pair fv-amt' + (lockAmt ? ' is-locked' : '') + '">'
+        + '<input type="text" inputmode="decimal" data-fv="amount"' + (isAbs ? ' data-fmt="usd"' : '')
+        + ' value="' + esc(String(amt)) + '"' + (lockAmt ? ' readonly' : '') + ' aria-label="Level"/>'
+        + '<span class="unit">' + (isAbs ? '$' : '&times;') + '</span></span>'
+      + '<span class="input-pair fv-swr"><input type="number" step="0.1" min="0" max="20" data-fv="swr" value="' + (v.swr != null ? v.swr : '') + '" placeholder="std" aria-label="Withdrawal rate, blank for the standard rate"/><span class="unit">%</span></span>'
+      + '<span class="input-pair fv-pt"><input type="text" inputmode="decimal" data-fmt="usd" data-fv="partTime" value="' + (v.partTime ? fmtUSDval(v.partTime) : '') + '" placeholder="&mdash;" aria-label="Part-time income per year"/><span class="unit">$</span></span>'
+      + (v.key === 'standard' ? '<span class="fv-del"></span>'
+         : '<button type="button" class="gl-act gl-act-del fv-del" data-fvdel="' + i + '" aria-label="Remove ' + esc(v.label) + '">&times;</button>')
+      + '</div>';
+  }
+
+  function fireRenderVariants() {
+    const host = $('fire-variants'); if (!host) return;
+    if (!fireVariants) fireVariants = fireVariantsFromPrefs(fireLoadPrefs());
+    host.innerHTML = fireVariants.map(fireVariantRowHtml).join('');
+  }
+
+  // DOM -> state. Read on every edit so the state is never a second source of truth that can
+  // drift from what is on screen.
+  function fireReadVariantsFromDom() {
+    const host = $('fire-variants'); if (!host || !fireVariants) return;
+    Array.from(host.querySelectorAll('.fv-row')).forEach(row => {
+      const i = +row.dataset.fvi; const v = fireVariants[i]; if (!v) return;
+      const get = k => row.querySelector('[data-fv="' + k + '"]');
+      const lbl = get('label'); if (lbl) v.label = lbl.value.slice(0, 64) || v.key;
+      const bas = get('basis'); if (bas && v.key !== 'standard') v.basis = (bas.value === 'abs') ? 'abs' : 'mult';
+      const amt = get('amount');
+      if (amt && v.key !== 'standard') v.amount = v.basis === 'abs' ? rn(amt.value) : (+amt.value || 0);
+      const sw = get('swr');  v.swr = (sw && String(sw.value).trim() !== '') ? +sw.value : null;
+      const pt = get('partTime'); v.partTime = (pt && String(pt.value).trim() !== '') ? rn(pt.value) : null;
+    });
+  }
+
+  // state -> the engine's variant_specs. `standard` is always sent: pctToFi, the coast maths and
+  // fiWindowYears are all measured against it.
+  function fireVariantSpecs() {
+    const out = (fireVariants || []).map(v => {
+      const spec = { key: v.key, label: v.label };
+      if (v.basis === 'abs') spec.spend = Math.max(0, v.amount || 0);
+      else spec.mult = Math.max(0.0001, v.amount || 1);
+      if (v.swr != null && v.swr > 0) spec.swr = v.swr / 100;
+      if (v.partTime != null && v.partTime > 0) spec.partTimeIncome = v.partTime;
+      return spec;
+    });
+    if (!out.some(sp => sp.key === 'standard')) out.push({ key: 'standard', label: 'Full FI', mult: 1 });
+    return out.slice(0, 12);   // matches FireModel's cap, so the request cannot 422 on length
+  }
+
   function fireSavePrefs() {
     try {
       persist(FIRE_KEY, JSON.stringify({
@@ -16155,10 +16692,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         swr: +($('fire-swr') || {}).value || 3.5,
         nomReturn: +($('fire-nom-return') || {}).value || 7,
         inflation: +($('fire-inflation') || {}).value || 3,
-        leanMult: +($('fire-lean-mult') || {}).value || 0.7,
-        fatMult: +($('fire-fat-mult') || {}).value || 1.5
+        // leanMult/fatMult are still written so that DOWNGRADING, or restoring this blob into an
+        // older build, keeps working -- the two fields they feed no longer exist in the DOM, so
+        // they are mirrored from the variants of the same name instead of read from it.
+        leanMult: fireVariantMultFor('lean', 0.7),
+        fatMult: fireVariantMultFor('fat', 1.5),
+        coastTargetAge: +($('fire-coast-age') || {}).value || null,
+        rtMagi: ($('fire-rt-magi') && $('fire-rt-magi').dataset.touched) ? rn($('fire-rt-magi').value) : null,
+        rtHousehold: +($('fire-rt-household') || {}).value || 1,
+        rtCliff: !$('fire-rt-cliff') || !!$('fire-rt-cliff').checked,
+        variants: (fireVariants || []).map(v => ({
+          key: v.key, label: v.label, basis: v.basis, amount: v.amount,
+          swr: v.swr, partTime: v.partTime,
+        })),
       }));
     } catch (e) {}
+  }
+
+  // Back-compat mirror for the two legacy prefs. Only meaningful when the variant still uses a
+  // multiplier basis; an absolute-spend lean has no multiplier to report, so the old default is
+  // written rather than a fabricated equivalent.
+  function fireVariantMultFor(key, fallback) {
+    const v = (fireVariants || []).find(x => x.key === key);
+    return (v && v.basis === 'mult' && v.amount > 0) ? v.amount : fallback;
   }
 
   function fireLoadPrefs() {
@@ -16193,8 +16749,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (prefs.swr       != null) fireSetField('fire-swr',        prefs.swr);
     if (prefs.nomReturn != null) fireSetField('fire-nom-return', prefs.nomReturn);
     if (prefs.inflation != null) fireSetField('fire-inflation',  prefs.inflation);
-    if (prefs.leanMult  != null) fireSetField('fire-lean-mult',  prefs.leanMult);
-    if (prefs.fatMult   != null) fireSetField('fire-fat-mult',   prefs.fatMult);
+    // Coast horizon defaults to the FI age, which is what the single conflated field used to
+    // mean -- so a profile saved before the split reads back as the behaviour it had.
+    fireSetField('fire-coast-age', prefs.coastTargetAge != null
+      ? prefs.coastTargetAge
+      : (prefs.targetAge != null ? prefs.targetAge : 55));
+    fireVariants = fireVariantsFromPrefs(prefs);
+    fireRenderVariants();
+    fireRenderSwrPresets();
+    firePaintRateNotes();
+    if (prefs.rtMagi != null) {
+      const el = $('fire-rt-magi');
+      if (el) { el.value = fmtUSDval(rn(prefs.rtMagi)); el.dataset.touched = '1'; }
+    }
+    if (prefs.rtHousehold != null) fireSetField('fire-rt-household', prefs.rtHousehold);
+    { const c = $('fire-rt-cliff'); if (c && prefs.rtCliff != null) c.checked = !!prefs.rtCliff; }
     if (prefs.currentNW) { const nwEl = $('fire-nw'); if (nwEl) nwEl.value = fmtUSDval(rn(prefs.currentNW)); }
   }
 
@@ -16276,15 +16845,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const spendBasis = ($('fire-spend-basis') || {}).value || 'planned';
     const currentAge = Math.max(18, +($('fire-age') || {}).value || 30);
     const targetFiAge = Math.max(currentAge + 1, +($('fire-target-age') || {}).value || 55);
+    const coastTargetAge = Math.max(currentAge, +($('fire-coast-age') || {}).value || targetFiAge);
     const swr = (+($('fire-swr') || {}).value || 3.5) / 100;
     const nomReturn = (+($('fire-nom-return') || {}).value || 7) / 100;
     const inflation = (+($('fire-inflation') || {}).value || 3) / 100;
-    const leanMult = +($('fire-lean-mult') || {}).value || 0.7;
-    const fatMult = +($('fire-fat-mult') || {}).value || 1.5;
+    fireReadVariantsFromDom();
+    const leanMult = fireVariantMultFor('lean', 0.7);
+    const fatMult = fireVariantMultFor('fat', 1.5);
     const realReturn = (1 + nomReturn) / (1 + inflation) - 1;
 
     const rrEl = $('fire-real-return');
     if (rrEl) rrEl.textContent = (realReturn * 100).toFixed(2) + '%';
+    // BUG-0045, second half. The lid-scent repaint is driven by `input`/`change`/`toggle`
+    // listeners, and this span is written PROGRAMMATICALLY -- it fires none of them. So the
+    // Assumptions lid kept whatever it computed at boot, when the span still read "—". The old
+    // code hid that by pushing "0% real" unconditionally; now that the guard is honest, the
+    // staleness is visible as a missing half, and this is what actually keeps it current.
+    if (typeof paintAllLidScent === 'function') { try { paintAllLidScent(); } catch (e) {} }
 
     const currentNW = rn(($('fire-nw') || {}).value);
     const annualSavings = firePlannedSavings();
@@ -16328,6 +16905,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         + (spendNote ? ' <span style="color:var(--warn);font-size:var(--fs-xs)">' + spendNote + '</span>' : '');
     }
 
+    // ---- Guard: without a spend figure there is no FIRE number, and saying so beats guessing --
+    // BUG-0047. `fireNumber = annualSpend / swr`, so a zero spend divides into nothing and
+    // fire.py's `already_fi_trivially` branch (:65) returns pctToFi = pctToCoast = 1.0,
+    // isCoastFi = true, every band 0.0. Correct inside the engine -- an unconstrained spender
+    // needs no portfolio -- but the tab rendered it as a GREEN "100.0% to Coast FI ·
+    // Coast-ready at age 35 · 20.0 yr early · target $0 · FI window 2026-2026". It congratulated
+    // you on financial independence because you had told it you spend nothing, and it was one
+    // keystroke away: type 0 into the visible Custom-spend field. Measured, not theorised.
+    if (!(annualSpend > 0)) {
+      fireRenderNoSpend(spendBasis);
+      return;
+    }
+
     const body = {
       currentNetWorth: currentNW,
       annualSpend: annualSpend || 0,
@@ -16339,8 +16929,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       inflation: inflation,
       leanMult: leanMult,
       fatMult: fatMult,
+      coastTargetAge: coastTargetAge,
+      variants: fireVariantSpecs(),
+      retirementMagi: fireRetirementMagi(annualSpend),
+      householdSize: Math.max(1, Math.min(12, +($('fire-rt-household') || {}).value || 1)),
+      acaCliffInEffect: !$('fire-rt-cliff') || !!$('fire-rt-cliff').checked,
       band: 0.02,
-      currentYear: 2026
+      // BUG-0044: this was a literal 2026 here, in server.py's FireModel and in fire.py's own
+      // default -- three copies of the same time bomb. `fiWindowYears` is the only output
+      // anchored to a wall-clock year, so on 1 Jan 2027 the tab would have kept rendering a
+      // confident FI window that was a year stale, with nothing admitting it.
+      currentYear: new Date().getFullYear()
     };
     if (income) body.income = income;
 
@@ -16369,9 +16968,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       } catch (_) {}
       fireRender(r, annualSavings, realCone);
+      fireRenderThresholds(r.retirementThresholds || null);
     } catch (e) {
       chartEl.innerHTML = '<div class="warn-box">Error calling /api/fire: ' + (e.message || e) + '</div>';
     }
+  }
+
+  // The honest empty state for "we cannot compute this yet". Every readout the success path
+  // writes is written here too -- a partial reset is how a stale 100% survives on screen beside
+  // a fresh warning, which is worse than either alone.
+  function fireRenderNoSpend(spendBasis) {
+    _fireResult = null;
+    window.__fireResult = null;   // What-If must not diff against a number we just refused to compute
+
+    const set = (id, txt) => { const e = $(id); if (e) e.textContent = txt; };
+    set('fire-coast-pct', '—');
+    set('fire-fi-pct', '—');
+    set('fire-lean-num', '—');  set('fire-lean-sub', '');
+    set('fire-fi-num', '—');    set('fire-fi-num-sub', '');
+    set('fire-fat-num', '—');   set('fire-fat-sub', '');
+    set('fire-window', '');
+    set('fire-fi-pct-sub', 'needs your annual spending');
+
+    const how = spendBasis === 'custom'
+      ? 'Enter your annual spending above.'
+      : (spendBasis === 'trailing'
+          ? 'Log some actuals, or switch the spend basis to Planned or Custom.'
+          : 'Add your monthly plan on the Budget tab, or switch the spend basis to Custom.');
+    set('fire-coast-line', how);
+
+    const tile = $('fire-coast-tile');
+    if (tile) tile.className = 'tile';          // never green on a number we do not have
+
+    const warnEl = $('fire-fi-warning');
+    if (warnEl) warnEl.style.display = 'none';
+
+    const chartEl = $('fire-chart');
+    if (chartEl) {
+      chartEl.innerHTML = '<div class="note-box"><b>No FIRE number yet.</b> Your target is your '
+        + 'annual spending divided by your withdrawal rate, so it cannot be computed from a spend '
+        + 'of $0. ' + esc(how) + '</div>';
+    }
+    const leverResEl = $('fire-lever-result');
+    if (leverResEl) leverResEl.textContent = '';
+    const notesEl = $('fire-notes');
+    if (notesEl) notesEl.innerHTML = '<div>&mdash;</div>';
+    if (typeof renderTabIndex === 'function') { try { renderTabIndex(); } catch (e) {} }
   }
 
   function fireRender(r, annualSavings, realCone) {
@@ -16386,9 +17028,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (r.coastReadyAge != null) {
         const targetAge = +($('fire-target-age') || {}).value || 55;
         const diff = r.coastReadyAge - targetAge;
-        const diffText = diff < -0.05 ? Math.abs(diff).toFixed(1) + ' yr early'
-                       : diff >  0.05 ? diff.toFixed(1) + ' yr late' : 'on target';
-        coastLineEl.textContent = 'Coast-ready at age ' + r.coastReadyAge.toFixed(1) + ' · ' + diffText;
+        // BUG-0046: `coastReadyAge` comes from an INTEGER scan (fire.py's `for t in range(...)`),
+        // so it is always a whole number. Rendering it `.toFixed(1)` advertised a tenth-of-a-year
+        // resolution the search never had. Show whole years, and only fractionalise the gap when
+        // the target age itself is fractional -- that one CAN be, the field accepts it.
+        const yr = n => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+        const diffText = diff < -0.05 ? yr(Math.abs(diff)) + ' yr early'
+                       : diff >  0.05 ? yr(diff) + ' yr late' : 'on target';
+        coastLineEl.textContent = 'Coast-ready at age ' + yr(r.coastReadyAge) + ' · ' + diffText;
       } else {
         coastLineEl.textContent = 'Not yet on a coast trajectory';
       }
@@ -16407,8 +17054,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (warnEl) {
       if (r.lowCaseReachesFi === false) {
         warnEl.style.display = '';
-        warnEl.textContent = '⚠ Conservative scenario never reaches FI within ~50 years. '
-          + 'Increase savings, reduce spend, or revisit your FI age.';
+        // "Conservative scenario" invited reading this as a probability. It is the LOW END of a
+        // deterministic sensitivity range, and saying so is the difference between a caveat and
+        // a false reassurance about the other cases.
+        warnEl.textContent = '⚠ At the low end of the return range (2 pp below your real return) '
+          + 'this plan does not reach FI within 50 years. Increase savings, reduce spend, or '
+          + 'revisit your FI age.';
       } else {
         warnEl.style.display = 'none';
       }
@@ -16447,15 +17098,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ---- Lean / Full / Fat tiles ----
-    const lean = (r.variants && r.variants.lean) || null;
-    const fat  = (r.variants && r.variants.fat)  || null;
+    const tilesEl = $('fire-lean-fi-fat');
+    if (tilesEl) {
+      // Rendered in the user's own row order rather than sorted by size: the editor above is the
+      // ordering control, and a list that silently re-sorts itself is a list you cannot arrange.
+      const order = (fireVariants || []).map(v => v.key).filter(k => r.variants && r.variants[k]);
+      Object.keys(r.variants || {}).forEach(k => { if (order.indexOf(k) < 0) order.push(k); });
+      // Legacy ids kept on the three original tiles so existing readers keep resolving.
+      const LEGACY = { lean: ['fire-lean-num', 'fire-lean-sub'],
+                       standard: ['fire-fi-num', 'fire-fi-num-sub'],
+                       fat: ['fire-fat-num', 'fire-fat-sub'] };
+      tilesEl.innerHTML = order.map(k => {
+        const v = r.variants[k]; if (!v) return '';
+        const ids = LEGACY[k] || [];
+        const pct = (v.pctToFi != null) ? Math.round(v.pctToFi * 100) : null;
+        const spend = (v.netAnnualSpend != null) ? v.netAnnualSpend : null;
+        const sub = [spend != null ? f$(spend) + '/yr' : null,
+                     pct != null ? pct + (k === 'standard' ? '% there' : '% to target') : null]
+                    .filter(Boolean).join(' \u00b7 ');
+        return '<div class="tile' + (k === 'standard' ? ' good' : '') + '" data-fv-key="' + esc(k) + '">'
+          + '<div class="k">' + esc(v.label || k) + '</div>'
+          + '<div class="v"' + (ids[0] ? ' id="' + ids[0] + '"' : '') + '>' + f$(v.fireNumber) + '</div>'
+          + '<div class="s"' + (ids[1] ? ' id="' + ids[1] + '"' : '') + '>' + esc(sub) + '</div>'
+          + '</div>';
+      }).join('');
+    }
 
-    const leanNumEl = $('fire-lean-num'); if (leanNumEl) leanNumEl.textContent = f$(r.leanFireNumber);
-    const leanSubEl = $('fire-lean-sub'); if (leanSubEl) leanSubEl.textContent = lean ? (lean.pctToFi * 100).toFixed(0) + '% to target' : '';
-    const fiNumEl   = $('fire-fi-num');   if (fiNumEl)   fiNumEl.textContent   = f$(r.fireNumber);
-    const fiNumSubEl= $('fire-fi-num-sub');if (fiNumSubEl)fiNumSubEl.textContent= r.pctToFi != null ? (r.pctToFi * 100).toFixed(0) + '% there' : '';
-    const fatNumEl  = $('fire-fat-num');  if (fatNumEl)  fatNumEl.textContent  = f$(r.fatFireNumber);
-    const fatSubEl  = $('fire-fat-sub');  if (fatSubEl)  fatSubEl.textContent  = fat ? (fat.pctToFi * 100).toFixed(0) + '% to target' : '';
+    // ---- Caveats: the engine's own notes, which used to be computed and discarded ----
+    // Rendered as compact bullets rather than the app-wide `notes()` helper's stacked
+    // .note-box: six full boxes would out-shout the numbers they qualify, and the tab already
+    // opens with a .note-box disclaimer. Same content, proportionate weight.
+    const notesEl = $('fire-notes');
+    if (notesEl) {
+      const ns = r.notes || [];
+      notesEl.innerHTML = ns.length
+        ? ns.map(n => '<div style="margin-top:4px">\u00b7 ' + esc(n) + '</div>').join('')
+        : '<div>No caveats returned by the model \u2014 that is itself suspicious; check /api/fire.</div>';
+    }
   }
 
   async function fireLeverCalc() {
@@ -16487,11 +17166,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const debounce = () => { clearTimeout(_fireInputTimer); _fireInputTimer = setTimeout(fireCalc, 450); };
 
-    ['fire-nw', 'fire-target-age', 'fire-swr', 'fire-nom-return',
-     'fire-inflation', 'fire-lean-mult', 'fire-fat-mult', 'fire-custom-spend'].forEach(id => {
+    ['fire-nw', 'fire-target-age', 'fire-coast-age', 'fire-swr', 'fire-nom-return',
+     'fire-inflation', 'fire-custom-spend'].forEach(id => {
       const el = $(id); if (!el) return;
-      el.addEventListener('input',  () => { fireSavePrefs(); debounce(); });
+      el.addEventListener('input',  () => { firePaintRateNotes(); fireSavePrefs(); debounce(); });
+      el.addEventListener('change', () => { firePaintRateNotes(); fireSavePrefs(); debounce(); });
+    });
+
+    // Choosing a published basis WRITES the rate; typing a rate that matches no basis flips the
+    // select back to Custom. One value, two ways in -- and the select never silently disagrees
+    // with the number beside it.
+    // The MAGI field stops being seeded the moment it is touched -- a deliberate number must
+    // never be overwritten by the next recompute.
+    { const el = $('fire-rt-magi');
+      if (el) ['input', 'change'].forEach(ev => el.addEventListener(ev, () => {
+        el.dataset.touched = '1'; fireSavePrefs(); debounce();
+      })); }
+    ['fire-rt-household', 'fire-rt-cliff'].forEach(id => {
+      const el = $(id); if (!el) return;
       el.addEventListener('change', () => { fireSavePrefs(); debounce(); });
+    });
+
+    const swrSel = $('fire-swr-preset');
+    if (swrSel) swrSel.addEventListener('change', () => {
+      const v = +swrSel.value;
+      if (v > 0) { const el = $('fire-swr'); if (el) el.value = v; }
+      firePaintRateNotes(); fireSavePrefs(); debounce();
     });
 
     // G) fire-age is a Pattern-2 consumer, not a plain FIRE pref: editing it writes back to the
@@ -16506,6 +17206,58 @@ document.addEventListener('DOMContentLoaded', async () => {
         fireSavePrefs(); debounce();
       });
     }
+
+    // ---- Variant editor ----------------------------------------------------------------
+    // Delegated, because the rows are re-rendered whenever one is added or removed and
+    // per-element listeners would be lost with them.
+    const varHost = $('fire-variants');
+    if (varHost) {
+      const sync = () => { fireReadVariantsFromDom(); fireSavePrefs(); debounce(); };
+      varHost.addEventListener('input', e => { if (e.target.closest('[data-fv]')) sync(); });
+      varHost.addEventListener('change', e => {
+        const t = e.target;
+        if (!t.closest('[data-fv]')) return;
+        fireReadVariantsFromDom();
+        // Switching basis changes what the amount MEANS -- 1.5 as a multiple is not $1.50 a year.
+        // Re-render so the unit, the formatter and the value all change together, rather than
+        // leaving a multiplier sitting in a field now labelled dollars.
+        if (t.dataset.fv === 'basis') {
+          const v = fireVariants[+t.closest('.fv-row').dataset.fvi];
+          if (v) v.amount = v.basis === 'abs' ? Math.round((rn($('fire-custom-spend') && $('fire-custom-spend').value) || 60000) * 1) : 1;
+          fireRenderVariants();
+        }
+        fireSavePrefs(); debounce();
+      });
+      varHost.addEventListener('click', e => {
+        const del = e.target.closest('[data-fvdel]');
+        if (!del) return;
+        e.preventDefault();
+        fireReadVariantsFromDom();
+        const i = +del.dataset.fvdel;
+        if (fireVariants[i] && fireVariants[i].key === 'standard') return;   // the anchor stays
+        fireVariants.splice(i, 1);
+        fireRenderVariants(); fireSavePrefs(); debounce();
+      });
+    }
+    const addBtn = $('fire-var-add');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      fireReadVariantsFromDom();
+      const taken = new Set((fireVariants || []).map(v => v.key));
+      const pick = FIRE_VARIANT_ADDABLE.find(p => !taken.has(p.key)) || FIRE_VARIANT_ADDABLE[FIRE_VARIANT_ADDABLE.length - 1];
+      // A duplicate key would collide in the engine's variants map and silently drop a row, so a
+      // repeated "custom" gets a suffix rather than overwriting the one already there.
+      let key = pick.key, n = 2;
+      while (taken.has(key)) { key = pick.key + n; n += 1; }
+      fireVariants.push({ key: key, label: pick.label, basis: pick.basis,
+                          amount: pick.amount, swr: null, partTime: pick.partTime || null });
+      fireRenderVariants(); fireSavePrefs(); debounce();
+    });
+    const resetBtn = $('fire-var-reset');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      if (!confirm('Reset your FI targets to Lean, Full and Fat?\n\nAny target you added or renamed here will be removed.')) return;
+      fireVariants = fireVariantsFromPrefs({});
+      fireRenderVariants(); fireSavePrefs(); debounce();
+    });
 
     const leverEl = $('fire-lever-savings');
     if (leverEl) {
