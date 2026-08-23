@@ -4001,6 +4001,36 @@ def list_schedules(conn, user_id, include_inactive=True) -> list[dict]:
     return [_schedule_dict(r) for r in conn.execute(sql + " ORDER BY name", (user_id,)).fetchall()]
 
 
+def schedules_in_window(conn, user_id, start: str, end: str, cap: int = 400) -> list[dict]:
+    """Every ACTIVE schedule with its occurrences inside [start, end], for a month view.
+
+    Exists because the Actuals tab's monthly reconciliation -- "did this bill come through?" --
+    needs every schedule at once, and the per-schedule endpoint would make that N requests on
+    every refresh. It is the same computation, batched: `schedule_occurrences` is called
+    unchanged, so a month view can never disagree with the single-schedule list.
+
+    `posted` means THIS ENGINE wrote a transaction for that date. It is NOT the same question as
+    "does a matching transaction exist" -- a bill paid and logged by hand is unposted but has
+    certainly come through. The caller reconciles that; this reports only what it knows.
+    """
+    out = []
+    for row in conn.execute(
+        "SELECT * FROM schedule WHERE user_id = ? AND active = 1 ORDER BY name", (user_id,)
+    ).fetchall():
+        d = _schedule_dict(row)
+        posted = _posted_dates(conn, d["id"])
+        hits = []
+        for h in schedules.expand(schedules.Rule.from_row(row), _exceptions_for(conn, d["id"]),
+                                  start, end, cap):
+            on = h["on"].isoformat()
+            hits.append({"on": on, "raw": h["raw"].isoformat(), "posted": on in posted,
+                         "amount": round(h.get("amount_cents", row["amount_cents"]) / 100.0, 2),
+                         "overridden": bool(h.get("overridden"))})
+        d["occurrences"] = hits
+        out.append(d)
+    return out
+
+
 def get_schedule(conn, user_id, schedule_id) -> dict | None:
     row = _schedule_row(conn, user_id, schedule_id)
     return _schedule_dict(row) if row else None

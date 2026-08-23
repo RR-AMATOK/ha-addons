@@ -379,6 +379,16 @@
      grid container, so an `auto` track aligns nothing BETWEEN rows -- fixed tracks, every cell
      placed explicitly, and an empty optional cell leaves its column empty rather than letting
      the next cell auto-place into it (DESIGN.md 4.4). */
+  /* Budget round-up row. This lived in an inline style that declared `display` TWICE —
+     `display:none;…;display:flex` — so the later flex always won and the row could never hide;
+     then bgbTotals set style.display='' to show it, which cleared the inline value entirely and
+     left a plain block, stacking the label and the amount with no gap. Layout belongs in a class
+     precisely so a visibility toggle cannot destroy it. */
+  .bgb-roundup { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3);
+                 padding: 4px 8px; border-top: 1px dashed var(--line); }
+  .bgb-roundup[hidden] { display: none; }
+  .bgb-rusum   { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
   .fv-list  { --fv-c-name: 128px; --fv-c-basis: 124px; --fv-c-amt: 112px; --fv-c-swr: 88px; --fv-c-pt: 112px; --fv-c-act: 30px; }
   .fv-head,
   .fv-list .fv-row { display: grid; align-items: center; column-gap: var(--space-2);
@@ -561,6 +571,31 @@
   .pcat-row.is-over .pcat-fill { background:var(--bad); }
   .pcat-row.is-none .pcat-fill { background:var(--muted); }
   .pcat-bar-partner { height:100%; opacity:.6; background:repeating-linear-gradient(45deg, var(--muted) 0 2px, transparent 2px 6px); }
+
+  /* ---- "Where a gross dollar goes" (Budget summary) -----------------------------------------
+     The owner asked for "graphs to consume the tax" instead of the Basis screen's wall of typed
+     numbers. This is that, and it deliberately introduces NO new chart idiom: it is .pcat-bar --
+     a flex track with coloured children, already used for per-category progress -- carrying N
+     segments instead of one. No SVG, no library.
+
+     It sits ABOVE the Investing tile because it is the establishing shot and that tile is the
+     judgement: the frame comes first. Capped at the same 780px as the prose beneath it (DESIGN.md
+     §5) rather than stretched to the card's full 1318px -- a composition bar reads better at a
+     measure than at a span, and setting it explicitly means the .card p.mini trap cannot fire
+     silently later. */
+  .gdb { max-width:780px; margin:0 0 14px; }
+  .gdb .pcat-bar { height:10px; position:relative; }
+  .gdb-seg { height:100%; }
+  /* Where gross pay runs out, on a plan that spends past it. A separate --bad SEGMENT was tried
+     first and was wrong twice over: the four named segments already fill the denominator, so
+     appending one summed the bar to 174% (measured); and it drew the overage as though it were a
+     fifth category of spending rather than the point at which the other four stop being affordable.
+     A marker says the true thing -- everything right of this line is money you do not have. */
+  .gdb-mark { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--bad);
+              border-radius:1px; pointer-events:none; }
+  .gdb-legend { display:flex; flex-wrap:wrap; gap:4px 14px; margin-top:7px; }
+  .gdb-key { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+  .gdb-dot { width:8px; height:8px; border-radius:2px; flex:0 0 8px; }
   @media (max-width:480px) { .pcat-row { grid-template-columns:1fr auto; grid-template-areas:"name name" "amt badge" "bar bar"; } .pcat-amt { align-items:flex-start; } }
   /* Credit-card utilization meter (docs/manage-panel-redesign.md §3) — re-homed from the Manage
      account rows to "Pay off your cards"; numerator is the section's OWN runningRemaining figure
@@ -1302,6 +1337,50 @@
   .nw-field input { width:128px; }
   /* G) provenance line under a sourced-and-locked field ("from Invest tab" / "from Budget + Tax") */
   .nw-src { display:block; margin-top:2px; font-size:var(--fs-2xs); color:var(--muted); }
+
+  /* ---- Budget plan settings bar -------------------------------------------------------------
+     Replaces two flex strips of `.row`s that put four controls at FOUR different heights
+     (measured at 1500px: base y=1167, summary y=1180, tax y=1192, round-up y=1235) and three
+     different left edges (199 / 506 / 159). Two causes, both structural:
+
+       * `align-items:flex-end` on a strip where ONLY #bgb_base carries a note beneath it, so
+         that one field floated up by the note's height and nothing else did;
+       * a `.row` sizes to its own label, so every control started wherever its label ended.
+
+     The fix is the shape the app already ships for exactly this content -- `.nw-field` on the
+     Overview forecast card: label ABOVE, field, provenance note below. A note then hangs off the
+     bottom of its own cell instead of shoving a shared baseline, and every field starts at its
+     cell's left edge rather than after a label of arbitrary length. DESIGN.md §4.4: the tracks
+     are declared on the container as custom properties, not left to `auto`. */
+  /* flex, not grid: `repeat(auto-fit, minmax(X, max-content))` is invalid CSS -- auto-fit needs a
+     fixed or flexible max -- so the whole declaration was dropped and every cell became a full
+     -width row. Measured before it was caught: base w=1214, tax w=1285, round-up w=1318, and the
+     header GREW from ~380px to 556px. `align-items:flex-start` is what actually kills the
+     staircase; the fixed basis is what gives the controls one rhythm instead of three. */
+  .bgb-set { display:flex; flex-wrap:wrap; align-items:flex-start;
+             gap:12px var(--space-4); margin-top:12px; }
+  #bgb_plan_card { --bgb-set-col: 148px; }
+  /* A FLOOR, not a fixed width: the base cell carries two units and a lock button, so its
+     min-content is genuinely wider than the others and forcing them equal would crush it.
+     Everything narrower than the floor is padded up to it, which is what gives the row its
+     rhythm without pretending five different controls want the same width. */
+  .bgb-set > .nw-field { flex:0 0 auto; min-width:var(--bgb-set-col); }
+  /* One control height across the bar. Measured unaligned: a <select> renders 34px beside a 28px
+     .input-pair, so top-aligned cells still had their bottoms 6px apart -- the residue of the
+     staircase, at a smaller scale. 34px also moves the row closer to the 44px phone tap target
+     (DESIGN.md §5) than 28px did. */
+  .bgb-set > .nw-field > .input-pair, .bgb-set > .nw-field > input,
+  .bgb-set > .nw-field > select { width:100%; box-sizing:border-box; min-height:34px; }
+  .bgb-set > .nw-field > .input-pair { align-items:center; }
+  /* The readout is the one thing here read on every visit; the settings are set once. It gets the
+     end of the bar and a baseline of its own, rather than floating between two control rows. */
+  .bgb-set > .bgb-set-read { margin-left:auto; text-align:right; align-self:center; }
+  @media (max-width:480px) {
+    /* Full-bleed, DESIGN.md §4.3: a 148px control beside a 340px .input-pair is the defect that
+       rule exists for. */
+    .bgb-set > .nw-field { flex:1 1 100%; }
+    .bgb-set > .bgb-set-read { margin-left:0; text-align:left; }
+  }
   /* DEC-024 HA theme adapter (shiro-full only): the net-worth cone's fill-opacity/stroke-opacity
      are tuned for a dark background and read as near-invisible on light. html.theme-shiro-full
      is set by applyHaTheme() only in full (light) presentation — accent-only stays dark and never
@@ -1329,7 +1408,19 @@
   .bgb-bhead { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
   .bgb-bname { background:transparent; border:none; color:var(--text); font-weight:var(--fw-bold); font-size:var(--fs-base); width:140px; }
   .bgb-bkind { background:var(--field); border:1px solid var(--line); color:var(--muted); border-radius:5px; padding:2px 4px; font-size:var(--fs-2xs); text-transform:uppercase; letter-spacing:var(--ls-caps); }
-  .bgb-bsum { font-variant-numeric:tabular-nums; margin-left:auto; }
+  /* The amounts are a FIXED track, right-aligned, and always the last thing before the delete
+     control. They used to be one span carrying the monthly figure, the yearly figure AND any
+     round-up note, right-aligned as a block by margin-left:auto — so the moment a bucket gained
+     a note the block grew and shoved its own amounts left, and no two bucket headers lined up.
+     DESIGN.md §4.4: cross-row alignment needs fixed tracks, not `auto` anything. The note gets
+     its own cell BEFORE the track, where growing costs the amounts nothing. */
+  /* ONE declaration of the track, on the container, so both rows read the same value and the
+     narrow-viewport block can override it once. Declaring 196px twice meant a phone override was
+     two edits and a hope — §4.4 asks for the width as a custom property for exactly this reason. */
+  #bgBuilder   { --bgb-c-sum: 196px; }
+  .bgb-sumwrap { margin-left:auto; display:flex; align-items:baseline; gap:var(--space-2); min-width:0; }
+  .bgb-runote  { color:var(--muted); text-align:right; min-width:0; }
+  .bgb-bsum { font-variant-numeric:tabular-nums; min-width:var(--bgb-c-sum); text-align:right; white-space:nowrap; }
   .bgb-x { background:transparent; border:none; color:var(--bad); cursor:pointer; font-size:var(--fs-md); }
   .bgb-x:hover { filter:brightness(1.3); }
   .bgb-items td { padding:4px 6px; border-bottom:1px solid var(--line-faint); }
@@ -1346,9 +1437,13 @@
   input[type="color"] { height: 34px; box-sizing: border-box; padding: 2px; }
   .mi { width:68px; background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; font-size:var(--fs-sm); }
   .bgb-group { margin:6px 0 6px 6px; padding-left:10px; border-left:2px solid var(--line); }
-  .bgb-ghead { display:flex; align-items:center; gap:8px; }
+  /* gap matches .bgb-bhead's 10px on purpose: both rows end with a ✕ after the amount track, so
+     a 2px gap difference put the bucket sums at x=1354 and the group sums at x=1356 — measurably
+     NOT the one column the comment above claims. */
+  .bgb-ghead { display:flex; align-items:center; gap:10px; }
   .bgb-gname { background:transparent; border:none; color:var(--muted); font-weight:var(--fw-semibold); font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); width:150px; }
-  .bgb-gsum { font-variant-numeric:tabular-nums; margin-left:auto; font-size:var(--fs-sm); color:var(--muted); }
+  .bgb-gsum { font-variant-numeric:tabular-nums; margin-left:auto; font-size:var(--fs-sm); color:var(--muted);
+              min-width:var(--bgb-c-sum); text-align:right; white-space:nowrap; }
   .bgb-addgroup { margin-top:2px; }
   .bgb-grip { cursor:grab; color:#5a6473; user-select:none; width:14px; text-align:center; padding-right:0 !important; }
   .bgb-grip:active { cursor:grabbing; }
@@ -1539,7 +1634,8 @@
     #gl_target, #gl_manual { width: 100% !important; }
     #tab-invest .row select, #tab-invest .row input[type=text],
     #gl_card .row select, #gl_card .row input[type=text],
-    #sf_card .row select, #sf_card .row input[type=text], #sf_card .row input[type=date] { width: 100% !important; min-width: 0 !important; }
+    #sf_card .row select, #sf_card .row input[type=text], #sf_card .row input[type=date],
+    #bgb_plan_card .row select { width: 100% !important; min-width: 0 !important; }
 
     /* budget builder: two-line wrap rows (name full-width on line 1;
        handle/amount/tax/split/$ on line 2) instead of full-bleed scroll */
@@ -1559,7 +1655,18 @@
        fits on one line at ≤480px once the grip/chevron are added — wrap it two-line, name on
        its own full-width line 1 (same "name gets its own line" pattern the item rows already
        use above), grip/chevron/kind/total/delete on line 2. */
-    .bgb-bhead { flex-wrap: wrap; row-gap: var(--space-1); }
+    /* .bgb-bhead already wrapped here; .bgb-ghead did NOT, so its 196px amount floor pushed the
+       group subtotal to x=400 in a 390px viewport — clipped off-screen with its tail cut off.
+       Wrap it too, and drop the floor entirely: a fixed track is what aligns columns on a wide
+       row, and a wrapped single-column row has no columns left to align. Keeping the floor is
+       what broke it. */
+    .bgb-bhead, .bgb-ghead { flex-wrap: wrap; row-gap: var(--space-1); }
+    #bgBuilder { --bgb-c-sum: 0px; }
+    /* The note takes its own full line rather than squeezing to 112px and breaking mid-token
+       (.mini inherits overflow-wrap:anywhere) — the .jc-wait precedent: it is a note about the
+       row, not a third control. */
+    .bgb-sumwrap { flex: 1 1 100%; justify-content: space-between; }
+    .bgb-runote  { text-align: left; }
     .bgb-bhead .bgb-bname { order: -1; flex: 1 1 100%; }
 
     /* FIRE net-worth fields */
@@ -2650,51 +2757,84 @@
 </main>
 
 <div class="tab-panel" id="tab-budget"><div class="panel-inner">
-  <section class="card" id="bgb_inputs_card">
-    <h2>Budget</h2>
-    <p class="mini">Frameworks computed on your <b>after-tax</b> base (net take-home + pre-tax 401k/HSA/premiums). <button class="seed-btn" id="bg_seed" type="button">Use Tax take-home</button></p>
-    <div class="row"><label class="mini">Net take-home</label><span class="input-pair"><input id="bg_net" type="text" inputmode="decimal" data-fmt="usd" value="120000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax 401(k)</label><span class="input-pair"><input id="bg_t401" type="text" inputmode="decimal" data-fmt="usd" value="24500"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax HSA</label><span class="input-pair"><input id="bg_hsa" type="text" inputmode="decimal" data-fmt="usd" value="4400"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Pre-tax health premiums <span class="muted" style="font-size:var(--fs-2xs)">(medical/dental/vision — a Need, NOT an investment)</span></label><span class="input-pair"><input id="bg_prem" type="text" inputmode="decimal" data-fmt="usd" value="3600"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Post-tax savings (Roth/ESPP)</label><span class="input-pair"><input id="bg_post" type="text" inputmode="decimal" data-fmt="usd" value="7500"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:var(--fs-2xs)">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Gross income (50/15/5)</label><span class="input-pair"><input id="bg_gross" type="text" inputmode="decimal" data-fmt="usd" value="180000"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
-    <div class="row"><label class="mini">Employer 401(k) match</label><span class="mini">Match <input id="bg_mrate" class="mi" type="number" step="5" value="50"/>% of first <input id="bg_mpct" class="mi" type="number" step="1" value="6"/>% of salary</span></div>
-    <div id="bg_match_out" class="mini" style="margin:4px 0 8px"></div>
-    <div class="row"><label class="mini">Income base</label><select id="bg_base"><option value="after_tax">After-tax (recommended)</option><option value="take_home">Raw take-home</option></select></div>
-    <button class="calc-btn" id="bg_go" type="button">Calculate budget</button>
-  </section>
   <div>
     <section class="card" id="bgb_summary_card">
       <h2>Budget summary</h2>
       <div class="row" style="margin:0 0 8px"><label class="mini">Compare to strategy</label><select id="bgb_strategy" aria-label="Compare to strategy"></select></div>
+
       <div id="bgb_catsummary"><span class="mini muted">Edit your budget below to see the split.</span></div>
     </section>
     <!-- House affordability (TODO-225, DEC-019) -->
-    <details class="card" style="margin-top:16px" id="bgb_targets_card"><summary>Framework targets <span class="mini" style="font-weight:var(--fw-normal)">(50/30/20 etc. — just a guide)</span></summary><div class="body"><div id="bg_out" class="mini">Enter your numbers and calculate.</div></div></details>
+    <details class="card" style="margin-top:16px" id="bgb_targets_card"><summary>Framework targets <span class="mini" style="font-weight:var(--fw-normal)">(50/30/20 etc. — just a guide)</span></summary><div class="body">
+      <!-- The income base is a LENS on these targets, not an input to the plan: it changes what
+           the frameworks are measured against and nothing else. It follows the numbers it
+           qualifies, the same way "Compare to strategy" sits with the split it qualifies. -->
+      <div class="row" style="margin:0 0 8px"><label class="mini">Income base</label><select id="bg_base"><option value="after_tax">After-tax (recommended)</option><option value="take_home">Raw take-home</option></select></div>
+      <div id="bg_out" class="mini">Calculate your taxes and these fill in.</div></div></details>
   </div>
 </div>
 <section class="card" style="margin-top:16px" id="bgb_plan_card">
   <h2>Dynamic budget — buckets &amp; line items</h2>
-  <p class="mini">Allocate your monthly take-home into buckets and services. Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups. <button class="seed-btn" id="bgb_seed" type="button">Use Tax take-home</button></p>
-  <p class="mini" style="margin-top:-4px;color:var(--muted)">Your base auto-tracks <b>net take-home</b> — all 401k/Roth/HSA/ESPP contributions are already taken out, so this is only your spendable cash.</p>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
-    <div class="row" style="margin:0"><label class="mini">Monthly base</label><span class="input-pair"><input id="bgb_base" type="text" inputmode="decimal" data-fmt="usd" value="8,000"/><span class="unit">$</span><span class="unit">/mo</span></span></div>
-    <div class="row" style="margin:0"><label class="mini">Local sales tax</label><span class="input-pair"><input id="bgb_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span></div>
-    <div id="bgb_summary" class="mini" style="margin-left:auto;align-self:center"></div>
+  <!-- TWO standing paragraphs of grey text used to sit here, 64px at 1500px and 508px at 390px,
+       between the heading and the first control. The first described the TABLE (tick tax, set %,
+       drag the handle) and has moved down to sit directly above the table it describes -- an
+       instruction three screens from the thing it instructs is decoration. The second explained
+       what the base is; the field now says that itself, in its own provenance note, which is
+       where a reader looks for it. -->
+  <div class="bgb-set">
+    <!-- The base is SOURCED from the Tax tab and locked by default. It was previously a plain
+         input that detached from income on the first keystroke, with no visible state and no way
+         back except a console function -- the asymmetry this pattern exists to remove. `.nw-field`
+         is the same component #nw_current uses, and the reason it is here: its note hangs off the
+         bottom of its own cell instead of floating the field above its neighbours. -->
+    <label class="nw-field">Monthly base
+      <span class="input-pair has-lock"><input id="bgb_base" type="text" inputmode="decimal" data-fmt="usd" value="8,000" readonly/><span class="unit">$</span><span class="unit">/mo</span><button type="button" class="gl-lock" id="bgb_base_lock" aria-pressed="true" title="Sourced automatically — click to override">&#128274;</button></span>
+      <span class="nw-src" id="bgb_base_src">from Tax take-home</span>
+    </label>
+    <input type="checkbox" id="bgb_base_locked" checked style="display:none" aria-hidden="true" tabindex="-1">
+    <label class="nw-field">Local sales tax
+      <span class="input-pair"><input id="bgb_tax" type="number" step="0.05" value="8.25"/><span class="unit">%</span></span>
+      <span class="nw-src">applied to lines ticked <b>tax</b></span>
+    </label>
+    <!-- Round-up lives in this card, not the summary card, because every visible consequence of it
+         renders HERE: the note in each bucket header, the row in each bucket body, and the
+         "(incl. …)" on #bgb_summary. A control whose entire effect shows in another card is in
+         the wrong card. "Compare to strategy" stays in the summary card for the mirror reason --
+         it changes nothing, only what the split is measured against.
+         The leading ellipsis carries the grammar without putting a <select> inside prose. The app
+         has no instance of that anywhere, and the one place prose-flowed controls were built at
+         scale (Setup ▸ Budget strategies) was deliberately reverted. -->
+    <label class="nw-field">Round up
+      <select id="bgb_ru_scope" aria-label="Round up">
+        <option value="off">Off</option>
+        <option value="bucket">Each bucket</option>
+        <option value="total">The total</option>
+      </select>
+    </label>
+    <label class="nw-field" id="bgb_ru_unit_row" hidden>&hellip;to the next
+      <select id="bgb_ru_unit" aria-label="Round up to the next"></select>
+    </label>
+    <label class="nw-field" id="bgb_ru_bucket_row" hidden>&hellip;added to
+      <select id="bgb_ru_bucket" aria-label="Which bucket absorbs the round-up"></select>
+    </label>
+    <div id="bgb_summary" class="mini bgb-set-read"></div>
   </div>
+  <div class="mini muted" id="bgb_base_hint" style="margin-top:6px"></div>
+  <div class="mini muted" id="bgb_ru_note" style="margin:6px 0 0;display:none;line-height:1.5"></div>
+
   <div id="bgb_cu_row" class="mini" style="display:none;margin:10px 0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--warn-tint)">
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
       <input id="bgb_cu_toggle" type="checkbox"/>
       <span>Budget on <b>take-home during catch-up</b> (rest of year) instead of steady take-home <span class="muted" id="bgb_cu_lbl"></span></span>
     </label>
   </div>
-  <div id="bgb_presets" class="mini" style="margin:8px 0"></div>
   <details id="hb_share_wrap" class="mini" style="margin:4px 0 8px">
     <summary class="muted">Share expenses with your partner — tick the categories they should see</summary>
     <div id="hb_share_panel" class="body" style="margin-top:8px"></div>
   </details>
+  <!-- Moved down from the top of the card, where it stood between the heading and the first
+       control describing something two blocks below it. -->
+  <p class="mini" style="margin:14px 0 6px">Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups.</p>
   <div id="bgBuilder"></div>
   <button class="seed-btn" id="bgb_addbucket" type="button" style="margin-top:10px">+ Add bucket</button>
 </section>
@@ -3027,9 +3167,49 @@
       <div id="bgb_alias_groups" class="bgb-alias-groups"></div>
     </div>
       </section>
-      <section id="setup_strategies" data-setup-pane="strategies" hidden><h2>Budget strategies</h2>
+      <!-- Renamed from "Budget strategies": this pane now holds three kinds of budget rule, and
+           `data-setup="strategies"` is deliberately UNCHANGED -- acShowSetupPane() and the nav both
+           key off it, and renaming buys nothing.
+
+           Split presets and Split-by-income moved here off the Budget tab. The precedent was
+           already in the building and is exact: bgbRenderStrategyManage() has only ever rendered
+           into Setup while the CHOOSER (#bgb_strategy) stayed on Budget. Split presets have the
+           identical shape -- splitSelect() builds a per-row <select> whose <option>s ARE
+           bgb.splitPresets. The presets are the VOCABULARY of an in-row control: vocabulary moves,
+           the control stays.
+
+           Split-by-income is the strongest case of the three, and its own copy admits it: "this
+           only ever suggests a preset, it changes no line on its own." Measured at 390px it was
+           222px of a 348px block on the tab's busiest card, for a control that mutates nothing. -->
+      <section id="setup_strategies" data-setup-pane="strategies" hidden><h2>Budget rules</h2>
+        <div class="subhead">Strategies</div>
         <p class="mini muted">Named splits to compare your budget against.</p>
         <div id="bgb_strat_manage" class="body" style="margin-top:8px"></div>
+        <!-- Order matters: split-by-income PRODUCES a preset, so it sits directly above the list
+             it feeds. Cause, then effect. On the Budget tab they sat 220px apart, reversed. -->
+        <!-- Moved off the Budget tab with the Basis screen. These are the only three controls
+             on that screen that were ever genuinely user-supplied; the other six were hand-typed
+             copies of numbers the Tax tab computes, and are now resolved from it directly.
+
+             "Other investments" is deliberately NOT folded into the budget's own investment lines.
+             Folding is what would make the tab's two savings rates fully reconcile, but a Roth IRA
+             line in the budget PLUS a Roth contribution on the Tax tab would then be counted
+             twice, and no de-duplication rule is right for everyone. One field in Setup is not a
+             screen; a wrong number is a wrong number. -->
+        <div class="subhead" style="margin-top:18px">What the Tax tab cannot know</div>
+        <div class="row"><label class="mini">Other investments <span class="muted" style="font-size:var(--fs-2xs)">(brokerage, Roth IRA…)</span></label><span class="input-pair"><input id="bg_other" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span><span class="unit">/yr</span></span></div>
+        <!-- The field survives on purpose. Folding it into the budget's own investment lines is
+             what would make the tab's two savings figures converge -- and it double-counts the
+             moment a Roth IRA exists BOTH as a budget line and as a Tax-tab contribution, which is
+             the default budget's exact shape ("Savings > Roth IRA $600/mo"). Measured: the rate
+             would read ~7 points better than the truth, silently, in the flattering direction. -->
+        <div class="mini muted" style="margin:-4px 0 10px">Only what your payroll never touches. Your budget&rsquo;s own investment lines are counted separately, on the Budget tab &mdash; adding them here would count them twice.</div>
+        <div class="row"><label class="mini">Employer 401(k) match</label><span class="mini">Match <input id="bg_mrate" class="mi" type="number" step="5" value="50"/>% of first <input id="bg_mpct" class="mi" type="number" step="1" value="6"/>% of salary</span></div>
+        <div id="bg_match_out" class="mini" style="margin:4px 0 8px"></div>
+
+        <div class="subhead" style="margin-top:18px">Split presets</div>
+        <p class="mini muted">The shares offered on every budget line&rsquo;s <b>%</b> picker.</p>
+        <div id="bgb_presets" class="mini" style="margin:8px 0"></div>
       </section>
       <section id="setup_accounts" data-setup-pane="accounts" hidden><h2>Accounts</h2>
           <div class="subhead">Accounts</div>
@@ -3216,7 +3396,75 @@
       <h2>Plan vs actual <span class="mini muted" id="ac_pva_month"></span></h2>
       <div id="ac_pva"><div class="note-box">Log a few transactions, then <b>Sync plan from Budget</b> to see this month against your plan.</div></div>
 
-      <div class="subhead" style="margin-top:14px">Recurring this month <span class="mini muted" id="ac_rec_month"></span></div>
+      <!-- Scheduled money. The engine behind this shipped in bdecc28 (2026-08-12) with the note
+           "No client yet; nothing calls this" — a full recurrence engine, store and 13 routes with
+           no way in. This is that way in.
+           It sits ABOVE "Recurring this month" deliberately: the due list is the only thing here
+           that wants a decision today, and burying an inbox under a report is how an inbox gets
+           ignored. The older Recurring panel below still reads the legacy `recurring` table —
+           migration 16 already copied those rows into schedules, so the two describe the same
+           bills, and retiring the old panel is the follow-up, not this change. -->
+      <div class="subhead" style="margin-top:14px">Scheduled money <span class="mini muted" id="sch_count"></span></div>
+      <!-- What automatic posting could not do. ABOVE the due tray because a schedule the user
+           switched auto-post on for is one they stopped watching, so its failure has to come
+           looking for them rather than wait to be found. -->
+      <div id="sch_problems" hidden></div>
+      <div id="sch_due"></div>
+      <div id="sch_list" style="margin-top:8px"></div>
+      <details id="sch_add_wrap" style="margin-top:8px"><summary>Add a scheduled payment or deposit</summary>
+        <div class="body" id="sch_form">
+          <div class="ac-row">
+            <label class="ac-field" style="flex:2"><span class="ac-lbl">Name</span>
+              <input id="sch_name" type="text" placeholder="e.g. Paycheck, Rent, Car fund"></label>
+            <label class="ac-field"><span class="ac-lbl">Flow</span>
+              <select id="sch_dir"><option value="in">Money in</option><option value="out" selected>Money out</option></select></label>
+            <label class="ac-field"><span class="ac-lbl">Amount</span>
+              <span class="input-pair"><span class="unit">$</span><input id="sch_amt" type="text" inputmode="decimal" data-fmt="usd2" placeholder="0.00"></span></label>
+          </div>
+          <div class="ac-row">
+            <label class="ac-field"><span class="ac-lbl">Account</span><select id="sch_acct"></select></label>
+            <label class="ac-field" id="sch_bucket_wrap"><span class="ac-lbl">Bucket</span><select id="sch_bucket"></select></label>
+            <label class="ac-field"><span class="ac-lbl">Category</span>
+              <input id="sch_cat" type="text" placeholder="e.g. Salary, Electricity"></label>
+          </div>
+          <div class="ac-row">
+            <label class="ac-field" style="flex:2"><span class="ac-lbl">How often</span>
+              <select id="sch_freq">
+                <option value="semimonthly">Twice a month</option>
+                <option value="weekly">Every N weeks, on a weekday</option>
+                <option value="monthly">Monthly, on a day</option>
+                <option value="yearly">Once a year</option>
+                <option value="daily">Every N days</option>
+              </select></label>
+            <label class="ac-field" id="sch_d1_wrap"><span class="ac-lbl">Day</span><select id="sch_d1"></select></label>
+            <label class="ac-field" id="sch_d2_wrap"><span class="ac-lbl">and day</span><select id="sch_d2"></select></label>
+            <label class="ac-field" id="sch_wd_wrap"><span class="ac-lbl">Weekday</span>
+              <select id="sch_wd"><option value="MO">Monday</option><option value="TU">Tuesday</option><option value="WE">Wednesday</option><option value="TH">Thursday</option><option value="FR" selected>Friday</option><option value="SA">Saturday</option><option value="SU">Sunday</option></select></label>
+            <label class="ac-field" id="sch_int_wrap"><span class="ac-lbl">Every</span>
+              <span class="input-pair"><input id="sch_int" type="number" min="1" max="52" value="2"><span class="unit">wks</span></span></label>
+            <label class="ac-field" id="sch_moy_wrap"><span class="ac-lbl">Month</span><select id="sch_moy"></select></label>
+          </div>
+          <div class="ac-row">
+            <label class="ac-field" style="flex:2"><span class="ac-lbl">If it lands on a weekend</span>
+              <select id="sch_shift">
+                <option value="before">Move to the Friday before</option>
+                <option value="after">Move to the Monday after</option>
+                <option value="none">Leave it on the day</option>
+              </select></label>
+            <label class="ac-field"><span class="ac-lbl">Starting</span><input id="sch_anchor" type="date"></label>
+          </div>
+          <div class="ac-row" style="align-items:center;gap:14px;flex-wrap:wrap">
+            <label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sch_est" style="width:auto"> Amount varies <span class="muted">(never posts on its own)</span></label>
+            <label class="mini" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="sch_auto" style="width:auto"> Post it automatically <span class="muted">(only for a fixed amount)</span></label>
+            <button class="calc-btn" id="sch_save" type="button" style="width:auto">Save schedule</button>
+            <button class="ac-tool" id="sch_cancel" type="button" style="display:none">Cancel edit</button>
+          </div>
+          <div id="sch_err" class="mini bad-text" style="min-height:1em"></div>
+          <div id="sch_preview" class="mini muted" style="margin-top:4px;line-height:1.5"></div>
+        </div>
+      </details>
+
+      <div class="subhead" style="margin-top:18px">Recurring this month <span class="mini muted" id="ac_rec_month"></span></div>
       <div id="ac_recurring"></div>
       <details id="ac_rec_setup_wrap" style="margin-top:8px"><summary>Set up recurring (from your budget)</summary><div class="body" id="ac_rec_setup"></div></details>
     </section>
@@ -3651,7 +3899,6 @@ const TAB_SCREENS = {
   ],
   budget: [
     { key: 'plan',  label: 'Plan',  sections: ['bgb_plan_card', 'bgb_summary_card', 'bgb_targets_card'] },
-    { key: 'basis', label: 'Basis', sections: ['bgb_inputs_card'], solo: true },
     { key: 'goals', label: 'Goals & funds', sections: ['gl_card', 'sf_card'], solo: true },
   ],
 };
@@ -3719,6 +3966,10 @@ function applyScreens(tab) {
 
 function tabIndexModel(tab) {
   const bs = window.__budgetSummary || {};
+  const bf = window.__budgetFrameworks || {};
+  // __budgetPlan publishes bgb.strategy, which is how this top-level function reaches a value that
+  // otherwise only exists inside the page IIFE -- the scope gap that killed the old lid entry.
+  const bp = window.__budgetPlan || {};
   const gl = window.__glSummary || {};
   const sf = window.__sfSummary || {};
   const hb = window.__hbSummary || {};
@@ -3743,7 +3994,15 @@ function tabIndexModel(tab) {
       { id: 'gl_card',          label: 'Goals',   value: gl.count ? (gl.funded + ' of ' + gl.count + ' funded') : null },
       { id: 'sf_card',          label: 'Funds',   value: sf.count ? (sf.count + (sf.total ? ' · ' + money(sf.total) : '')) : null },
       { id: 'hb_share_wrap',    label: 'Shared',  value: hb.count ? (hb.count + (hb.partner ? ' with ' + hb.partner : '')) : null },
-      { id: 'bgb_targets_card', label: 'Targets', value: null },
+      // The sole writer for this lid (see the note where LID_SCENT's dead duplicate used to be).
+      // It carries a number because the income-base LENS now lives behind it, and
+      // docs/ux-disclosure-analysis.md §6 step 1 asks whether the open/don't-open decision can be
+      // made without opening -- a strategy name alone does not answer that.
+      { id: 'bgb_targets_card', label: 'Targets', value: (() => {
+          const rate = bf.savingsRate != null ? (bf.savingsRate * 100).toFixed(1) + '% from payroll' : null;
+          const strat = bp.strategy ? 'vs ' + bp.strategy : null;
+          return [rate, strat].filter(Boolean).join(' \u00b7 ') || null;
+        })() },
     ]; break;
 
     // The tab the whole direction was chosen for: fourteen sections, and the entry burden lives
@@ -3847,7 +4106,7 @@ function screenValue(tab, screen) {
   // take-home live (traced in ux-screen-boundaries.md §8), so the figure has to stay on screen
   // somewhere — one line in the strip instead of a column that dwarfed the tables themselves.
   const named = { taxes: 'tax_summary_card', tables: 'tax_summary_card',
-                  basis: 'bgb_inputs_card', plan: 'bgb_plan_card',
+                  plan: 'bgb_plan_card',
                   accounts: 'iv_accounts_card', nextdollar: 'iv_plan_card', projection: 'iv_proj_card',
                   house: 'hp_card', car: 'au_card' };
   if (named[screen.key] && byId[named[screen.key]] != null) return byId[named[screen.key]];
@@ -3951,8 +4210,10 @@ function syncTabAria() {
 // defaults a new user can keep, while these are somebody's salary, net worth and contributions.
 // Clearing the second set and leaving the first is the honest split.
 const DEMO_MONEY_FIELDS = ['salary_yr', 'salary_mo', 'salary_pp', 'trad401k', 'hsa', 'gtli',
-  'nw_current', 'nw_annual', 'sx_wages', 'sx_spend',
-  'bg_net', 'bg_t401', 'bg_hsa', 'bg_prem', 'bg_post', 'bg_gross'];
+  'nw_current', 'nw_annual', 'sx_wages', 'sx_spend'];
+// bg_net/bg_t401/bg_hsa/bg_prem/bg_post/bg_gross were dropped with the Basis screen. clearDemoValues()
+// guards on a missing id so nothing breaks either way, but the list is a claim about what the app
+// ships pre-filled, and it would have been a false one.
 
 function showDemoBanner() {
   const el = document.getElementById('demoBanner');
@@ -4554,7 +4815,7 @@ function annualSalary() { return rn($('salary_yr').value); }
 // deliberately leaves cash.salary as just the primary's wage. r.inputs.spouseSalary is the
 // household's second wage (server-forced to 0 for non-MFJ filers), so summing the two here is
 // what keeps the "Gross cash salary" cash-flow walk-down, the comp sub-label, and the Budget
-// tab's "Use my numbers" gross-income seed (bg_gross) all reconciling against the household
+// tab's gross-income basis (bgResolveBasis) all reconciling against the household
 // totals instead of silently dropping the spouse's wage. Pure + defensive (undefined/missing
 // spouseSalary -> +0) so it's also a safe no-op against a backend that hasn't shipped the
 // spouseSalary field yet.
@@ -5009,6 +5270,9 @@ function render(r) {
   // recompute cycle stale relative to whatever just changed MAGI.
   updateLimitHints();
   if (window.bgbBaseAutoFill) window.bgbBaseAutoFill();   // budget base tracks take-home — contributions reduce it live
+  // The frameworks are computed from this result, so the recalculation IS their trigger now that
+  // the six inputs (and the button that recalculated them) are gone.
+  if (typeof calcBudget === 'function') { try { calcBudget(); } catch (e) {} }
   if (window.renderOverview) window.renderOverview();   // keep the Overview live as the paycheck changes
   const pf = payFreq();
   const perMo = x => x / 12;
@@ -5341,7 +5605,17 @@ const LID_SCENT = [
   // setLidValue would have no-opped on the missing element, which is exactly why it is deleted
   // rather than left -- a registry entry that silently does nothing is the kind of thing that
   // gets read as working.
-  { id: 'bgb_targets_card', value: () => { try { return bgb.strategy ? 'vs ' + bgb.strategy : null; } catch (e) { return null; } } },
+  // bgb_targets_card's entry lived here and was DEAD from the day it was written -- the exact
+  // failure the comment above describes, one entry below it. It read `bgb.strategy`; `bgb` is
+  // declared `let bgb;` inside the page IIFE and this registry is top-level, so the reference threw
+  // ReferenceError on every call and the try/catch returned null. It never once rendered
+  // "vs 50/30/20". Verified live: LID_SCENT's value() -> null, typeof bgb -> undefined here.
+  //
+  // It is deleted rather than repaired because this lid already had a SECOND writer:
+  // paintSectionValues() paints tabIndexModel's value into the same `.sec-val` slot in the same
+  // <summary>. Two registries writing one slot means last-writer-wins, and worse -- a `value: null`
+  // from either one REMOVES what the other just wrote. One writer, and it is tabIndexModel, which
+  // can reach everything it needs through the published globals.
   { id: 'setup_aliases', value: () => {
       try {
         const n = Object.keys(bgb.catAliases || {}).length;
@@ -5636,7 +5910,7 @@ function save() {
 // NOTE: the [id^="bg_"] selector intentionally matches bg_* (framework) but NOT bgb_*
 // (builder), which the budget state owns — so restore never clobbers the builder.
 const TABS_KEY = 'itc.tabs.v1';
-const TABS_SEL = '#tab-overview input, #tab-invest input:not([id^="vn_"]), #tab-invest select:not([id^="vn_"]), #tab-decisions input, #tab-decisions select, #tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"], #tab-budget input[id^="hp_"], #tab-tax input[id^="sx_"], #tab-tax select[id^="sx_"]';
+const TABS_SEL = '#tab-overview input, #tab-invest input:not([id^="vn_"]), #tab-invest select:not([id^="vn_"]), #tab-decisions input, #tab-decisions select, #tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"], #tab-budget input[id^="hp_"], #tab-setup input[id^="bg_"], #tab-tax input[id^="sx_"], #tab-tax select[id^="sx_"]';
 function collectTabs() {
   const o = {};
   document.querySelectorAll(TABS_SEL).forEach(el => { if (el.id) o[el.id] = (el.type === 'checkbox') ? el.checked : el.value; });
@@ -7412,6 +7686,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     const p = $(pid);
     if (p) { p.addEventListener('input', saveTabs); p.addEventListener('change', saveTabs); }
   });
+  // The three budget-rule controls that moved to Setup with the Basis screen. Adding TABS_SEL
+  // coverage made collectTabs() SEE them; it did not make anything CALL saveTabs, because that is
+  // delegated per tab panel and #tab-setup was never on the list -- so they collected fine and
+  // never saved. Caught by test_the_moved_controls_still_persist_and_still_recalculate.
+  //
+  // Bound per-field rather than by adding 'tab-setup' to the list above, deliberately: Setup is
+  // full of inputs that are NOT in TABS_SEL (account forms, aliases), and a panel-wide listener
+  // would persist-and-dirty the profile on every keystroke in them. That is the BUG-0040 blast
+  // radius — a paint or an unrelated edit marking the profile dirty — for no benefit.
+  document.querySelectorAll('#tab-setup input[id^="bg_"]').forEach(el => {
+    el.addEventListener('input', saveTabs);
+    el.addEventListener('change', saveTabs);
+  });
 
   $('payFreq').addEventListener('change', onPayFreqChange);
 
@@ -7693,6 +7980,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function post(path, body) {
     return _fetchJSON(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
+  // Raw fetch() resolves on 4xx/5xx, so every write that skipped these helpers reported success
+  // on failure. There is no reason for a bare fetch with a method: in this file.
+  async function patch(path, body) {
+    return _fetchJSON(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  async function del(path) {
+    return _fetchJSON(path, { method: 'DELETE' });
+  }
+  // _fetchJSON throws `<status> <json>`, which carries the reason but is not a sentence. Pull the
+  // server's own `detail` out of it so a message can quote the cause without showing a JSON blob.
+  // Falls back to '' rather than to a guess -- an unreadable error must not become a confident one.
+  function errDetail(e) {
+    const raw = String((e && e.message) || e || '');
+    const body = raw.replace(/^\d{3}\s*/, '');
+    try { const j = JSON.parse(body); if (j && typeof j.detail === 'string') return j.detail; } catch (x) {}
+    return /^[[{]/.test(body) ? '' : body.slice(0, 120);
+  }
   const li = (k, v) => '<li><span>' + k + '</span><span>' + v + '</span></li>';
   const warns = a => (a || []).map(w => '<div class="warn-box">⚠ ' + w + '</div>').join('');
   const notes = a => (a || []).map(n => '<div class="note-box">' + n + '</div>').join('');
@@ -7876,7 +8180,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const month = (typeof acNowMonth === 'function') ? acNowMonth() : '';
     let recurring = [], txns = [];
-    try { recurring = (await getJSON('/api/tracking/recurring')).recurring || []; } catch (e) {}
+    // SCHEDULES, shaped into the records acMonthPace already expects. The legacy `recurring`
+    // table is no longer written to by anything -- the setup panel creates schedules now -- so
+    // reading it here would have made the Overview's pace estimate treat every fixed bill as
+    // variable spending the moment the divergence started. `expected` is the schedule's amount;
+    // the pure function's contract (and its tests) are untouched, which is why the mapping lives
+    // at the call site rather than inside it.
+    try {
+      recurring = ((await getJSON('/api/tracking/schedules')).schedules || [])
+        .map(x => ({ active: x.active, direction: x.direction, bucket: x.bucket,
+                     category: x.category, expected: x.amount }));
+    } catch (e) {}
     try { txns = (await getJSON('/api/tracking/transactions?month=' + month)).transactions || []; } catch (e) {}
     const now = new Date(), day = now.getDate(), dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const p = acMonthPace(plan, recurring, txns, day, dim);
@@ -7915,7 +8229,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<div class="mini muted" style="margin-top:6px">' + f$(p.spent) + ' spent · ' + f$(p.fixedLeft) + ' fixed bills left · ~' + f$(Math.max(0, p.projMid - p.spent - p.fixedLeft)) + ' more projected · plan ' + f$(p.budget) + cul + '</div>';
   }
   // deep-link nav from the Overview cards (content is re-rendered → one delegated listener)
-  { const ov = $('ov_out'); if (ov) ov.addEventListener('click', e => { const a = e.target.closest('[data-go]'); if (a) { e.preventDefault(); const b = document.querySelector('.tab-btn[data-tab="' + a.dataset.go + '"]'); if (b) b.click(); } }); }
+  // DELEGATED AT THE DOCUMENT, not on #ov_out. This was scoped to that one container, so every
+  // [data-go] written anywhere else was inert -- a link that looks like a link, takes a click, and
+  // does nothing. Two more were added in the same afternoon (the gross-dollar bar's empty state
+  // and the framework provenance line) before this was noticed, which is the argument for making
+  // it structural: the pattern is cheap to write and the failure is silent, so the handler has to
+  // be somewhere every future instance is already covered.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('[data-go]');
+    if (!a) return;
+    const b = document.querySelector('.tab-btn[data-tab="' + a.dataset.go + '"]');
+    if (!b) return;                       // an unknown tab name must not swallow the click
+    e.preventDefault();
+    b.click();
+  });
 
   // ---- Net-worth forecast: current net worth + level annual investing → cone over time ----
   function nwChart(r, opts = {}) {
@@ -8008,7 +8335,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // locked by default, with a lock toggle + provenance note + >10% drift hint (the pj_tax_hint
   // precedent threshold, ~L7850ish). See docs/ui-redesign.md §G for the full behavior spec.
   function bindSourcedField(cfg) {
-    const { inputId, lockId, resolve, noteEl, noteText, noSourceText, hintEl, label, fmt } = cfg;
+    const { inputId, lockId, resolve, noteEl, noteText, noteTextUnlocked, noSourceText, hintEl, label, fmt,
+            holdLockWithoutSource } = cfg;
+    // noteText may be a function so a field whose SOURCE changes can say which one it is
+    // tracking (the budget base follows catch-up take-home while catch-up mode is on).
+    const noteFor = t => (typeof t === 'function' ? t() : t) || '';
     const format = fmt || f$;
     const lockedCkId = inputId + '_locked';   // convention: <inputId>_locked, e.g. nw_current_locked
     function isLocked() { const cb = $(lockedCkId); return !!(cb && cb.checked); }
@@ -8030,17 +8361,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       const wrap = wrapOf(input), note = noteEl ? $(noteEl) : null;
       const src = resolve();
       const hasSource = src != null && src !== 0;
-      if (!hasSource && isLocked()) setLocked(false);   // never trap the user with a locked-empty field
+      // "Never trap the user with a locked-empty field" -- correct when a missing source is a
+      // DURABLE state the user has to act on (#nw_current: you have no accounts yet). It is wrong
+      // when the absence is TRANSIENT. The budget base resolves from window.__taxResult, which
+      // does not exist for the first moments of every page load, so this auto-unlocked the field
+      // on boot and nothing ever re-locked it -- reproducing, in a new form, the exact silent
+      // detach the lock was built to remove. Found by mutation testing: the reload test passed
+      // for the wrong reason, because the race unlocked the field regardless of what was stored.
+      //
+      // Opt-in, so the three fields whose sources are durable keep the old behaviour.
+      if (!hasSource && isLocked() && !holdLockWithoutSource) setLocked(false);
       const locked = isLocked();
       if (locked) {
-        if (document.activeElement !== input) input.value = Math.round(src);
+        // `src` is null while a held-lock field waits for its source; writing that would render
+        // "NaN" or blank the base until the tax engine reports.
+        if (hasSource && document.activeElement !== input) input.value = Math.round(src);
         input.readOnly = true;
         if (wrap) wrap.classList.add('is-locked');
-        if (note) note.textContent = noteText || '';
+        if (note) note.textContent = noteFor(noteText);
       } else {
         input.readOnly = false;
         if (wrap) wrap.classList.remove('is-locked');
-        if (note) note.textContent = hasSource ? (noteText || '') : (noSourceText || 'No source yet — enter manually');
+        // An unlocked field with a live source used to keep announcing that source -- #nw_current
+        // says "from Invest tab" while you are typing over it, which is exactly backwards. A
+        // field that is NOT tracking must not claim to be. noteTextUnlocked is optional, so the
+        // three existing call sites keep their current wording until they are given one.
+        if (note) note.textContent = hasSource
+          ? (noteFor(noteTextUnlocked) || noteFor(noteText))
+          : (noSourceText || 'No source yet — enter manually');
       }
       const btn = $(lockId);
       if (btn) {
@@ -8050,6 +8398,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         btn.setAttribute('aria-label', locked ? 'Locked — sourced automatically, click to override' : 'Unlocked — editing manually, click to re-lock and sync');
       }
       if (hintEl) _renderSrcHint(hintEl);
+      // The value is written as a bare number (Math.round(src)); every consumer of this helper
+      // so far happened to be re-formatted by a later pass. Doing it here means a sourced USD
+      // field is never briefly shown as "150000". Skips whatever is focused, so it cannot
+      // clobber mid-type.
+      try { formatUSDFields(); } catch (e) {}
     }
 
     const btn = $(lockId);
@@ -8197,13 +8550,58 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- Budget ----
+  // The frameworks are computed from the TAX RESULT, not from six hand-typed copies of it.
+  // Those copies were wrong on shipped defaults -- net take-home read 120,000 against a computed
+  // 90,658.75 -- and their sum was rendered as "After-tax base", 600px from a savings rate derived
+  // from the real take-home. Two books, one screen, $34,940/yr apart.
+  //
+  // This is not new math: it is the body of the old "Use Tax take-home" button, which existed
+  // precisely because the two drifted. Deleting the copy step deletes the drift.
+  function bgResolveBasis() {
+    const t = window.__taxResult, c = (t && t.cash) || null;
+    if (!c) return null;
+    return {
+      netTakeHome: c.takeHome || 0,
+      pretax401k: c.trad401k || 0,
+      pretaxHsa: c.hsa || 0,
+      // calculator.py publishes `mdv` (medical + dental + vision) and nothing read it, so this
+      // field looked user-supplied and was in fact a fourth stale duplicate.
+      pretaxHealthPremiums: c.mdv || 0,
+      postTaxSavings: (c.roth401k || 0) + (c.eeStock || 0) + (c.rothIra || 0) + (c.afterTax401k || 0),
+      grossIncome: bgGrossSeedValue(t),
+    };
+  }
   async function calcBudget() {
     try {
-      const body = { netTakeHome: N('bg_net'), pretax401k: N('bg_t401'), pretaxHsa: N('bg_hsa'),
-        pretaxHealthPremiums: N('bg_prem'), postTaxSavings: N('bg_post') + N('bg_other'), grossIncome: N('bg_gross'),
-        employerMatch: matchDollars().captured, baseMode: $('bg_base').value };
+      const b = bgResolveBasis();
+      const outEl = $('bg_out'); if (!outEl) return;
+      if (!b) {
+        // Never an invented zero: an empty tax result means "not calculated yet", which is a
+        // different statement from "your take-home is nothing".
+        outEl.innerHTML = '<div class="mini muted">These targets are computed from your take-home. <a href="#" data-go="tax">Open the Tax tab</a> and they fill in.</div>';
+        return;
+      }
+      const body = { netTakeHome: b.netTakeHome, pretax401k: b.pretax401k, pretaxHsa: b.pretaxHsa,
+        pretaxHealthPremiums: b.pretaxHealthPremiums, postTaxSavings: b.postTaxSavings + N('bg_other'),
+        grossIncome: b.grossIncome,
+        employerMatch: matchDollars().captured, baseMode: ($('bg_base') || {}).value || 'after_tax' };
       const r = await post('/api/budget', body), fw = r.frameworks;
-      let h = '<div class="tiles"><div class="tile good"><div class="k">True savings rate</div><div class="v">' + (r.savingsRate * 100).toFixed(1) + '%</div><div class="s">pre-tax + post-tax</div></div>' +
+      // NOTE, deliberately left as a difference rather than silently reconciled: this base and the
+      // Budget summary's Verdict base are not the same number, though after the Basis dissolution
+      // they are at least computed from the same source. The server's `after_tax` base adds back
+      // only the PRE-TAX deductions; the Verdict adds back post-tax ones too (Roth/ESPP), so the
+      // two differ by exactly the post-tax savings. Both are defensible readings, and changing
+      // either changes a rate the user may already be steering by -- so each names its own base
+      // instead, and the choice stays theirs.
+      // THE HONESTY GATE. Deleting nine inputs must not delete the user's ability to see what the
+      // frameworks were computed on. It does not become a form again -- that form was nine
+      // instances of a label 950px from its control. Two sentences, and a link to the one place
+      // any of it can be changed.
+      let h = '<div class="mini muted" style="margin-bottom:10px">Computed on your Tax tab: take-home <b>' + f$(b.netTakeHome)
+        + '</b> · 401(k) <b>' + f$(b.pretax401k) + '</b> · HSA <b>' + f$(b.pretaxHsa)
+        + '</b> · premiums <b>' + f$(b.pretaxHealthPremiums) + '</b> · post-tax savings <b>' + f$(b.postTaxSavings)
+        + '</b> · gross <b>' + f$(b.grossIncome) + '</b>.<br>Change any of these on the <a href="#" data-go="tax">Tax tab</a>.</div>';
+      h += '<div class="tiles"><div class="tile good"><div class="k">Payroll savings rate</div><div class="v">' + (r.savingsRate * 100).toFixed(1) + '%</div><div class="s">401(k) + HSA + ESPP, before you touch a dollar</div></div>' +
         '<div class="tile"><div class="k">After-tax base</div><div class="v">' + f$(r.base.afterTaxIncome) + '</div><div class="s">using ' + (r.base.incomeBaseUsed === 'after_tax' ? 'after-tax income' : 'take-home') + '</div></div></div>';
       h += '<div class="subhead">50/30/20 &amp; variants</div><table class="res-table"><tr><th>Framework</th><th>Needs</th><th>Wants</th><th>Savings</th></tr>';
       [['50/30/20', 'fiftyThirtyTwenty'], ['60/20/20', 'sixtyTwentyTwenty'], ['70/20/10', 'seventyTwentyTen'], ['80/20', 'eightyTwenty']].forEach(([l, k]) => {
@@ -8217,6 +8615,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (r.hcolWarning) h += '<div class="warn-box">Tight-budget / HCOL signal is on.</div>';
       h += notes(r.notes);
       $('bg_out').innerHTML = h;
+      // Publish for the screen strip, same convention as __budgetSummary. #bgb_targets_card is a
+      // LID and the income-base lens now lives behind it, so it has to carry a number a reader can
+      // decide on without opening -- docs/ux-disclosure-analysis.md §6 step 1. Its tabIndexModel
+      // row read `value: null` until now.
+      window.__budgetFrameworks = r;
+      // The match readout is a function of the same tax result, so it refreshes on the same beat.
+      // Its own listeners now cover only the two typed contract terms.
+      try { renderEmployerMatch(); } catch (e2) {}
+      try { renderTabIndex(); } catch (e2) {}
     } catch (e) { fail('bg_out', e); }
   }
 
@@ -9338,7 +9745,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---- Wire buttons ----
   const wire = (id, fn) => { const e = $(id); if (e) e.onclick = fn; };
-  wire('bg_go', calcBudget); wire('iv_go', calcInvest); wire('au_go', calcAuto);
+  wire('iv_go', calcInvest); wire('au_go', calcAuto);
 
   // ---- Invest tab: investment-accounts registry (TODO-222) ----
   // Reuses the SERVER account table (+ balance snapshots) — one registry, inside backups,
@@ -9356,7 +9763,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---- "Pull from Tax + Budget" seed for the next-dollar planner ----
   // Fills what has an honest source and leaves the rest — never locks a field, just fills it;
-  // every seeded value stays editable afterward, same as pj_seed/bg_seed elsewhere. Rooms,
+  // every seeded value stays editable afterward, same as pj_seed elsewhere. Rooms,
   // balances, and eligibility checkboxes have their own wiring (Roth-MAGI auto-flag, account
   // registry, etc.) and are deliberately left untouched here.
   function ivSeedFromSources() {
@@ -10019,9 +10426,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   liveBind('#tab-invest input, #tab-invest select', calcInvest);
   { const sel = $('iv_strategy'); if (sel) sel.addEventListener('change', ivStrategyToggle); }   // instant show/hide, ahead of the debounced recalc
   liveBind('#tab-decisions input, #tab-decisions select', calcAuto);
-  liveBind('#tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"]', calcBudget);
+  // The selector is tab-scoped, so the three controls that moved to Setup fell out of it and
+  // silently stopped triggering a recalculation. #bg_base stays on Budget, inside the targets lid.
+  liveBind('#tab-budget input[id^="bg_"], #tab-budget select[id^="bg_"], #tab-setup input[id^="bg_"]', calcBudget);
   // Pure seed-value computation for the "Gross income" field (TODO-247 final round, J11
-  // mutant close): factored out of the bg_seed click handler so tests/test_client_math.js
+  // mutant close): originally factored out of the bg_seed click handler -- that button is gone
+  // and this is now read by bgResolveBasis(), but the reason it is a named function is unchanged:
+  // tests/test_client_math.js
   // can bind directly to the PRODUCTION line rather than re-asserting householdCashSalary's
   // own contract a second time (already covered above) -- reverting this function's body
   // back to `Math.round(t.cash.salary || 0)` (the pre-TODO-247, primary-only Budget seed)
@@ -10029,17 +10440,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function bgGrossSeedValue(t) {
     return Math.round(householdCashSalary(t) || 0);
   }
-  wire('bg_seed', () => {
-    const t = window.__taxResult;
-    if (t && t.cash) {
-      $('bg_net').value = Math.round(t.cash.takeHome);
-      $('bg_t401').value = Math.round(t.cash.trad401k || 0);
-      $('bg_hsa').value = Math.round(t.cash.hsa || 0);
-      $('bg_post').value = Math.round((t.cash.roth401k || 0) + (t.cash.eeStock || 0) + (t.cash.rothIra || 0) + (t.cash.afterTax401k || 0));
-      $('bg_gross').value = bgGrossSeedValue(t);
-      formatUSDFields();
-    } else { alert('Open the Tax tab and let it calculate first.'); }
-  });
+  // #bg_seed is gone. A button that copies A into B has no reason to exist once B IS A -- its
+  // body became bgResolveBasis(). #bg_go ("Calculate budget") is gone for the same class of
+  // reason: liveBind already re-ran calcBudget on every change, and the trigger is now the tax
+  // recalculation itself. A .calc-btn for something already calculated is the dead-control class
+  // BUG-0023/BUG-0024 recorded twice.
 
   // ===== Dynamic budget builder (buckets, line items, per-item sales tax) =====
   const BGB_KEY = 'budgetBuilder_v1';
@@ -10474,6 +10879,68 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Factored out of the one-time boot init so What-If Mode's resume/discard transitions can
   // re-run the exact same normalization after swapping `bgb` for a different (session vs live)
   // blob, without duplicating this logic.
+  // Round-up settings. `scope` decides WHAT gets rounded; `unit` is the step; `bucket` is which
+  // bucket absorbs the difference in 'total' mode.
+  //
+  // Why 'total' mode still needs a bucket: the framework fold walks the CATEGORY list and adds
+  // each category's raw total, so any money carrying a kind that is not a real category is
+  // silently dropped from both the framework and standalone rows -- and the "Spent + invested /
+  // Unallocated" reconciliation would stop summing to 100% with nothing saying so. Attributing
+  // the difference to a real bucket keeps every downstream number coherent by construction,
+  // and the alternative (inventing a "Round up" pseudo-category) breaks it invisibly.
+  const BGB_ROUNDUP_UNITS = [1, 10, 100, 1000];
+  // Buckets are user-reorderable and user-deletable, so their POSITION is not an identity.
+  // Storing roundUp.bucket as an index meant deleting bucket 0 silently moved the round-up into
+  // whatever slid into the stored slot -- measured: $64.44 left an `investment` bucket for a
+  // `travel` one, changing the framework split, while the picker still read the old name. The
+  // range clamp could not see it because the stale index was still in range.
+  //
+  // Ids are minted lazily so existing saved budgets migrate on first read without a version bump.
+  let bgbBucketSeq = 0;
+  function bgbEnsureBucketIds() {
+    (bgb.buckets || []).forEach(b => {
+      if (!b.id) { bgbBucketSeq += 1; b.id = 'bk' + Date.now().toString(36) + bgbBucketSeq.toString(36); }
+    });
+  }
+  function bgbBucketIndexById(id) {
+    return (bgb.buckets || []).findIndex(b => b.id === id);
+  }
+  function bgbNormalizeRoundUp() {
+    bgbEnsureBucketIds();
+    const r = (bgb.roundUp && typeof bgb.roundUp === 'object') ? bgb.roundUp : {};
+    const scope = (r.scope === 'bucket' || r.scope === 'total') ? r.scope : 'off';
+    const unit = BGB_ROUNDUP_UNITS.indexOf(+r.unit) !== -1 ? +r.unit : 10;
+    const bs = bgb.buckets || [];
+    // One-time migration off the old index key: a saved budget that predates ids still carries
+    // roundUp.bucket, and resolving it once here is the only moment the index is still correct.
+    let idx = r.bucketId ? bgbBucketIndexById(r.bucketId) : -1;
+    if (idx < 0 && r.bucketId == null && Number.isInteger(+r.bucket) && +r.bucket >= 0 && +r.bucket < bs.length) idx = +r.bucket;
+    // A DELETED bucket falls back to the default rather than to a neighbour: losing the setting
+    // is recoverable and visible, silently rounding into a bucket of another kind is neither.
+    if (idx < 0) idx = bgbDefaultRoundUpBucket();
+    bgb.roundUp = { scope: scope, unit: unit, bucket: idx, bucketId: (bs[idx] || {}).bid || null };
+  }
+  // An unallocated buffer is savings in everything but name, so an investment bucket is the
+  // honest default home for it. Falls back to the first bucket when there is none.
+  function bgbDefaultRoundUpBucket() {
+    const bs = bgb.buckets || [];
+    const inv = bs.findIndex(b => b.kind === 'investment');
+    return inv >= 0 ? inv : (bs.length ? 0 : -1);
+  }
+  // ceil to the next multiple, with a tolerance so a total already ON the boundary does not gain
+  // a whole extra unit from a floating-point tail (487.99999999 must not round to 490).
+  //
+  // The delta is returned UNROUNDED, and that is the point rather than an oversight: rounding it
+  // to cents first leaves `total + delta` a fraction short of the boundary, so a bucket asked to
+  // round to $3,080 would actually hold $3,079.9958 and merely DISPLAY as $3,080. The whole
+  // feature is that the number lands exactly on the step. The line itself still displays through
+  // f2() like every other figure on the screen.
+  function bgbRoundUpDelta(total, unit) {
+    if (!(unit > 0) || !(total > 0)) return 0;
+    const stepped = Math.ceil((total / unit) - 1e-9) * unit;
+    return Math.max(0, stepped - total);
+  }
+
   function bgbNormalize() {
     if (!bgb || !Array.isArray(bgb.buckets)) bgb = bgbDefault();
     // Each bucket has direct (ungrouped) `items` + optional named `groups`.
@@ -10518,6 +10985,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // right inside this same `bgb` blob (already WI-scoped + backed up) rather than a new
     // storage key. Defensive against a corrupt/legacy shape (array, string, etc.).
     if (!bgb.customStrategies || typeof bgb.customStrategies !== 'object' || Array.isArray(bgb.customStrategies)) bgb.customStrategies = {};
+    // Round-up: deliberately OFF by default. Rounding a plan up is a choice to over-allocate on
+    // purpose, and doing it to someone silently would make every downstream figure -- allocated,
+    // remaining, the framework split, FIRE's planned spend -- differ from what they typed.
+    bgbNormalizeRoundUp();
     if (!bgb.catAliases) bgb.catAliases = {};
     if (typeof bgb.aliasText !== 'string') bgb.aliasText = Object.keys(bgb.catAliases).map(a => a + ' = ' + bgb.catAliases[a]).join(', ');
   }
@@ -11642,6 +12113,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     bgb.splitPresets.forEach((p, pi) => { const sel = (+p.pct === sp); if (sel) matched = true; opts += '<option value="p' + pi + '"' + (sel ? ' selected' : '') + '>' + esc(p.name) + ' (' + p.pct + '%)</option>'; });
     if (!matched) opts = '<option value="cur" selected>Custom (' + sp + '%)</option>' + opts;
     opts += '<option value="custom">Custom %…</option>';
+    // The pointer that makes the move to Setup findable, placed where the user is standing at the
+    // moment they want it rather than as a link on a card they may not be looking at. The change
+    // handler restores the previous selection first, so choosing it can never mutate the line.
+    opts += '<option value="manage">Manage presets…</option>';
     return '<select class="bgb-ipreset" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '">' + opts + '</select>';
   }
 
@@ -11688,7 +12163,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<button type="button" class="bgb-x bgb-collapse-btn" data-collapse="' + bi + '" aria-expanded="' + (!collapsed) + '" aria-controls="bgb_body_' + bi + '" title="' + (collapsed ? 'expand bucket' : 'collapse bucket') + '" aria-label="' + (collapsed ? 'expand' : 'collapse') + ' ' + esc(b.name) + '">' + (collapsed ? '&#9656;' : '&#9662;') + '</button>'
         + '<input type="text" class="bgb-bname" data-b="' + bi + '" value="' + esc(b.name) + '">'
         + '<select class="bgb-bkind" data-b="' + bi + '" title="bucket type — need / want / investment">' + Object.keys(KINDS).map(k => '<option value="' + k + '"' + ((b.kind || 'other') === k ? ' selected' : '') + '>' + esc(KINDS[k].label) + '</option>').join('') + '</select>'
-        + '<span class="bgb-bsum" data-b="' + bi + '"></span>'
+        + '<span class="bgb-sumwrap"><span class="bgb-runote mini" data-b="' + bi + '"></span>'
+        + '<span class="bgb-bsum" data-b="' + bi + '"></span></span>'
         + '<button class="bgb-x" data-delb="' + bi + '" title="remove bucket" aria-label="Remove bucket: ' + esc(b.name) + '">✕</button></div>';
       // Collapsed: header row (grip/chevron/name/kind/total/delete) only — items, groups and the
       // add-item/add-group affordances are omitted entirely (not just visually hidden) until
@@ -11715,6 +12191,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
         });
         h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button>';
+        // The round-up made visible, and emitted LAST in the bucket body on purpose. Its delta is
+        // computed from the direct items, the groups AND the shared lines together, so rendered
+        // above the groups it read as though it rounded only the items above it -- measured as
+        // "Round up $21.70" with a $2,435.00 group drawn underneath. A derived figure has to come
+        // after everything it derives from; here that is the closing line of the bucket.
+        //
+        // Hidden here and unhidden by bgbTotals when the difference is non-zero, because the
+        // renderer runs BEFORE the totals and cannot know it yet -- the same order .bgb-bsum and
+        // .bgb-gsum already live with. It carries no controls: an editable round-up is not one.
+        h += '<div class="bgb-roundup mini muted" data-b="' + bi + '" hidden>'
+          + '<span>Round up</span>'
+          + '<span class="bgb-rusum" data-b="' + bi + '"></span></div>';
         h += '</div>';
       }
       h += '</div>';
@@ -11724,6 +12212,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     Object.keys(hbAsg.orphanByKind).forEach(k => { h += hbOrphanBucketHtml(k, hbAsg.orphanByKind[k]); });
     $('bgBuilder').innerHTML = h;
     formatUSDFields();   // comma-format the freshly-rendered item amount inputs
+    // The round-up picker lists buckets, so it has to restack with them for the same reason the
+    // share picker does. Its only two call sites were boot and its own change handler, so a
+    // bucket delete/rename/add/reorder left it offering a name that no longer existed.
+    try { bgbRenderRoundUp(); } catch (e) {}
     bgbTotals();
     // The share picker lists the SAME local lines this render just drew, so it restacks with
     // them -- otherwise renaming or deleting a line leaves the picker offering a ghost. Only
@@ -11735,6 +12227,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     const base = +bgb.baseMonthly || 0;
     let allocated = 0, household = 0;
     const cats = [];
+    // A bucket subtotal that has silently absorbed a round-up looks like a number the user
+    // typed. Saying so in the header is the difference between "$340.00" and "$340.00, $4.44 of
+    // which the app added" -- and the header is the figure people read, not the row below it.
+    const bucketSumHtml = total => f2(total) + ' <span class="mini">/ ' + f2(total * 12) + ' yr</span>';
+    // Written to its own cell rather than appended to the amounts: a note that shares a box with
+    // the figures pushes them out of their column the moment it appears, which is the whole
+    // reason the headers stopped lining up.
+    const setBucketSum = (bi, total, added) => {
+      const sum = root.querySelector('.bgb-bsum[data-b="' + bi + '"]');
+      if (sum) sum.innerHTML = bucketSumHtml(total);
+      const note = root.querySelector('.bgb-runote[data-b="' + bi + '"]');
+      if (note) note.textContent = added > 0.005 ? 'incl. ' + f2(added) + ' rounded up' : '';
+    };
+    bgbNormalizeRoundUp();                 // a bucket may have been deleted since this was set
+    const roundUpByBucket = {};            // bucket index -> the difference it absorbed
     // Per-line-item plan, grouped by bucket kind, so the Actuals tab can check spend per category and
     // seed recurring bills. Items are matched to actuals by (kind + name); same-name lines merge.
     const linesByKind = {}; getCategories().forEach(c => { linesByKind[c.key] = {}; });
@@ -11768,10 +12275,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // spends this bucket's money, and counting only the direct slot would under-report the
       // bucket the moment anything is grouped.
       hbLinesInBucket(hbAsg, b, bi).forEach(line => { const it = hbAsItem(line); btotal += myShare(it); addLine(b.kind, it); });
+      // Round-up, bucket scope. Applied AFTER everything real in the bucket -- items, groups and
+      // shared lines -- so it rounds the number the user actually sees on the bucket, not a
+      // partial sum. Deliberately NOT passed to addLine(): plan LINES are what the Actuals tab
+      // matches transactions against, and there is no transaction called "Round up", so listing
+      // it there would show a bill that can never be paid. It does reach `cats`, because that is
+      // what the framework split is computed from and this money IS allocated to this bucket.
+      if (bgb.roundUp.scope === 'bucket') {
+        const d = bgbRoundUpDelta(btotal, bgb.roundUp.unit);
+        roundUpByBucket[bi] = d;
+        btotal += d;
+      }
       allocated += btotal;
       cats.push({ name: b.name, kind: KINDS[b.kind] ? b.kind : 'other', total: btotal });
-      const bsum = root.querySelector('.bgb-bsum[data-b="' + bi + '"]');
-      if (bsum) bsum.innerHTML = f2(btotal) + ' <span class="mini">/ ' + f2(btotal * 12) + ' yr</span>';
+      setBucketSum(bi, btotal, roundUpByBucket[bi] || 0);
     });
     // Orphan shared bucket keys (no local bucket uses that category, §5.1/DEC-010) fold in the
     // SAME way -- addLine + allocated + cats -- so the framework %, verdict and PVA baseline
@@ -11784,8 +12301,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       const bsum = root.querySelector('.hb-orphan-bsum[data-hbkind="' + k + '"]');
       if (bsum) bsum.innerHTML = f2(btotal) + ' <span class="mini">/ ' + f2(btotal * 12) + ' yr</span>';
     });
+    // Round-up, total scope. The difference is attributed to a real bucket -- see
+    // bgbNormalizeRoundUp's note on why an invented category would break the fold silently. Both
+    // `allocated` and that bucket's own entry in `cats` move together, so the subtotal, the
+    // framework split and the 100% reconciliation all stay in agreement.
+    if (bgb.roundUp.scope === 'total') {
+      const d = bgbRoundUpDelta(allocated, bgb.roundUp.unit);
+      const bi = bgb.roundUp.bucket;
+      if (d > 0 && bi >= 0 && cats[bi]) {
+        roundUpByBucket[bi] = d;
+        allocated += d;
+        cats[bi].total += d;
+        setBucketSum(bi, cats[bi].total, d);
+      }
+    }
+    // Paint the per-bucket round-up rows the renderer left empty (same pattern as .bgb-bsum:
+    // bgbRender runs first and cannot know the figure, bgbTotals fills it).
+    root.querySelectorAll('.bgb-rusum').forEach(el => {
+      const d = roundUpByBucket[+el.dataset.b] || 0;
+      el.textContent = f2(d);
+      const row = el.closest('.bgb-roundup');
+      if (row) row.hidden = !(d > 0.005);
+    });
+
     const rem = base - allocated, partner = household - allocated;
+    // In total scope the ALLOCATED figure is the one that was rounded, so this line is its
+    // header and has to carry the same disclosure the bucket headers do.
+    const totalAdded = bgb.roundUp.scope === 'total'
+      ? Object.values(roundUpByBucket).reduce((a, b) => a + b, 0) : 0;
     let s = '<b>Allocated ' + f2(allocated) + '</b> of ' + f2(base)
+      + (totalAdded > 0.005 ? ' <span class="mini muted">(incl. ' + f2(totalAdded) + ' rounded up)</span>' : '')
       + ' &middot; <span class="' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + (rem >= 0 ? 'Remaining ' : 'Over by ') + f2(Math.abs(rem)) + '</span>';
     if (partner > 0.005) s += '<br><span class="mini">Household ' + f2(household) + ' · your share ' + f2(allocated) + ' · partner ' + f2(partner) + '</span>';
     { const pf = payFreq(); s += '<br><span class="mini">Per paycheck (' + pf + '×/yr): <b>' + f2(allocated * 12 / pf) + '</b> allocated of ' + f2(base * 12 / pf) + ' · ' + (rem >= 0 ? 'left ' : 'over ') + f2(Math.abs(rem) * 12 / pf) + '</span>'; }
@@ -11846,9 +12391,71 @@ document.addEventListener('DOMContentLoaded', async () => {
       // thing and judge nothing -- and a dollar delta is more actionable than a percentage point.
       const _invAmt = fold.framework.investment, _invTgtAmt = incomeBase * _invTgt;
       const _invDelta = _invAmt - _invTgtAmt;
-      const _invLine = 'Investing ' + f2(_invAmt) + '/mo — ' + f2(Math.abs(_invDelta))
+      // The verb moved into the tile's label so it is not said twice. The rest of this line is
+      // unchanged and deliberately so -- see the note above on grading the month, not the person.
+      const _invLine = f2(_invAmt) + '/mo — ' + f2(Math.abs(_invDelta))
         + (_invDelta >= 0 ? ' above' : ' below') + ' the ' + (_invTgt * 100).toFixed(0) + '% target';
-      let cs = '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Verdict</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + esc(_invLine) + '</div><div class="s">' + (_invPct * 100).toFixed(0) + '% of after-tax income · vs ' + esc(bgb.strategy) + '</div></div></div>';
+      // "Where a gross dollar goes" — the establishing shot, above the judgement.
+      //
+      // This is what the owner asked for when they said the Basis screen was noise and "we better
+      // make graphs to consume the tax". It answers the same question that screen's nine typed
+      // fields tried to: what happens to your pay before the budget starts. Every input already
+      // exists; nothing here is a new computation.
+      //
+      // TAX IS NOT COLOURED --bad. That token means "over plan, destructive, error" in this app,
+      // and calling tax an error is an editorial claim the app has no business making. It takes an
+      // unused categorical slot instead.
+      let cs = '';
+      {
+        const tr = window.__taxResult;
+        const grossMo = tr ? (householdCashSalary(tr) || 0) / 12 : 0;
+        if (grossMo > 0) {
+          const taxMo = (tr.taxes && tr.taxes.totalTax || 0) / 12;
+          const invMo = taxInvest + (kindT.investment || 0);
+          const needMo = kindT.need || 0, wantMo = kindT.want || 0;
+          // Everything the four named segments do not claim. Clamped at 0: a NEGATIVE remainder is
+          // over-allocation, which gets its own cap below rather than a nonsensical segment.
+          const restMo = Math.max(0, grossMo - taxMo - invMo - needMo - wantMo);
+          const over = Math.max(0, taxMo + invMo + needMo + wantMo - grossMo);
+          const segs = [
+            // --cat-eestock (#c78cff) is BORROWED for its hue, not its meaning: no ESPP segment
+            // exists on this bar, so there is nothing to confuse it with. It was --cat-fica first,
+            // which is #f0b957 -- byte-identical to --warn, which is the Wants segment two slots
+            // along. Two indistinguishable bands and two indistinguishable legend dots.
+            // Measured separation from the other three: Needs #7aa7ff, Investments #5fd38b,
+            // Wants #f0b957. Violet is the only free slot far from all of them that is not in the
+            // good/warn/bad family -- and colouring tax with --bad would be an editorial claim the
+            // app has no business making.
+            { k: 'Tax', v: taxMo, c: 'var(--cat-eestock)' },
+            { k: 'Investments', v: invMo, c: categoryColor('investment') },
+            { k: 'Needs', v: needMo, c: categoryColor('need') },
+            { k: 'Wants', v: wantMo, c: categoryColor('want') },
+          ].filter(x => x.v > 0);
+          const denom = grossMo + over;   // an over-plan bar still totals 100% of what it draws
+          const pct = v => (v / denom * 100);
+          cs += '<div class="gdb"><div class="subhead">Where a gross dollar goes '
+            + '<span class="mini" style="font-weight:var(--fw-normal)">(' + f2(grossMo) + '/mo gross)</span></div>'
+            + '<div class="pcat-bar">'
+            + segs.map(x => '<span class="gdb-seg" style="width:' + pct(x.v).toFixed(2) + '%;background:' + x.c + '" title="' + esc(x.k) + ' ' + esc(f2(x.v)) + '/mo"></span>').join('')
+            + (restMo > 0 ? '<span class="gdb-seg" style="width:' + pct(restMo).toFixed(2) + '%"></span>' : '')
+            // NOT another segment: the four above already fill the denominator when over > 0, so a
+            // fifth took the bar to 174%. This marks the point where gross pay is used up.
+            + (over > 0 ? '<span class="gdb-mark" style="left:' + pct(grossMo).toFixed(2) + '%" title="gross pay ends here"></span>' : '')
+            + '</div><div class="gdb-legend mini">'
+            + segs.map(x => '<span class="gdb-key"><span class="gdb-dot" style="background:' + x.c + '"></span>'
+                + esc(x.k) + ' ' + pct(x.v).toFixed(0) + '%</span>').join('')
+            + (restMo > 0 ? '<span class="gdb-key"><span class="gdb-dot" style="background:var(--chip)"></span>Unallocated ' + pct(restMo).toFixed(0) + '%</span>' : '')
+            + (over > 0 ? '<span class="gdb-key" style="color:var(--bad)"><span class="gdb-dot" style="background:var(--bad)"></span>Over by ' + f2(over) + '/mo</span>' : '')
+            + '</div>'
+            // The sentence that answers the owner's other observation: it names the JOIN between
+            // the two tabs, which nothing on this screen said out loud before.
+            + '<div class="mini muted" style="margin-top:6px">Your budget starts at the take-home line \u2014 everything left of it is already spent before you plan.</div>'
+            + '</div>';
+        } else {
+          cs += '<div class="gdb mini muted">Calculate your taxes to see where your gross pay goes. <a href="#" data-go="tax">Open the Tax tab \u2192</a></div>';
+        }
+      }
+      cs += '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Investing</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + esc(_invLine) + '</div><div class="s">' + (_invPct * 100).toFixed(0) + '% of ' + f2(incomeBase) + '/mo · plan + payroll · vs ' + esc(bgb.strategy) + '</div></div></div>';
       // 1) By type vs the selected strategy — per-paycheck + monthly + yearly + target + Δ. The
       // three rows are always the framework kinds (folded per countsAs); anything standalone
       // (countsAs=null) gets its own visually-distinct group below with no target — see
@@ -11962,6 +12569,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       else if (t.classList.contains('bgb-bkind')) { bgb.buckets[d.b].kind = t.value; saveBgb(); bgbRender(); }
       else if (t.classList.contains('bgb-ipreset')) {
         const it = itemsArr(d.b, d.g)[d.i];
+        if (t.value === 'manage') {
+          // Restore the row's own value BEFORE navigating: an <option> that is really a link must
+          // not leave the line reading something the user did not choose.
+          bgbRender();
+          showTab('setup'); acShowSetupPane('strategies');
+          return;
+        }
         if (t.value === 'custom') { const v = prompt('Your share % for "' + it.name + '" (0–100):', it.split == null ? 100 : it.split); if (v != null && v !== '') it.split = Math.max(0, Math.min(100, +v || 0)); }
         else if (t.value.charAt(0) === 'p') { it.split = +bgb.splitPresets[+t.value.slice(1)].pct; }
         saveBgb(); bgbRender();
@@ -12083,9 +12697,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   const bgBaseEl = $('bgb_base'), bgTaxEl = $('bgb_tax');
-  let bgbBaseTouched = false;
+  // Replaced `let bgbBaseTouched = false` -- an in-memory flag set by one keystroke, displayed
+  // nowhere, persisted nowhere, and cleared only by a console function. The lock is the same
+  // decision made visible and reversible.
+  let bgbBaseField = null;
+  function bgbBaseIsLocked() { const cb = $('bgb_base_locked'); return !!(cb && cb.checked); }
+  // What the base tracks when it is locked. Mirrors bgbBaseAutoFill's old choice exactly: the
+  // catch-up take-home while a catch-up sprint is on (the budget should reflect the tighter
+  // cash), otherwise the steady take-home.
+  function bgbResolveBase() {
+    const cu = window.__catchupCash;
+    if (bgbCatchupMode && cu && cu.takeHomeMo != null) return Math.round(cu.takeHomeMo);
+    const c = (window.__taxResult && window.__taxResult.cash) || {};
+    return c.takeHome ? Math.round(c.takeHome / 12) : null;
+  }
   let bgbCatchupMode = !!bgb.catchupMode;   // budget against "take-home during catch-up" instead of steady take-home
-  if (bgBaseEl) { bgBaseEl.value = fmtUSDval(bgb.baseMonthly); bgBaseEl.addEventListener('input', () => { bgb.baseMonthly = rn(bgBaseEl.value); bgbBaseTouched = true; saveBgb(); bgbTotals(); }); }
+  if (bgBaseEl) {
+    bgBaseEl.value = fmtUSDval(bgb.baseMonthly);
+    // Typing no longer detaches anything: the field is readOnly while locked, so an edit can
+    // only happen after the user has unlocked it deliberately.
+    bgBaseEl.addEventListener('input', () => { bgb.baseMonthly = rn(bgBaseEl.value); saveBgb(); bgbTotals(); });
+  }
+  {
+    // Restore the lock BEFORE binding, so the first sync respects a saved override instead of
+    // overwriting it. `bgb_base_locked` does not match TABS_SEL's `#tab-budget input[id^="bg_"]`
+    // ("bgb_" is not "bg_"), so it rides in the bgb blob with baseMonthly and catchupMode -- the
+    // same store, one round trip, and it survives the server-backed profile sync for free.
+    const ck = $('bgb_base_locked');
+    if (ck) ck.checked = bgb.baseLocked !== false;
+    bgbBaseField = bindSourcedField({
+      inputId: 'bgb_base', lockId: 'bgb_base_lock', resolve: bgbResolveBase,
+      noteEl: 'bgb_base_src',
+      noteText: () => (bgbCatchupMode ? 'from catch-up take-home' : 'from Tax take-home'),
+      noteTextUnlocked: 'Your number \u2014 not tracking Tax',
+      noSourceText: 'Calculate on the Tax tab to source this',
+      hintEl: 'bgb_base_hint', label: 'Take-home',
+      // The Tax tab has not calculated yet for the first moments of every load. A field that
+      // unlocked itself over that gap would detach the budget from income on every reload.
+      holdLockWithoutSource: true,
+      onToggle: () => {
+        bgb.baseLocked = bgbBaseIsLocked();
+        // Re-locking discards the manual value and re-syncs, so the stored base has to follow or
+        // the plan is computed from a number the field no longer shows.
+        if (bgb.baseLocked) { const v = bgbResolveBase(); if (v != null) bgb.baseMonthly = v; }
+        else { bgb.baseMonthly = rn((bgBaseEl || {}).value); }
+        saveBgb(); bgbTotals();
+      },
+    });
+  }
   // Show/hide the catch-up toggle based on whether a catch-up plan is live (published by the Max-out
   // planner) and keep its label fresh. If the plan disappears, silently fall back to steady take-home.
   function bgbCatchupSync() {
@@ -12105,21 +12764,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   // rest-of-year take-home during the sprint (so the budget reflects the tighter cash).
   function bgbBaseAutoFill() {
     bgbCatchupSync();
-    if (bgbBaseTouched) return;
-    const cu = window.__catchupCash;
-    let mo = null;
-    if (bgbCatchupMode && cu && cu.takeHomeMo != null) mo = Math.round(cu.takeHomeMo);
-    else { const c = (window.__taxResult && window.__taxResult.cash) || {}; if (c.takeHome) mo = Math.round(c.takeHome / 12); }
-    if (mo != null) { bgb.baseMonthly = mo; if (bgBaseEl) bgBaseEl.value = fmtUSDval(mo); saveBgb(); bgbTotals(); }
+    // The lock decides, and sync() renders the state either way -- so an UNLOCKED field still
+    // gets its note and its drift hint repainted here, which the old early return skipped.
+    if (bgbBaseField) bgbBaseField.sync();
+    if (!bgbBaseIsLocked()) return;
+    const mo = bgbResolveBase();
+    // Saves UNCONDITIONALLY, including when the value is unchanged. That looks wasteful and a
+    // `mo !== bgb.baseMonthly` guard was tried -- it broke BUG-0012 and BUG-0040, whose whole
+    // subject is the profile-sync provenance of exactly this paint-autosave ("a paint autosave on
+    // a fresh device stays quiet"). Reducing the app's write volume is a real question, but it is
+    // not this change's question, and smuggling it into a UI commit is how a sync bug gets
+    // reintroduced by something that reads like a tidy-up.
+    if (mo != null) { bgb.baseMonthly = mo; saveBgb(); bgbTotals(); }
   }
   window.bgbBaseAutoFill = bgbBaseAutoFill;   // called from render() so the budget base tracks every take-home change
-  window.bgbBaseUnlock = () => { bgbBaseTouched = false; };   // re-arm auto-tracking (used by max-out "Apply")
+  // Kept as a window shim because its two callers (max-out Apply, What-If restore) are declared
+  // thousands of lines earlier. RE-LOCK is the honest name: it re-arms tracking by putting the
+  // field back on its source, and now says so on screen instead of flipping a hidden boolean.
+  window.bgbBaseUnlock = () => {
+    if (!bgbBaseField) return;
+    bgbBaseField.setLocked(true);
+    bgb.baseLocked = true;
+    const v = bgbResolveBase(); if (v != null) bgb.baseMonthly = v;
+    saveBgb(); bgbBaseField.sync(); bgbTotals();
+  };
   const bgCuToggle = $('bgb_cu_toggle');
   if (bgCuToggle) bgCuToggle.addEventListener('change', () => {
     bgbCatchupMode = bgCuToggle.checked; bgb.catchupMode = bgbCatchupMode;
-    bgbBaseTouched = false;            // re-arm so the chosen source applies to the base now
+    // Ticking this is an explicit statement about WHICH source the base should use, so it
+    // re-locks. That was already the behaviour; it is now visible rather than silent, and the
+    // note under the field changes to say which take-home it switched to.
+    if (bgbBaseField) { bgbBaseField.setLocked(true); bgb.baseLocked = true; }
     saveBgb(); bgbBaseAutoFill();
   });
+  _registerSrcHint('bgb_base_hint', () =>
+    bgbBaseIsLocked() ? '' : 'Modelling a different income rather than recording one? Use What-If — it keeps your real plan intact.');
   bgbCatchupSync();   // initial visibility (a plan may already be live this session)
   if (bgTaxEl) { bgTaxEl.value = bgb.salesTaxPct; bgTaxEl.addEventListener('input', () => { bgb.salesTaxPct = +bgTaxEl.value || 0; saveBgb(); bgbTotals(); }); }
   {
@@ -12222,7 +12901,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (cs.baseMonthly != null) {
       bgb.baseMonthly = cs.baseMonthly;
-      bgbBaseTouched = true;   // keep the restored base even if Tax inputs still hold the scenario comp
+      // A restored scenario base is the user's own number, so the field must show it as one --
+      // otherwise the next tax recalculation overwrites the thing that was just restored.
+      if (bgbBaseField) { bgbBaseField.setLocked(false); bgb.baseLocked = false; }
       const bel = $('bgb_base'); if (bel) bel.value = fmtUSDval(cs.baseMonthly);
     }
     saveBgb(); if (typeof bgbRender === 'function') bgbRender(); bgbTotals();
@@ -12447,6 +13128,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Write-block (M4): every real Actuals write path calls this first. Logging real money against
   // a hypothetical scenario would corrupt the DEC-007 plan-vs-actual history with fantasy data.
+  // What catch-up could not post on the last refresh. Held on the module rather than rendered
+  // inline because the write happens at the top of acRefresh and the surface that reports it is
+  // drawn further down.
+  let acSchProblems = [];
   function acWriteGuard() {
     if (!WhatIf.active) return false;
     showToast('Exit What-If Mode to log actuals — that belongs to your real numbers, not the sandbox.');
@@ -12554,6 +13239,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { const t = load(TABS_KEY); if (t) restoreTabs(JSON.parse(t)); } catch (e) {}
     try { if (typeof bgbRenderStrategySelect === 'function') bgbRenderStrategySelect(); } catch (e) {}
     try { if (typeof bgbRenderStrategyManage === 'function') bgbRenderStrategyManage(); } catch (e) {}
+    // Same reason as its two siblings above: bgbTotals() below recomputes with the RESTORED
+    // bgb.roundUp, but the three <select>s keep whatever the mode swapped away from -- so the
+    // plan came back rounded while the control read "Off". BUG-0045's class exactly.
+    try { if (typeof bgbRenderRoundUp === 'function') bgbRenderRoundUp(); } catch (e) {}
     if (typeof bgbRender === 'function') { try { bgbRender(); } catch (e) {} }
     try { bgbTotals(); } catch (e) {}
     try { restoreMaxout(); } catch (e) {}
@@ -12628,7 +13317,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Income base MUST be derived from the same snapshot pair as take-home above (never from
     // window.__budgetPlan / frozen.budgetPlan) — that cache is scheduled on its own timer and its
     // contribution fold (taxInvest, mirrored below — see the live version at ~6971, the two must
-    // stay in lockstep) can sit behind bgbBaseTouched (~7163) and go stale. A live budgetPlan
+    // stay in lockstep) can sit behind the base lock (bgbBaseIsLocked) and go stale. A live budgetPlan
     // compared against a frozen one then diffs a fresh rollup against a stale one and inflates the
     // delta to the FULL contribution amount instead of the true income-base change. Diagnosed
     // 2026-07-26. Same-snapshot-per-side is the rule: cT vs fT, nothing else, both lines. This is
@@ -13603,6 +14292,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     // becomes valid again later (e.g. a backup restore reintroduces that custom strategy).
     sel.value = (presetNames.includes(bgb.strategy) || customNames.includes(bgb.strategy)) ? bgb.strategy : '50/30/20';
   }
+  // Reflects the stored setting into the three controls, and shows only what applies: the unit
+  // is meaningless when rounding is off, and the absorbing bucket only exists in 'total' mode.
+  function bgbRenderRoundUp() {
+    bgbNormalizeRoundUp();
+    const sc = $('bgb_ru_scope'), un = $('bgb_ru_unit'), bk = $('bgb_ru_bucket');
+    if (!sc || !un || !bk) return;
+    sc.value = bgb.roundUp.scope;
+    // Built from BGB_ROUNDUP_UNITS rather than a hardcoded <option> list, because the comment on
+    // the test said they were the same source and they were not: adding a step to the array
+    // alone left the plan rounding by it while the <select> fell blank, with nothing to pick.
+    un.innerHTML = BGB_ROUNDUP_UNITS.map(u => '<option value="' + u + '">$' + fmtUSDval(u) + '</option>').join('');
+    un.value = String(bgb.roundUp.unit);
+    // Option values are ids, not positions, so a reorder cannot re-point the setting and a
+    // delete cannot leave a name in the list that no longer exists.
+    bk.innerHTML = (bgb.buckets || []).map((b, i) =>
+      '<option value="' + esc(b.bid) + '">' + esc(b.name || ('Bucket ' + (i + 1))) + '</option>').join('');
+    if (bgb.roundUp.bucketId) bk.value = bgb.roundUp.bucketId;
+    const on = bgb.roundUp.scope !== 'off';
+    const ur = $('bgb_ru_unit_row'), br = $('bgb_ru_bucket_row'), nt = $('bgb_ru_note');
+    // The [hidden] ATTRIBUTE, not an inline display: these cells are grid items now, and an
+    // inline `display:''` would leave the grid's own display value in place while `display:none`
+    // would have to be re-cleared to exactly the right value. This is the same move the round-up
+    // ROW made after an inline style declared `display` twice and could never hide at all.
+    if (ur) ur.hidden = !on;
+    if (br) br.hidden = bgb.roundUp.scope !== 'total';
+    if (nt) {
+      nt.style.display = on ? '' : 'none';
+      // Says what it DOES to the rest of the screen, because over-allocating on purpose changes
+      // "Remaining" and the framework split, and a reader who is surprised by that is owed the
+      // sentence rather than left to work it out.
+      // Cut to the one fact the screen does not already demonstrate. The bucket row, the header
+      // note and #bgb_summary's "(incl. …)" all show that the extra counts as allocated; that it
+      // moves the framework split is the part nothing else says. The unit is not restated either
+      // — the control directly above now reads "…to the next $10".
+      nt.textContent = bgb.roundUp.scope === 'bucket'
+        ? 'Each bucket is rounded up \u2014 the extra counts as allocated, so Remaining falls and it counts toward that bucket\u2019s type below.'
+        : 'The total is rounded up \u2014 the extra is allocated to that bucket, so the split below still adds to the total.';
+    }
+  }
+
   const stratMetaLabel = t => Math.round(t.need * 100) + '% need · ' + Math.round(t.want * 100) + '% want · ' + Math.round(t.investment * 100) + '% investment';
   function bgbRenderStrategyManage() {
     const el = $('bgb_strat_manage'); if (!el) return;
@@ -13713,11 +14442,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   bgbRenderStrategySelect();
+  bgbRenderRoundUp();
+  ['bgb_ru_scope', 'bgb_ru_unit', 'bgb_ru_bucket'].forEach(id => {
+    const el = $(id); if (!el) return;
+    el.addEventListener('change', () => {
+      bgb.roundUp = {
+        scope: ($('bgb_ru_scope') || {}).value || 'off',
+        unit: +(($('bgb_ru_unit') || {}).value) || 10,
+        bucketId: ($('bgb_ru_bucket') || {}).value || null,
+      };
+      bgbNormalizeRoundUp();
+      saveBgb();
+      bgbRenderRoundUp();
+      // A full re-render, not just a recount: the per-bucket row's label carries the unit, and
+      // the rows themselves only exist while rounding is on.
+      bgbRender();
+    });
+  });
   bgbRenderStrategyManage();
   const bgStratEl = $('bgb_strategy');
   if (bgStratEl) bgStratEl.addEventListener('change', () => { bgb.strategy = bgStratEl.value; saveBgb(); bgbTotals(); });
   wire('bgb_addbucket', () => { bgb.buckets.push({ name: 'New bucket', items: [], groups: [] }); saveBgb(); bgbRender(); });
-  wire('bgb_seed', () => { const t = window.__taxResult; if (t && t.cash) { bgbBaseTouched = false; bgbCatchupMode = false; bgb.catchupMode = false; const tog = $('bgb_cu_toggle'); if (tog) tog.checked = false; bgb.baseMonthly = Math.round(t.cash.takeHome / 12); if (bgBaseEl) bgBaseEl.value = fmtUSDval(bgb.baseMonthly); saveBgb(); bgbTotals(); } else { alert('Open the Tax tab and let it calculate first.'); } });
+  // #bgb_seed ("Use Tax take-home") is gone: the lock button performs that action, and two
+  // controls for one intent is how the old flag stayed invisible. One behaviour is deliberately
+  // NOT carried over -- the button also silently switched catch-up mode OFF, which re-pointed the
+  // base at a different source than the one the user had chosen. Re-locking now syncs to whatever
+  // source is actually selected.
 
   function bgbRenderPresets() {
     const el = $('bgb_presets'); if (!el) return;
@@ -13956,7 +14706,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ===== Employer 401(k) match visibility (free money) =====
   function matchDollars() {
-    const salary = N('bg_gross'), rate = N('bg_mrate') / 100, cap = N('bg_mpct') / 100, emp = N('bg_t401');
+    // Was reading #bg_gross and #bg_t401, both of which are gone. The match rate and cap stay
+    // user-supplied (they are terms of an employment contract the app cannot know); the salary and
+    // the contribution come from the same place everything else now does.
+    const t = window.__taxResult, c = (t && t.cash) || {};
+    const salary = t ? (bgGrossSeedValue(t) || 0) : 0, rate = N('bg_mrate') / 100,
+          cap = N('bg_mpct') / 100, emp = c.trad401k || 0;
     const empPct = salary > 0 ? emp / salary : 0;
     const full = rate * cap * salary;                       // max match if you contribute the full cap%
     const captured = rate * Math.min(empPct, cap) * salary; // what you actually get at your contribution
@@ -13974,7 +14729,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     h += '</div><div class="note-box">Free money toward retirement — it is NOT part of your spendable budget, but it counts toward your total savings and the Fidelity 50/15/5 target.</div>';
     out.innerHTML = h;
   }
-  ['bg_mrate', 'bg_mpct', 'bg_gross', 'bg_t401'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', renderEmployerMatch); });
+  // bg_gross and bg_t401 were in this list and no longer exist. The `if (el)` guard meant they
+  // failed SILENTLY rather than loudly -- and silence here is the bug: the match is a function of
+  // salary and contribution, both of which now come from the tax result, so the two listeners that
+  // mattered were the two that stopped existing. The remaining pair are the contract terms, which
+  // are still typed; the tax-driven half is refreshed by calcBudget().
+  ['bg_mrate', 'bg_mpct'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', renderEmployerMatch); });
   renderEmployerMatch();
 
   // ---------- Actuals: plan-vs-actual tracking (server-backed; data lives in /data/actuals.db) ----------
@@ -14018,6 +14778,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // TODO-250: custom, named budget strategies — STRATEGIES is the same live object
     // stratResolveTargets() falls back to, not a copy, so a test can't drift from the real presets.
     STRATEGIES, stratResolveTargets, stratInvestmentPct, stratPctValid, stratBuildTargets, stratValidateName,
+    // Budget round-up: pure, closed over nothing, so the boundary behaviour is unit-testable
+    // without a browser. BGB_ROUNDUP_UNITS is the same live array the <select> is built from,
+    // not a copy, so a test cannot certify a step the UI does not actually offer.
+    bgbRoundUpDelta, BGB_ROUNDUP_UNITS,
     // Slice B (household shared-budget overlay, docs/shared-budget-design.md §5) — pure
     // placement/fold/display logic, independent of the DOM. myShare/itemTotal are the SAME
     // functions bgbTotals() already used pre-Slice-B (§3) — exposed here specifically so a test
@@ -14069,6 +14833,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function getJSON(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
   function acNowMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
   function acToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  // Last day of a 'YYYY-MM'. Built with day 0 of the NEXT month so leap years and 30/31 need no
+  // table, and in local time to match acNowMonth()/acMonthLabel() rather than drifting a day at
+  // the boundary the way a UTC round-trip would.
+  function acMonthEndIso(m) {
+    const a = m.split('-').map(Number);
+    const d = new Date(a[0], a[1], 0);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
   function acMonthLabel(m) { const a = m.split('-').map(Number); return new Date(a[0], a[1] - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' }); }
   function acMonthShift(m, d) { let a = m.split('-').map(Number), y = a[0], mo = a[1] + d; y += Math.floor((mo - 1) / 12); mo = ((mo - 1) % 12 + 12) % 12 + 1; return y + '-' + String(mo).padStart(2, '0'); }
   function acMonthEnd(m) { const a = m.split('-').map(Number); return m + '-' + String(new Date(a[0], a[1], 0).getDate()).padStart(2, '0'); }
@@ -14611,6 +15383,80 @@ document.addEventListener('DOMContentLoaded', async () => {
   // endpoint failing never blanks the other's data; a /snapshots failure specifically sets
   // snapLoadOk=false so acAcctMetaHtml renders the neutral "—" instead of ever fabricating the
   // "no snapshot exists" nudge over an account that may well have years of real anchors.
+  // ---- Per-account history, and the sparkline that shows it ------------------------------
+  // Twelve month-end reads of /account-balances, in parallel. That endpoint returns EVERY
+  // account at a date, so twelve calls give twelve points for every account at once rather than
+  // twelve per account -- the same shape fireGetTrailing() already uses for plan-vs-actual.
+  //
+  // Deliberately NOT built from /snapshots: a snapshot is where you last re-anchored, so a
+  // snapshot-only line would show a flat step between anchors and call it history. The balances
+  // endpoint applies logged flows between anchors, which is the curve the account actually took.
+  const AC_SPARK_MONTHS = 12;
+
+  function acMonthEnds(n) {
+    const out = [], now = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      // Day 0 of the NEXT month is the last day of this one, and building it in UTC keeps the
+      // date from sliding a day west of Greenwich (the BUG-0042 class).
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 0));
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+
+  async function acLoadHistory() {
+    const dates = acMonthEnds(AC_SPARK_MONTHS);
+    let series = {};
+    try {
+      const pages = await Promise.all(dates.map(d =>
+        getJSON('/api/tracking/account-balances?asOf=' + encodeURIComponent(d))
+          .then(r => ({ d: d, accounts: r.accounts || [] }))
+          .catch(() => ({ d: d, accounts: [] }))));
+      const first = ACT.firstSnap || {};
+      pages.forEach(p => p.accounts.forEach(a => {
+        // Skip month-ends BEFORE this account's first anchor. Drawing them would plot the
+        // endpoint's virtual zero as though it were a real balance of nothing — a line that
+        // starts on the floor and leaps, describing a history that never happened.
+        // `if (from && ...)` disabled the trim whenever `from` was falsy -- which is the
+        // NO-SNAPSHOT case, where EVERY point is a virtual zero rather than merely the early
+        // ones. The guard was off precisely where it was most needed. No anchor means no
+        // series, which falls through acSparkHtml's `pts.length < 2` to no sparkline at all,
+        // matching the "one dot is not a trend" rule already there.
+        const from = first[a.accountId];
+        if (!from || p.d < from) return;
+        (series[a.accountId] || (series[a.accountId] = [])).push({ on: p.d, v: a.balance });
+      }));
+      Object.keys(series).forEach(k => series[k].sort((x, y) => x.on < y.on ? -1 : 1));
+    } catch (e) { series = {}; }
+    ACT.history = series;
+  }
+
+  // A sparkline, not a chart: no axes, no labels, no tooltip. It answers "which way is this
+  // going" at a glance beside the number that answers "where is it now", and anything more would
+  // be a second chart competing with the number it sits next to.
+  function acSparkHtml(points) {
+    const pts = (points || []).filter(p => p && p.v != null);
+    if (pts.length < 2) return '';                       // one dot is not a trend
+    const W = 84, H = 18, pad = 1.5;
+    const vals = pts.map(p => p.v);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const span = (hi - lo) || 1;                         // a flat line sits mid-height, not at 0/0
+    const x = i => pad + (i / (pts.length - 1)) * (W - pad * 2);
+    const y = v => H - pad - ((v - lo) / span) * (H - pad * 2);
+    const d = pts.map((p, i) => x(i).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ');
+    const last = pts[pts.length - 1], first = pts[0];
+    // Colour says direction, not good-or-bad: the caller knows whether up is good (savings) or
+    // bad (a card), and encoding that here would get it wrong for half the accounts.
+    const stroke = 'var(--muted)';
+    return '<svg class="ac-spark" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"'
+      + ' role="img" aria-label="' + pts.length + '-month trend, ' + fmt$(first.v) + ' to ' + fmt$(last.v) + '"'
+      + ' style="vertical-align:middle;margin-left:6px">'
+      + '<polyline points="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="1.25"'
+      + ' stroke-linejoin="round" stroke-linecap="round" opacity="0.8"/>'
+      + '<circle cx="' + x(pts.length - 1).toFixed(1) + '" cy="' + y(last.v).toFixed(1) + '" r="1.8" fill="var(--accent)"/>'
+      + '</svg>';
+  }
+
   async function acLoadBalances() {
     try {
       const data = await getJSON('/api/tracking/account-balances');
@@ -14619,13 +15465,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { ACT.balances = {}; }
     try {
       const snapData = await getJSON('/api/tracking/snapshots');
-      const snapAccts = new Set(), latestSnap = {};
+      const snapAccts = new Set(), latestSnap = {}, firstSnap = {};
       (snapData.snapshots || []).forEach(s => {
         snapAccts.add(s.accountId);
         if (!latestSnap[s.accountId] || s.asOf > latestSnap[s.accountId]) latestSnap[s.accountId] = s.asOf;
+        // The FIRST anchor matters as much as the last: before it, /account-balances reports a
+        // virtual zero (its own docstring says so), and a sparkline drawn over that reads as
+        // "you had nothing" when the truth is "we were not tracking yet".
+        if (!firstSnap[s.accountId] || s.asOf < firstSnap[s.accountId]) firstSnap[s.accountId] = s.asOf;
       });
-      ACT.snapAccts = snapAccts; ACT.latestSnap = latestSnap; ACT.snapLoadOk = true;
-    } catch (e) { ACT.snapLoadOk = false; }
+      ACT.snapAccts = snapAccts; ACT.latestSnap = latestSnap; ACT.firstSnap = firstSnap; ACT.snapLoadOk = true;
+      // History rides the same load. Failure is silent BY DESIGN: a missing sparkline is a
+      // missing decoration, while a missing balance is a missing fact — they must not share a
+      // failure path, or a flaky history call would blank the number people actually rely on.
+      try { await acLoadHistory(); } catch (e) { ACT.history = {}; }
+    } catch (e) {
+      // The series comes from the same load, so leaving it in place renders a twelve-month
+      // sparkline next to a balance that has just been replaced by a neutral "—". One of the two
+      // then claims to know something the other says it does not.
+      ACT.snapLoadOk = false; ACT.history = {};
+    }
     acRenderAcctList();
   }
 
@@ -14655,7 +15514,39 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<a href="#" class="gl-act gl-act-primary" data-fix-liab="' + a.id + '" data-fix-target="' + forced + '" style="color:var(--warn)" title="Mark as ' + targetWord + '" aria-label="Mark ' + esc(a.name) + ' as ' + targetWord + '">Fix</a>';
     }
     const liabChip = a.isLiability ? '<span class="mng-flag">Liability</span>' : '';
-    if (a.type === 'credit') return liabChip || '<span class="mng-flag">Liability</span>';   // no balance -- lives in Pay-off-your-cards (§3)
+    const spark = acSparkHtml((ACT.history || {})[a.id]);
+    if (a.type === 'credit') {
+      // The BALANCE still lives in Pay-off-your-cards (§3) and is not repeated here. Utilization
+      // is, because this is the row a reader looks at when asking "how are my cards doing".
+      //
+      // THE TWO UTILIZATION FIGURES ON THIS TAB ANSWER DIFFERENT QUESTIONS, and code review
+      // flagged them as one number that disagreed with itself. It was half right.
+      //
+      // This row answers "what is my utilization NOW" -- the number that matters for a credit
+      // score, and a property of the account rather than of a month. The cards section answers
+      // "what do I owe for the month I am looking at", which follows month navigation. Feeding
+      // this row from the section's rollup was tried and rejected: it makes the two agree by
+      // making this one WRONG for every user who anchors balances with snapshots instead of
+      // logging each transaction, whose meter simply vanished. Deleting information is a worse
+      // outcome than two honest numbers.
+      //
+      // So the source stays /account-balances, and the three REAL defects are fixed here:
+      //   * unfloored -- an overpaid card rendered "-3% of $5,000", in the calm band, because
+      //     acUtilBand(-0.03) returns ''.
+      //   * always printed -- a paid-off card showed "0% of $5,000", the exact string
+      //     adversarial-review finding #9 removed from the cards section for saying nothing.
+      //   * unlabelled -- two same-looking captions inviting a comparison they do not support.
+      // The caption now says "now", which is what distinguishes it from the month-scoped one.
+      const ab = (ACT.balances || {})[a.id];
+      const limit = ab ? ab.creditLimit : null;
+      const hasLimit = limit != null && limit > 0;
+      const pct = (ab && ab.utilization != null) ? ab.utilization : null;
+      // Same suppression rule as the cards section, for the same reason: 0% beside a paid-off
+      // card tells the reader nothing they cannot already see.
+      const showMeter = hasLimit && pct != null && pct >= 0.00005;
+      const util = showMeter ? acUtilCapHtml(Math.max(0, pct), limit, ' now') : '';
+      return (liabChip || '<span class="mng-flag">Liability</span>') + spark + util;
+    }
     let balanceHtml;
     if (!ACT.snapLoadOk) {
       balanceHtml = '<span class="muted">—</span>';   // /snapshots itself failed -- never fabricate the nudge over unknown state (finding #5)
@@ -14674,7 +15565,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       balanceHtml = '<a href="#" class="gl-act gl-act-primary" data-set-balance="' + a.id + '">Set a balance to start tracking &rarr;</a>';
     }
-    return (liabChip ? liabChip + ' ' : '') + balanceHtml;
+    return (liabChip ? liabChip + ' ' : '') + balanceHtml + spark;
   }
   function acAcctRowHtml(a) {
     return '<div class="mng-row">'
@@ -15075,6 +15966,26 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function acRefresh() {
     acEnsureBudgetPlan();
+    // Catch-up FIRST, and this is the whole reason it moved: it WRITES transactions, and it used
+    // to run at the tail of acRenderRecurring -- after the ledger, the plan-vs-actual and the
+    // "$X in · $Y out" status had already painted. So on the load that posted them, everything on
+    // screen predated the posts and they only appeared on the NEXT load. The old comment claimed
+    // it "runs first"; it did not. It is idempotent by a database key, so calling it on every
+    // load still cannot double-post.
+    //
+    // Guarded like every other ledger write on this tab. What it writes is real rather than
+    // fantasy, so this is not a correctness fix -- but it was the only unguarded write here, and
+    // one exception is how the next reader concludes the guard is optional.
+    if (!WhatIf.active) {
+      try {
+        const cu = await post('/api/tracking/schedules/catch-up', {});
+        // materialize_due_schedules documents this contract: "the surviving problem is reported
+        // so the UI can say so rather than failing silently." The client used to throw it away,
+        // so an auto-post bill with no account silently did not post, month after month -- the
+        // same shape as the confirm defect one call site over.
+        acSchProblems = (cu && cu.problems) || [];
+      } catch (e) { acSchProblems = []; }
+    }
     let data; try { data = await getJSON('/api/tracking/plan-vs-actual?month=' + ACT.month); } catch (e) { return; }
     await acRenderLedger();   // loads ACT.txns first, so the per-category check + recurring can use them
     const st = $('ac_monthstatus');
@@ -15303,6 +16214,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   // theoretically arrive via CSV import/direct API. Harmless either way: acSignedAmount would
   // flip its sign exactly like it does for an 'out' refund, which is the same rule the server's
   // own signed_c formula applies regardless of direction.)
+  // Which account a bill created from a budget line should post to. A schedule with NO account
+  // cannot post at all -- that is BUG-0053, where every migration-16 bill 422'd on confirm -- so
+  // guessing well here matters more than it looks. Preference order: whatever the user last
+  // logged against (their working account), then the first non-liability account (a bill paid
+  // from a credit card is possible but is not the common case), then anything at all.
+  //
+  // Returns null when the user has no accounts yet, and that is deliberate: the schedule is still
+  // created, and the due tray already flags it "needs an account" with a button that opens the
+  // editor. A silently-unpostable bill was the bug; a visibly-incomplete one is a to-do.
+  function acDefaultAccountId() {
+    const all = ACT.accounts || [];
+    if (!all.length) return null;
+    const sticky = ACT.sticky && ACT.sticky.acct;
+    if (sticky && all.some(a => String(a.id) === String(sticky))) return +sticky;
+    const asset = all.find(a => !a.isLiability);
+    return (asset || all[0]).id;
+  }
+
   function acMatchRecurring(r) {
     const cat = (r.category || '').toLowerCase(); let actual = 0, count = 0, lastDate = null;
     const hit = (amt, on) => { actual += amt; count++; if (!lastDate || on > lastDate) lastDate = on; };
@@ -15314,24 +16243,357 @@ document.addEventListener('DOMContentLoaded', async () => {
     return { actual: actual, count: count, lastDate: lastDate };
   }
 
+  // ---- Scheduled money -------------------------------------------------------------------
+  // A client for the engine that shipped in bdecc28 with "No client yet; nothing calls this".
+  //
+  // Three of the engine's guarantees shape this UI rather than being restated by it:
+  //   - an estimate NEVER auto-posts, whatever the auto-post flag says, so "amount varies"
+  //     disables the auto-post checkbox instead of the two silently contradicting each other;
+  //   - confirming the same occurrence twice is refused by a database key, not by bookkeeping,
+  //     so the Confirm button does not need a disabled-while-in-flight dance to stay correct;
+  //   - nothing posts from before the schedule existed, which is why a schedule created today
+  //     shows an empty due list until its next date actually arrives. The empty state says so,
+  //     because "nothing here" and "not working" look identical otherwise.
+  // listOk/dueOk start true so a render before the first load reads as "nothing yet" rather
+  // than "unreachable". They only ever go false because a load actually failed.
+  // One list, read by the month picker AND by the cadence sentence. The sentence used to say
+  // "Once a year, in month 5" while the picker directly above it offered "May" -- on a feature
+  // whose whole thesis is that the form says back what you chose.
+  const SCH_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const SCH_STATE = { schedules: [], due: [], editing: null, listOk: true, dueOk: true };
+
+  const SCH_DOW = { MO: 'Monday', TU: 'Tuesday', WE: 'Wednesday', TH: 'Thursday', FR: 'Friday', SA: 'Saturday', SU: 'Sunday' };
+  const SCH_LAST_DAY = 32;      // the engine's "last day of the month" sentinel
+
+  function schDayLabel(d) {
+    if (+d === SCH_LAST_DAY) return 'last day';
+    const n = +d;
+    const suf = (n % 10 === 1 && n !== 11) ? 'st' : (n % 10 === 2 && n !== 12) ? 'nd' : (n % 10 === 3 && n !== 13) ? 'rd' : 'th';
+    return n + suf;
+  }
+
+  // The rule, in words. A cadence a reader cannot restate is a cadence they cannot check, and
+  // "semimonthly / day_1 15 / day_2 32 / weekend_shift before" is not something anyone can check.
+  function schCadenceText(s) {
+    let base;
+    if (s.freq === 'semimonthly') base = 'Twice a month, on the ' + schDayLabel(s.day1) + ' and the ' + schDayLabel(s.day2);
+    else if (s.freq === 'weekly') base = (s.interval > 1 ? 'Every ' + s.interval + ' weeks' : 'Every week') + ' on ' + (SCH_DOW[(s.weekdays || 'FR').split(',')[0]] || 'Friday');
+    else if (s.freq === 'monthly') base = 'Monthly, on the ' + schDayLabel(s.day1);
+    else if (s.freq === 'yearly') base = 'Once a year, in ' + (SCH_MONTHS[(s.monthOfYear || 1) - 1] || ('month ' + s.monthOfYear)) + ' on the ' + schDayLabel(s.day1);
+    else base = s.interval > 1 ? 'Every ' + s.interval + ' days' : 'Every day';
+    if (s.weekendShift === 'before') base += ', moved to the Friday before if it lands on a weekend';
+    else if (s.weekendShift === 'after') base += ', moved to the Monday after if it lands on a weekend';
+    return base;
+  }
+
+  // `post()` throws with the server's detail in the message where it can. Anything unrecognised
+  // stays vague on purpose: inventing a specific cause is the mistake this function exists to
+  // undo, and "could not log it" is at least true.
+  function schConfirmError(err, due) {
+    const msg = String((err && err.message) || err || '');
+    if (/no account to post to/i.test(msg)) {
+      return (due && due.name ? due.name : 'That schedule') + ' has no account set — open it below and choose one.';
+    }
+    if (/already/i.test(msg) || /exists/i.test(msg)) return 'That one is already logged';
+    return 'Could not log that one — ' + (errDetail(err) || 'the server refused it');
+  }
+
+  async function schRefresh() {
+    // Two independent loads, each caught on its own. The Promise.all version let EITHER failure
+    // blank BOTH -- and worse, an unreachable server then rendered "Nothing scheduled yet",
+    // which is a positive factual claim about the user's data manufactured out of a transport
+    // error. acLoadBalances next door already gets this right; this is the same discipline.
+    // ACT.snapLoadOk (finding #5, "never fabricate over unknown state") is the model.
+    SCH_STATE.listOk = true; SCH_STATE.dueOk = true;
+    await Promise.all([
+      getJSON('/api/tracking/schedules')
+        .then(r => { SCH_STATE.schedules = r.schedules || []; })
+        .catch(() => { SCH_STATE.schedules = []; SCH_STATE.listOk = false; }),
+      getJSON('/api/tracking/schedules/due')
+        .then(r => { SCH_STATE.due = r.due || []; })
+        .catch(() => { SCH_STATE.due = []; SCH_STATE.dueOk = false; }),
+    ]);
+    schRenderDue();
+    schRenderList();
+    schRenderProblems();
+  }
+
+  // An auto-post schedule that cannot post is the quietest possible failure: the user switched
+  // auto-post ON precisely so they would not have to think about it.
+  function schRenderProblems() {
+    const el = $('sch_problems'); if (!el) return;
+    if (!acSchProblems.length) { el.innerHTML = ''; el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = '<div class="warn-box"><b>' + acSchProblems.length
+      + (acSchProblems.length === 1 ? ' schedule is set to post automatically and cannot.</b> '
+                                    : ' schedules are set to post automatically and cannot.</b> ')
+      + 'Nothing was logged for ' + (acSchProblems.length === 1 ? 'it' : 'them') + '.<ul style="margin:6px 0 0 18px">'
+      + acSchProblems.map(pr => '<li>' + esc(pr.name || 'A schedule') + ' — ' + esc(pr.reason || 'the server refused it')
+          + (pr.scheduleId != null ? ' <button type="button" class="ac-tool" data-schfix="' + esc(String(pr.scheduleId)) + '">Fix it</button>' : '')
+          + '</li>').join('')
+      + '</ul></div>';
+  }
+
+  function schRenderDue() {
+    const el = $('sch_due'); if (!el) return;
+    const due = SCH_STATE.due;
+    if (!due.length) {
+      // Three states, not two. An unreachable endpoint is not an empty one, and saying so is
+      // the difference between a report and an invention.
+      if (!SCH_STATE.dueOk || !SCH_STATE.listOk) {
+        el.innerHTML = '<div class="warn-box">Could not reach your schedules just now — this list may be incomplete. Nothing has been lost; try again in a moment.</div>';
+        return;
+      }
+      // Distinguishes "nothing due" from "nothing set up" -- they look the same and mean very
+      // different things, and only one of them is a reason to go and do something.
+      el.innerHTML = SCH_STATE.schedules.length
+        ? '<div class="mini muted">Nothing waiting for a decision. A schedule you just added stays quiet until its next date arrives.</div>'
+        : '<div class="mini muted">Nothing scheduled yet — add a paycheck, a bill or a transfer below and it will appear here when it is due.</div>';
+      return;
+    }
+    let h = '<div class="mini" style="margin-bottom:6px"><b>' + due.length + '</b> waiting for you</div><table class="res-table">';
+    due.forEach((d, i) => {
+      const est = d.amountIsEstimate;
+      // A schedule with no account cannot post, so it gets no Confirm. Every bill migration 16
+      // converted is in exactly this state, and offering a button that 422s is how the old
+      // catch-all came to lie in the first place — the fix is to not draw it.
+      const canPost = d.accountId != null;
+      h += '<tr><td>' + esc(d.name) + ' <span class="mini muted">' + esc(d.on) + (est ? ' · amount varies' : '') + '</span>'
+        + (canPost ? '' : ' <span class="mng-flag">needs an account</span>') + '</td>'
+        + '<td class="num"><span class="input-pair" style="width:120px"><span class="unit">$</span>'
+        + '<input type="text" inputmode="decimal" data-schamt="' + i + '" value="' + fmtUSD2val(d.amount) + '"' + (canPost ? '' : ' disabled') + '></span></td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+        + (canPost
+            ? '<button type="button" class="ac-tool" data-schconfirm="' + i + '">Confirm</button> '
+            : '<button type="button" class="ac-tool" data-schfix="' + (d.scheduleId) + '">Set an account</button> ')
+        + '<button type="button" class="ac-tool" data-schskip="' + i + '">Skip</button></td></tr>';
+    });
+    el.innerHTML = h + '</table>';
+  }
+
+  function schRenderList() {
+    const el = $('sch_list'); if (!el) return;
+    const cnt = $('sch_count');
+    // A count of 0 over a failed load is the same lie as the empty state, quieter. Say nothing
+    // rather than say zero.
+    if (cnt) cnt.textContent = !SCH_STATE.listOk ? '' : (SCH_STATE.schedules.length ? '(' + SCH_STATE.schedules.length + ')' : '');
+    if (!SCH_STATE.schedules.length) {
+      el.innerHTML = SCH_STATE.listOk ? ''
+        : '<div class="warn-box">Could not load your schedules — nothing has been deleted. Reopen this tab to try again.</div>';
+      return;
+    }
+    el.innerHTML = '<div class="mng-list">' + SCH_STATE.schedules.map(s =>
+      '<div class="mng-row"><div class="mng-main">'
+      + '<span class="mng-name">' + esc(s.name) + (s.active ? '' : ' <span class="mini muted">(paused)</span>') + '</span>'
+      + '<span class="mng-meta">' + (s.direction === 'in' ? '+' : s.direction === 'out' ? '−' : '↔') + acAmt(s.amount)
+      + (s.amountIsEstimate ? ' · varies' : '') + (s.autoPost && !s.amountIsEstimate ? ' · posts itself' : '')
+      + ' · ' + esc(schCadenceText(s)) + '</span></div>'
+      + '<div class="mng-actions">'
+      + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + s.id + '" title="edit">✎</a>'
+      + '<a href="#" class="gl-act gl-act-del" data-schdel="' + s.id + '" title="delete">✕</a>'
+      + '</div></div>').join('') + '</div>';
+  }
+
+  // Populate the day/month pickers once; the "last day" option is what makes "the 30th or 31st"
+  // expressible at all, and it is the engine's own sentinel rather than a client invention.
+  function schFillPickers() {
+    const days = i => Array.from({ length: 31 }, (_, n) =>
+      '<option value="' + (n + 1) + '">' + schDayLabel(n + 1) + '</option>').join('')
+      + '<option value="' + SCH_LAST_DAY + '">last day of the month</option>';
+    const d1 = $('sch_d1'), d2 = $('sch_d2'), moy = $('sch_moy');
+    if (d1 && !d1.options.length) { d1.innerHTML = days(); d1.value = '15'; }
+    if (d2 && !d2.options.length) { d2.innerHTML = days(); d2.value = String(SCH_LAST_DAY); }
+    if (moy && !moy.options.length) {
+      moy.innerHTML = SCH_MONTHS.map((m, i) => '<option value="' + (i + 1) + '">' + m + '</option>').join('');
+    }
+    const ac = $('sch_acct');
+    if (ac) {
+      // The form SHAPE was guarded against a mid-edit rebuild and the account list was not, so a
+      // background refresh re-pointed a half-typed rule at a different account -- measured:
+      // Savings -> Amex, with the composer still open and the typed name intact, so nothing
+      // signalled it. Preserve the selection across the rebuild; only fall back to the first
+      // account when the one that was chosen genuinely no longer exists.
+      const keep = ac.value;
+      ac.innerHTML = (ACT.accounts || []).map(a => '<option value="' + a.id + '">' + esc(a.name) + '</option>').join('');
+      if (keep && [...ac.options].some(o => o.value === keep)) ac.value = keep;
+    }
+    const bk = $('sch_bucket');
+    if (bk) bk.innerHTML = '<option value="">—</option>' + Object.keys(KINDS).map(k =>
+      '<option value="' + k + '">' + esc(KINDS[k].label) + '</option>').join('');
+    const an = $('sch_anchor');
+    if (an && !an.value) an.value = new Date().toISOString().slice(0, 10);
+    // Shape the form the FIRST time it is built. Without this it opens showing every cadence
+    // field at once — weekday, both day pickers, the interval and the month — with an empty
+    // preview, and only tidies itself once the user changes something. Guarded so a later
+    // refresh cannot reshape a form somebody is halfway through filling in.
+    if (!SCH_STATE.formReady) { SCH_STATE.formReady = true; schSyncFormShape(); }
+  }
+
+  // Show only the fields the chosen cadence actually uses. A monthly rule has no weekday and a
+  // weekly rule has no day-of-month; leaving both on screen invites someone to fill in a field
+  // the engine will ignore, and then wonder why the dates are wrong.
+  function schSyncFormShape() {
+    const f = ($('sch_freq') || {}).value || 'semimonthly';
+    const show = (id, on) => { const e = $(id); if (e) e.style.display = on ? '' : 'none'; };
+    show('sch_d1_wrap', f === 'semimonthly' || f === 'monthly' || f === 'yearly');
+    show('sch_d2_wrap', f === 'semimonthly');
+    show('sch_wd_wrap', f === 'weekly');
+    show('sch_int_wrap', f === 'weekly' || f === 'daily');
+    show('sch_moy_wrap', f === 'yearly');
+    show('sch_bucket_wrap', (($('sch_dir') || {}).value) !== 'in');   // income carries no bucket
+    const unit = $('sch_int_wrap') && $('sch_int_wrap').querySelector('.unit');
+    if (unit) unit.textContent = f === 'daily' ? 'days' : 'wks';
+    // The engine refuses to auto-post an estimate whatever this flag says. Rather than let the
+    // two disagree on screen, the checkbox goes with it and explains itself.
+    const est = $('sch_est'), auto = $('sch_auto');
+    if (est && auto) {
+      auto.disabled = !!est.checked;
+      if (est.checked) auto.checked = false;
+      const lab = auto.closest('label');
+      if (lab) lab.style.opacity = est.checked ? '0.55' : '';
+      if (lab) lab.title = est.checked ? 'An amount that varies always waits for you to confirm it.' : '';
+    }
+    schPreview();
+  }
+
+  // Says the rule back in words before it is saved. The three shapes this app's user actually
+  // needs — the 15th shifted off a weekend, the 15th and the last day, every other Friday — are
+  // all expressible here, and all three are easy to mis-set silently.
+  function schPreview() {
+    const el = $('sch_preview'); if (!el) return;
+    el.textContent = schCadenceText(schFormToPayload(true)) + '.';
+  }
+
+  function schFormToPayload(loose) {
+    const f = ($('sch_freq') || {}).value || 'semimonthly';
+    const dir = ($('sch_dir') || {}).value || 'out';
+    const p = {
+      name: (($('sch_name') || {}).value || '').trim(),
+      direction: dir,
+      amount: rn(($('sch_amt') || {}).value),
+      amountIsEstimate: !!($('sch_est') || {}).checked,
+      accountId: +(($('sch_acct') || {}).value) || null,
+      bucket: dir === 'in' ? null : ((($('sch_bucket') || {}).value) || null),
+      category: (($('sch_cat') || {}).value || '').trim() || null,
+      freq: f,
+      interval: Math.max(1, +(($('sch_int') || {}).value) || 1),
+      weekdays: f === 'weekly' ? (($('sch_wd') || {}).value || 'FR') : null,
+      day1: (f === 'semimonthly' || f === 'monthly' || f === 'yearly') ? +(($('sch_d1') || {}).value) || 1 : null,
+      day2: f === 'semimonthly' ? +(($('sch_d2') || {}).value) || SCH_LAST_DAY : null,
+      monthOfYear: f === 'yearly' ? +(($('sch_moy') || {}).value) || 1 : null,
+      anchorOn: (($('sch_anchor') || {}).value) || new Date().toISOString().slice(0, 10),
+      weekendShift: (($('sch_shift') || {}).value) || 'none',
+      autoPost: !!($('sch_auto') || {}).checked,
+    };
+    if (loose) return p;
+    return p;
+  }
+
+  function schFormFrom(s) {
+    SCH_STATE.editing = s ? s.id : null;
+    const set = (id, v) => { const e = $(id); if (e && v != null) e.value = v; };
+    schFillPickers();
+    set('sch_name', s ? s.name : '');
+    set('sch_dir', s ? s.direction : 'out');
+    const amt = $('sch_amt'); if (amt) amt.value = s ? fmtUSD2val(s.amount) : '';
+    { const e = $('sch_est'); if (e) e.checked = !!(s && s.amountIsEstimate); }
+    { const a = $('sch_auto'); if (a) a.checked = !!(s && s.autoPost); }
+    if (s && s.accountId) set('sch_acct', String(s.accountId));
+    set('sch_bucket', s ? (s.bucket || '') : '');
+    set('sch_cat', s ? (s.category || '') : '');
+    set('sch_freq', s ? s.freq : 'semimonthly');
+    set('sch_int', s ? String(s.interval || 1) : '2');
+    if (s && s.weekdays) set('sch_wd', s.weekdays.split(',')[0]);
+    set('sch_d1', s && s.day1 != null ? String(s.day1) : '15');
+    set('sch_d2', s && s.day2 != null ? String(s.day2) : String(SCH_LAST_DAY));
+    if (s && s.monthOfYear) set('sch_moy', String(s.monthOfYear));
+    set('sch_anchor', s ? s.anchorOn : new Date().toISOString().slice(0, 10));
+    set('sch_shift', s ? s.weekendShift : 'before');
+    const cancel = $('sch_cancel'); if (cancel) cancel.style.display = s ? '' : 'none';
+    const save = $('sch_save'); if (save) save.textContent = s ? 'Update schedule' : 'Save schedule';
+    const wrap = $('sch_add_wrap'); if (wrap && s) wrap.open = true;
+    schSyncFormShape();
+  }
+
+  async function schSave() {
+    const err = $('sch_err'); if (err) err.textContent = '';
+    const p = schFormToPayload(false);
+    if (!p.name) { if (err) err.textContent = 'Give it a name.'; return; }
+    if (!p.accountId) { if (err) err.textContent = 'Pick the account it moves through.'; return; }
+    if (!(p.amount > 0)) { if (err) err.textContent = 'Enter an amount — use "Amount varies" if it is only an estimate.'; return; }
+    // Captured BEFORE schFormFrom(null) clears it. Reading SCH_STATE.editing after the reset
+    // made the 'Schedule updated' branch unreachable, so an edit and a create produced a
+    // byte-identical toast -- removing the one signal that could distinguish "your change
+    // landed" from "nothing happened".
+    const wasEditing = SCH_STATE.editing;
+    try {
+      // The PATCH used raw fetch(), which RESOLVES on 422/404/500. The catch never ran, the
+      // composer closed, and the user was told it saved while the edit was discarded. post()
+      // goes through _fetchJSON, which throws on !r.ok and folds the server's own detail into
+      // the message -- the same source schConfirmError reads.
+      if (wasEditing) await patch('/api/tracking/schedules/' + wasEditing, p);
+      else await post('/api/tracking/schedules', p);
+      schFormFrom(null);
+      const wrap = $('sch_add_wrap'); if (wrap) wrap.open = false;
+      await schRefresh();
+      showToast(wasEditing ? 'Schedule updated' : 'Schedule saved');
+    } catch (e) {
+      const detail = errDetail(e);
+      if (err) err.textContent = 'Could not save that schedule' + (detail ? ' — ' + detail : ' — check the fields above.');
+    }
+  }
+
+  // THE MONTHLY RECONCILIATION -- "did this bill come through?" -- now built from SCHEDULES.
+  //
+  // This is why retiring the old panel was never a deletion. The Scheduled Money due tray answers
+  // "what wants a decision TODAY"; this answers "is anything missing THIS MONTH", and they are not
+  // the same question. Removing the panel without rebuilding this would have removed a capability
+  // and called it tidying.
+  //
+  // The occurrence list comes from the engine (one request for every active schedule, not N), and
+  // the match against real transactions is acMatchRecurring UNCHANGED -- it keys on direction,
+  // bucket and category, all of which a schedule carries. So the answer to "did it come through"
+  // is computed exactly as it was before; only where the expectation comes from has changed.
+  //
+  // `posted` is NOT used for that: it means the engine wrote the row, and a bill you paid and
+  // logged by hand is unposted but has certainly come through. Asking the ledger is the honest
+  // question; asking the engine would report your own manual entries as missing.
   async function acRenderRecurring() {
     const el = $('ac_recurring'); if (!el) return;
     acEnsureBudgetPlan();
-    let rec; try { rec = (await getJSON('/api/tracking/recurring')).recurring; } catch (e) { rec = []; }
-    ACT.recurring = rec;
+    const mStart = ACT.month + '-01';
+    const mEnd = acMonthEndIso(ACT.month);
+    let sched = [], schedOk = true;
+    try { sched = (await getJSON('/api/tracking/schedules/occurrences?start=' + mStart + '&end=' + mEnd)).schedules || []; }
+    catch (e) { sched = []; schedOk = false; }
+    ACT.monthSchedules = sched;
     const ml = $('ac_rec_month'); if (ml) ml.textContent = acMonthLabel(ACT.month);
-    const active = rec.filter(r => r.active);
-    if (!active.length) {
-      el.innerHTML = '<div class="mini muted">No recurring bills tracked yet — open <b>Set up recurring</b> below to pick them from your budget.</div>';
+    const active = sched.filter(r => (r.occurrences || []).length);
+    if (!schedOk) {
+      // Never an empty-state claim over a transport failure -- the ACT.snapLoadOk rule, and the
+      // same lie BUG-0056 was about.
+      el.innerHTML = '<div class="warn-box">Could not reach your schedules — this month&rsquo;s check is incomplete.</div>';
+    } else if (!active.length) {
+      el.innerHTML = '<div class="mini muted">Nothing scheduled falls in ' + esc(acMonthLabel(ACT.month)) + ' — open <b>Set up recurring</b> below to pick bills from your budget.</div>';
     } else {
       const isCur = ACT.month === acNowMonth(), todayDay = isCur ? (new Date()).getDate() : 32;
       let recv = 0, pend = 0, miss = 0, rows = '';
       active.forEach(r => {
-        const m = acMatchRecurring(r), planned = r.expected || 0;
+        const m = acMatchRecurring(r);
+        const occ = r.occurrences || [];
+        const planned = occ.reduce((a, o) => a + (o.amount || 0), 0) || r.amount || 0;
+        // The LAST occurrence in the month decides lateness: a twice-monthly paycheck is not
+        // "missing" on the 20th because the 31st has not arrived. The old checklist only had a
+        // single dueDay and could not express that at all.
+        const lastDay = occ.length ? +occ[occ.length - 1].on.slice(8, 10) : null;
+        const dueLabel = occ.length > 1
+          ? ('due ' + occ.map(o => +o.on.slice(8, 10)).join(', '))
+          : (lastDay ? 'due day ' + lastDay : 'not yet');
         let label, cls, icon;
         if (m.count > 0) { label = 'came through' + (m.lastDate ? ' ' + m.lastDate.slice(5) : ''); cls = 'good-text'; icon = '✓'; recv++; }
-        else if (r.dueDay && todayDay > r.dueDay) { label = 'missing'; cls = 'bad-text'; icon = '⚠'; miss++; }
-        else { label = r.dueDay ? ('due day ' + r.dueDay) : 'not yet'; cls = 'muted'; icon = '⏳'; pend++; }
+        else if (lastDay && todayDay > lastDay) { label = 'missing'; cls = 'bad-text'; icon = '⚠'; miss++; }
+        else { label = dueLabel; cls = 'muted'; icon = '⏳'; pend++; }
         const where = esc(r.direction === 'in' ? 'income' : (KINDS[r.bucket] ? KINDS[r.bucket].label : r.bucket || '—'));
         const amt = m.count > 0 ? acAmt(m.actual) : (planned ? acAmt(planned) : '—');
         const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
@@ -15349,6 +16611,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '<table class="res-table">' + rows + '</table>';
     }
     acRenderRecurringSetup();
+    schFillPickers();
+    await schRefresh();
   }
 
   // "Log it" — prefill the composer from a recurring bill that has not arrived yet.
@@ -15362,12 +16626,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // electricity"), and this month's screen proves it — Electricity planned $94.50 and came through
   // $159.74. Auto-adding would log a figure the user never saw.
   function acLogFromRecurring(id) {
-    const r = (ACT.recurring || []).find(x => String(x.id) === String(id));
+    // Reads the month's SCHEDULES now. ACT.recurring was the legacy table, which the setup
+    // panel no longer writes to -- a "Log it" that looked up the old store would have found
+    // nothing for every bill created after this change.
+    const r = (ACT.monthSchedules || []).find(x => String(x.id) === String(id));
     if (!r) return;
     acApplyTemplate({
       name: r.category,
       direction: r.direction || 'out',
-      amount: r.expected || 0,
+      // `amount` on a schedule; `expected` was the legacy recurring column and is simply absent
+      // here, so reading it silently prefilled 0 and the user got an empty amount box on a bill
+      // whose figure the app already knew. Falls through both so a stale record cannot blank it.
+      amount: (r.amount != null ? r.amount : r.expected) || 0,
       bucket: r.direction === 'in' ? null : (r.bucket || null),
       category: r.category || '',
       description: r.category || '',
@@ -15395,7 +16665,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     acEnsureBudgetPlan();
     const bp = acPlan();
     if (!bp || !bp.lines) { el.innerHTML = '<div class="mini muted">Build your budget on the <b>Budget</b> tab first — its line items seed this list.</div>'; return; }
-    const recByKey = {}; (ACT.recurring || []).forEach(r => { recByKey['out|' + (r.bucket || '') + '|' + (r.category || '').toLowerCase()] = r; });
+    // Keyed off SCHEDULES, so the checkboxes reflect what actually exists in the store the
+    // panel now writes to. SCH_STATE.schedules is the full list (including ones with no
+    // occurrence this month), which is the right set for "is this bill tracked at all?".
+    const recByKey = {}; (SCH_STATE.schedules || []).forEach(r => { if (r.direction === 'out') recByKey['out|' + (r.bucket || '') + '|' + (r.category || '').toLowerCase()] = r; });
     let h = '<div class="mini muted" style="margin:6px 0">Tick the budget lines that are recurring bills and set the day they post. Each month we check whether a matching transaction came through (amount can vary — e.g. electricity).</div>';
     let any = false;
     getCategories().forEach(({ key: kind }) => {
@@ -15568,9 +16841,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // the caption text itself only warns (color) at the high band.
   function acUtilBand(pct) { return pct >= 0.70 ? 'is-high' : (pct >= 0.30 ? 'is-mid' : ''); }
   // Summary column: a compact caption only (no bar — the sticky column is too narrow).
-  function acUtilCapHtml(pct, limit) {
+  // `suffix` distinguishes the Manage row's as-of-today figure from this section's month-scoped
+  // one. They are different questions, they can legitimately differ, and two identical-looking
+  // captions invited a comparison that does not hold. Empty here, ' now' there.
+  function acUtilCapHtml(pct, limit, suffix) {
     return '<div class="ac-util ' + acUtilBand(pct) + '" style="justify-content:flex-end">'
-      + '<span class="ac-util-cap">' + Math.round(pct * 100) + '% of ' + fmt$(limit) + '</span></div>';
+      + '<span class="ac-util-cap">' + Math.round(pct * 100) + '% of ' + fmt$(limit) + (suffix || '') + '</span></div>';
   }
   // Detail expand: the full track+fill bar (legible at full width) + a fuller caption.
   function acUtilMeterHtml(rr, pct, limit) {
@@ -16183,6 +17459,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     acComboInit($('ac_tx_cat'), 'ac_cat_list', { selectEvent: 'input', label: 'Category suggestions' });
     acComboInit($('ac_tx_memo'), 'ac_payee_list', { selectEvent: 'input', label: 'Payee suggestions' });
     acComboInit($('ac_tx_tags_in'), 'ac_tags_list', { selectEvent: 'change', label: 'Tag suggestions' });
+    { const w = document.getElementById('sch_add_wrap');
+      if (w) w.addEventListener('toggle', () => { if (w.open) schSyncFormShape(); }); }
+    { const sv = document.getElementById('sch_save'); if (sv) sv.addEventListener('click', schSave); }
+    { const cx = document.getElementById('sch_cancel'); if (cx) cx.addEventListener('click', () => schFormFrom(null)); }
+    ['sch_freq', 'sch_dir', 'sch_est', 'sch_d1', 'sch_d2', 'sch_wd', 'sch_int', 'sch_shift', 'sch_moy'].forEach(id => {
+      const e = document.getElementById(id); if (e) e.addEventListener('change', schSyncFormShape);
+    });
+
     const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
       // Prefill the composer from a recurring bill that has not arrived yet. First in the chain
@@ -16190,6 +17474,71 @@ document.addEventListener('DOMContentLoaded', async () => {
       // shadowed by a later handler that calls preventDefault for a different reason.
       { const lg = ev.target.closest('[data-reclog]');
         if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
+
+      // ---- Scheduled money ----
+      { const c = ev.target.closest('[data-schconfirm]');
+        if (c) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          const i = +c.dataset.schconfirm, d = SCH_STATE.due[i];
+          if (!d) return;
+          const amtEl = document.querySelector('[data-schamt="' + i + '"]');
+          // rn('') is 0, so clearing the box and hitting Confirm posted a $0 settled transaction.
+      // The engine's contract is that a null amount means "use the schedule's own" -- which is
+      // what an emptied field is actually asking for.
+      const typed = amtEl ? String(amtEl.value).trim() : '';
+      const amount = typed === '' ? null : rn(typed);
+          try {
+            await post('/api/tracking/schedules/' + d.scheduleId + '/confirm', { on: d.on, amount: amount });
+            showToast('Logged ' + d.name + ' for ' + d.on);
+          } catch (e) {
+            // This used to say "That one is already logged" for EVERY failure, on the reasoning
+            // that a repeat confirm is refused with a 422. It is — but so is a schedule with no
+            // account to post to, and migration 16 leaves EVERY converted bill exactly that way
+            // (its INSERT has no account_id column). So the one message users would actually
+            // meet was the reassuring one, on a confirm that wrote nothing at all.
+            //
+            // A catch that asserts a cause it did not read is worse than no message. Read the
+            // server's own reason, and only claim "already logged" when that is what it said.
+            showToast(schConfirmError(e, d));
+          }
+          await schRefresh(); acRefresh(); return;
+        } }
+      { const k = ev.target.closest('[data-schskip]');
+        if (k) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          const d = SCH_STATE.due[+k.dataset.schskip]; if (!d) return;
+          // An empty catch made a failed skip indistinguishable from a successful one. Same
+      // read-the-server shape as schConfirmError rather than a second guess.
+      try { await post('/api/tracking/schedules/' + d.scheduleId + '/skip', { on: d.on }); }
+      catch (e) { showToast('Could not skip that one — ' + (errDetail(e) || 'the server refused it')); }
+          await schRefresh(); return;
+        } }
+      { const fx = ev.target.closest('[data-schfix]');
+        if (fx) { ev.preventDefault();
+          schFormFrom((SCH_STATE.schedules || []).find(x => String(x.id) === fx.dataset.schfix) || null);
+          const acc = $('sch_acct'); if (acc) { try { acc.scrollIntoView({ block: 'center' }); } catch (e) {} acc.focus(); }
+          return; } }
+      { const e2 = ev.target.closest('[data-schedit]');
+        if (e2) { ev.preventDefault();
+          schFormFrom((SCH_STATE.schedules || []).find(x => String(x.id) === e2.dataset.schedit) || null);
+          return; } }
+      { const dl = ev.target.closest('[data-schdel]');
+        if (dl) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          const s2 = (SCH_STATE.schedules || []).find(x => String(x.id) === dl.dataset.schdel);
+          if (!s2) return;
+          // Names what goes and what stays: deleting the rule must not read as deleting the
+          // transactions it already wrote, because it does not.
+          if (!confirm('Delete the schedule "' + s2.name + '"?\n\nTransactions it already posted stay in your ledger — only the future occurrences stop.')) return;
+          // Raw fetch resolves on 4xx/5xx, so this reported success on every failure AND
+          // swallowed the reason. Both halves fixed by using the helper.
+          try { await del('/api/tracking/schedules/' + s2.id); }
+          catch (e) { showToast('Could not delete that schedule — ' + (errDetail(e) || 'the server refused it')); }
+          await schRefresh(); return;
+        } }
       // Card row expand/collapse
       const ct = ev.target.closest('[data-card-toggle]');
       if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open)); } return; }
@@ -16375,15 +17724,60 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (cb) {
         if (acWriteGuard()) { cb.checked = !cb.checked; return; }   // undo the checkbox flip the guard didn't get to block
         const parts = cb.dataset.rectoggle.split('|'), kind = parts[0], name = parts.slice(1).join('|');
-        if (cb.checked) { try { await post('/api/tracking/recurring', { category: name, direction: 'out', bucket: kind, expected: +cb.dataset.planned || 0 }); } catch (e) {} }
-        else { const r = (ACT.recurring || []).find(x => x.direction === 'out' && (x.bucket || '') === kind && (x.category || '').toLowerCase() === name.toLowerCase()); if (r) { try { await fetch('/api/tracking/recurring/' + r.id, { method: 'DELETE' }); } catch (e) {} } }
+        // WRITES A SCHEDULE, not a legacy `recurring` row. It posted to /api/tracking/recurring
+        // until now, which was a silent divergence rather than merely a duplicate surface:
+        // migration 16 converted the rows that EXISTED at migration time, so anything ticked here
+        // afterwards lived only in the old table and the Scheduled Money surface never saw it.
+        // Two creation paths, two stores, one of them invisible to the feature that replaced it.
+        //
+        // Monthly on `dueDay` is the only cadence the old checklist could express, so nothing is
+        // lost in the translation -- and everything the schedule engine can do that it could not
+        // (weekend shift, twice-monthly, every-other-Friday) is available by editing it afterwards.
+        try {
+          if (cb.checked) {
+            const amt = +cb.dataset.planned || 0;
+            await post('/api/tracking/schedules', {
+              name: name, direction: 'out', amount: amt, bucket: kind, category: name,
+              accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
+              // Anchored to the START of the month being viewed, not to today. Anchored to today,
+              // a bill ticked on the 22nd has its first occurrence NEXT month -- so the panel
+              // answered "nothing scheduled falls in August" immediately after the user had just
+              // told it about a bill, which reads as broken rather than as correct. Measured.
+              //
+              // Safe because autoPost is false and estimates never auto-post regardless: a
+              // back-dated anchor cannot write a transaction the user did not confirm. The worst
+              // case is a bill flagged "missing" for a month already underway, which is either
+              // true (it has not been logged) or resolved by logging it.
+              anchorOn: ACT.month + '-01',
+              // A budget line is a PLANNED figure, not a bill you have seen -- electricity is
+              // planned at $94.50 and arrives at $159.74. Estimates never auto-post, which is the
+              // engine's own guarantee and exactly the right default here.
+              amountIsEstimate: true, autoPost: false,
+            });
+          } else {
+            const hit = (SCH_STATE.schedules || []).find(x =>
+              x.direction === 'out' && (x.bucket || '') === kind
+              && (x.category || '').toLowerCase() === name.toLowerCase());
+            if (hit) await del('/api/tracking/schedules/' + hit.id);
+          }
+        } catch (e) {
+          showToast('Could not update that bill — ' + (errDetail(e) || 'the server refused it'));
+        }
         acRefresh(); return;
       }
       const dd = ev.target.closest('[data-recday]');
       if (dd) {
         if (acWriteGuard()) return;
-        const r = (ACT.recurring || []).find(x => x.id == dd.dataset.recday);
-        if (r) { const day = dd.value ? Math.max(1, Math.min(31, Math.round(+dd.value))) : null; try { await post('/api/tracking/recurring', { category: r.category, direction: r.direction, bucket: r.bucket, expected: r.expected, dueDay: day }); } catch (e) {} acRefresh(); }
+        // Same store as the checkbox above. The day picker edits the schedule's day1 rather
+        // than re-POSTing a whole recurring row, so a day change cannot silently create a second
+        // entry -- which the old upsert-by-POST could and did.
+        const hit = (SCH_STATE.schedules || []).find(x => String(x.id) === String(dd.dataset.recday));
+        if (hit) {
+          const day = dd.value ? Math.max(1, Math.min(31, Math.round(+dd.value))) : 1;
+          try { await patch('/api/tracking/schedules/' + hit.id, { day1: day }); }
+          catch (e) { showToast('Could not set the day — ' + (errDetail(e) || 'the server refused it')); }
+          acRefresh();
+        }
         return;
       }
     });

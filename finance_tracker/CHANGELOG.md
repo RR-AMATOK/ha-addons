@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.7.6
+
+The Budget tab lost a screen it should never have had, and the bills you track moved onto one
+engine instead of two.
+
+**A screen that kept a second set of books is gone**
+
+- The **Basis** screen has been removed. It asked you to type in your take-home, 401(k), HSA,
+  premiums and gross income — numbers the Tax tab already works out. On a fresh install three of
+  those six were wrong before you touched anything: it claimed a take-home of $120,000 against a
+  computed $90,659, a 401(k) of $24,500 against $15,000, and health premiums of $3,600 against
+  nothing at all. Those four figures added together were the "After-tax base" the frameworks were
+  measured against, which is why the same tab could show you 29% in one place and 23.9% six inches
+  away. The targets are now computed from your Tax tab directly, and a line at the top of
+  **Framework targets** says exactly what they were computed on.
+- **Your employer match was wrong, and it was wrong in the direction that costs you money.** It
+  divided by the gross income typed into that screen rather than your real salary — reporting
+  $5,400 a year of free money where the truth was $4,500.
+- The three settings on that screen that were genuinely yours — *Other investments* and the two
+  employer-match terms — moved to **Settings ▸ Budget rules**. *Income base* moved next to the
+  framework targets it applies to.
+
+**Where a gross dollar goes**
+
+- A new bar at the top of **Budget summary** shows what happens to your pay before the budget
+  starts: tax, investments, needs, wants, and what is left. Spend past what you earn and it marks
+  the point where your pay ran out.
+
+**The Budget tab reads as one thing now**
+
+- The settings above your buckets sat at four different heights and three different left edges.
+  They are one row. Two paragraphs of grey text that stood between the heading and the first
+  control are gone — one of them described the table further down and now sits with it.
+- **Split presets** and **Split by income** moved to **Settings ▸ Budget rules**. The `%` picker on
+  each budget line is unchanged and now offers *Manage presets…* so you can get to them from where
+  you are standing.
+
+**Your monthly base tracks your income, visibly**
+
+- It is locked to your Tax take-home and says so. Click the lock to enter your own number — for
+  contract income, a partner's share, or a month you know will be short — and it says *"Your number
+  — not tracking Tax"* until you click it back. Before this, one keystroke detached your budget
+  from your income permanently, nothing on screen said so, and the only way back was a function
+  with no button. Your choice now survives a reload, which it never did.
+
+**Two savings rates that looked like rivals**
+
+- They measure different things and now say so: **Investing** is what your plan does, **Payroll
+  savings rate** is what your paycheck already did before you touched a dollar. No number changed.
+
+**Bills you track**
+
+- **The bills ticked in "Set up recurring" were being saved somewhere the Scheduled Money surface
+  could not see.** Anything added after the app gained scheduling lived in the old list only. Both
+  now write to the same place, and the month's came-through / pending / missing check is computed
+  from it.
+- **A bill with no account said "That one is already logged" when nothing had been logged.** Every
+  bill carried over from the old checklist was in that state. It now says what is actually wrong
+  and offers a button to fix it.
+- A rejected edit to a schedule used to report success and quietly discard your change.
+- When the app cannot reach the server it now says so, instead of telling you that you have nothing
+  scheduled.
+- Accounts with no starting balance no longer draw a twelve-month history that never happened.
+- An automatic payment that cannot post now tells you, instead of failing quietly every month.
+
+**Budget round-up**
+
+- Deleting a bucket used to move your round-up into a different one — of a different type — with
+  nothing saying so, while the picker went on naming the old one.
+
 ## 0.7.5
 
 The FIRE tab grew up, the app stopped hardcoding the tax year, and three defects went with them.

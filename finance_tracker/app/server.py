@@ -2546,6 +2546,31 @@ def schedules_catch_up_endpoint(today: str | None = None, request: Request = Non
         return tracking_store.materialize_due_schedules(c, scope, day)
 
 
+@app.get("/api/tracking/schedules/occurrences")
+def schedules_in_window_endpoint(start: str | None = None, end: str | None = None,
+                                 request: Request = None) -> dict:
+    """READ-ONLY. Every active schedule with its occurrences in a window — the month view.
+
+    Declared BEFORE `/schedules/{schedule_id}` for the same reason `/due` and `/catch-up` are:
+    a path parameter would otherwise swallow the literal segment and try to parse "occurrences"
+    as an id.
+    """
+    scope = resolve_user(request)["scopeId"]
+    s = _today_or(start)
+    e = end or (_date.fromisoformat(s) + _timedelta(days=31)).isoformat()
+    for label, value in (("start", s), ("end", e)):
+        try:
+            _datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422,
+                                detail=f"{label} must be YYYY-MM-DD, got {value!r}")
+    if e < s:
+        raise HTTPException(status_code=422, detail="end must not precede start")
+    with closing(tracking_store.connect()) as c:
+        return {"start": s, "end": e,
+                "schedules": tracking_store.schedules_in_window(c, scope, s, e)}
+
+
 @app.get("/api/tracking/schedules")
 def list_schedules_endpoint(includeInactive: bool = True, request: Request = None) -> dict:
     scope = resolve_user(request)["scopeId"]
