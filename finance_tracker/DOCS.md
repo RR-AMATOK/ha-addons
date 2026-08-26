@@ -61,6 +61,28 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   or click a card or category anywhere else in the app to filter the ledger to it. The
   active filter always shows as one removable chip; a month with no matches explains
   the active filter instead of rendering an empty table.
+- **Changing jobs mid-year (since 0.7.7):** the **Job change** card on the Tax tab takes
+  what the old job has already paid you and what the new one will, and works out the
+  blended year — remaining 401(k) and HSA room, the employer match forfeited during an
+  eligibility wait, and the Social Security over-withholding that two employers in one
+  year cause. **Apply** writes that blended year into the Tax tab.
+
+  > **What Apply does to your budget, and what it no longer does.** The blended year is
+  > the right figure to file taxes on and the wrong one to spend: it averages the salary
+  > you have left behind across twelve months. Apply therefore *keeps* the take-home you
+  > had before pressing it, shows it on the Job change card as **Take-home you get now**,
+  > and budgets on that until the new job starts. Correct that field if it is not what
+  > actually lands — everything downstream reads it. On the start date the budget switches
+  > to the new job's own monthly take-home, and a banner on the Budget tab announces the
+  > change in advance. Nothing leaves the Job change card until you press Apply.
+
+  > **Paycheck counts.** Contribution targets are per-paycheck, so they depend on how many
+  > paydays are left in the year. Those are counted on your employer's calendar — including
+  > paydays moved earlier because they fall on a weekend or federal holiday, and the
+  > 1 January cheque that is really paid on 31 December and belongs to the earlier tax
+  > year. The card states the pay schedule it assumed; if your employer pays on different
+  > days than it guesses, the count can be one out.
+
 - **Multiple household users:** the panel opens to every Home Assistant user in the
   household, not just admins (since 0.2.1). **Since 0.3.0, each household member has
   their own data** — transactions, accounts, budget, goals, ventures, sinking funds,

@@ -1,9 +1,9 @@
 # Finance Tracker — a Home Assistant add-on
 
 A self-hosted household finance app that runs entirely inside Home Assistant: tax
-planning (Federal + TX/CA/WA), budgeting, real spending vs. plan, sinking funds,
-FIRE projections, and — since 0.3.0 — a per-HA-login profile for every household
-member. FastAPI + SQLite live inside the add-on's own private `/data` volume;
+planning (Federal, plus Texas and Washington — both no-income-tax states),
+budgeting, real spending vs. plan, sinking funds, FIRE projections, and — since
+0.3.0 — a per-HA-login profile for every household member. FastAPI + SQLite live inside the add-on's own private `/data` volume;
 there's no external service, no signup, and no ports exposed to your network. Open
 **Finance** in the HA sidebar and everything runs behind your existing HA login.
 
@@ -22,13 +22,18 @@ there's no external service, no signup, and no ports exposed to your network. Op
 *Tax — Federal + state take-home breakdown, Single and MFJ.*
 
 ![Budget](images/budget.png)
-*Budget — 50/30/20 breakdown, custom categories, sinking funds.*
+*Budget — where a gross dollar goes, buckets and line items, and the job-change
+banner announcing next month's take-home.*
 
 ![Actuals](images/actuals.png)
 *Actuals — the transaction ledger, with the single Filter control.*
 
 ![FIRE](images/fire.png)
 *FIRE — Coast FIRE hero number, years-to-FI bands, savings-rate lever.*
+
+*Screenshots use the worked example the add-on ships with, not a real household's
+figures — the "These are example figures, not yours" banner is visible in them and
+clears with one click.*
 
 <!-- Future candidates: Settings (theme picker), a mobile/phone-width shot. -->
 
@@ -49,12 +54,13 @@ is published to this repository.
 
 ## What's inside
 
-Seven tabs, one consistent take-home number feeding all of them:
+Eight tabs, one consistent take-home number feeding all of them:
 
 - **Overview** — net-worth forecast, spending pace vs. plan this month, compensation flow.
-- **Tax** — Federal + TX / CA / WA / no-state-tax, Single and Married Filing Jointly,
-  payroll deductions (401k, HSA, premiums), ESPP/RSU dispositions, a max-out
-  contribution planner, and a WA-vs-TX cost-of-living compare.
+- **Tax** — Federal + Texas / Washington / no state tax, Single and Married Filing
+  Jointly, payroll deductions (401k, HSA, premiums), ESPP/RSU dispositions, a
+  max-out contribution planner, a WA-vs-TX cost-of-living compare, and a **Job
+  change** planner for moving employer mid-year (see below).
 - **Budget** — 50/30/20 (and other frameworks) on your after-tax income, custom
   categories, savings goals, a house-affordability planner, **sinking funds** for
   irregular expenses (car maintenance, travel — reserve monthly, draw against it
@@ -65,9 +71,32 @@ Seven tabs, one consistent take-home number feeding all of them:
   balance with earmarked payments; CSV/Excel import; full backup/restore.
 - **Invest** — next-dollar savings waterfall, Roth/backdoor guidance, an
   investment-accounts registry, and a venture ROI tracker for self-investments.
-- **Car** — lease vs. finance, total cost of ownership, buy-vs-lease crossover.
+- **Decisions** — house affordability and rent-vs-buy, plus car lease vs. finance,
+  total cost of ownership and the buy-vs-lease crossover.
+- **Setup** — accounts, categories, recurring bills, linked logins, theme, and
+  backup/restore.
 - **FIRE** — Coast FIRE hero number, years-to-FI bands, a savings-rate lever, and
   Lean/FI/Fat variants.
+
+### Changing jobs mid-year (since 0.7.7)
+
+Moving employer part-way through a year breaks most planning tools, because the
+year stops being one salary. The **Job change** card on the Tax tab takes what the
+old job has already paid you and what the new one will, and works out the blended
+year — the 401(k) and HSA room you have left, the employer match you forfeit during
+an eligibility wait, and the Social Security over-withholding two employers cause
+that nobody refunds automatically.
+
+The Budget tab then follows it: your budget stays on the money still arriving until
+the start date, switches on the day, and tells you in advance —
+
+> *From November 2 your monthly take-home becomes $9,929 — up $2,374/mo on $7,555
+> at your current job.*
+
+Both figures are one month at one job, so the difference is the one you would
+actually feel. Contribution targets are divided by paychecks **counted on your
+employer's calendar** — including the ones paid early because they fall on a weekend
+or federal holiday, and the 1 January cheque that really arrives on 31 December.
 
 **Multi-user, per household login (since 0.3.0):** every Home Assistant user who
 opens the panel gets their own transactions, accounts, budget, goals, and tax
