@@ -12654,8 +12654,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         let gt = 0;
         g.items.forEach((it, ii) => { household += itemTotal(it); gt += myShare(it); addLine(b.kind, it); setCell(it, '.bgb-itotal[data-b="' + bi + '"][data-g="' + gi + '"][data-i="' + ii + '"]'); });
         btotal += gt;
+        // The group's own SHARED lines (§5.1), for the subtotal only. Without this a group whose
+        // every line is shared reported $0.00 while listing six lines adding to $882.70 above it,
+        // and the bucket header directly overhead already counted them -- so the two numbers on
+        // screen disagreed with each other by the whole contents of the group.
+        //
+        // Display-only, and deliberately NOT folded into `btotal`: the bucket picks up every
+        // shared line below via hbLinesInBucket, which sweeps grouped ones too. Adding them here
+        // as well would count each of them twice in the bucket.
+        const gShared = hbLinesAt(hbAsg, hbBucketKey(b, bi), hbGroupKey(g, gi))
+          .reduce((acc, line) => acc + myShare(hbAsItem(line)), 0);
         const gsum = root.querySelector('.bgb-gsum[data-b="' + bi + '"][data-g="' + gi + '"]');
-        if (gsum) gsum.textContent = f2(gt);
+        if (gsum) gsum.textContent = f2(gt + gShared);
       });
       // Shared lines injected into THIS bucket (§5.1) fold in exactly like any other item
       // (§5.3) -- the same myShare()/addLine() calls, no new math. Deliberately NOT added to

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.8
+
+A shared-expense group was reporting nothing.
+
+- **A group made only of shared lines showed a $0.00 subtotal.** A "Housing" group listing six
+  shared lines worth $847.70 reported zero, while the bucket heading directly above it counted
+  them correctly — two figures an inch apart, disagreeing by the whole contents of the group. The
+  group subtotal was adding up only the lines you type in; shared lines reached the bucket by a
+  different route and never reached the group they sit in.
+
+  The bucket total was right before this and is unchanged by it. That is deliberate: shared lines
+  are counted once, by the bucket, and the group subtotal now reports them without adding them a
+  second time.
+
 ## 0.7.7
 
 Your budget now knows about your job change, and two numbers it had been quietly getting wrong
