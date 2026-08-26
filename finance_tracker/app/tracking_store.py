@@ -102,6 +102,11 @@ _BACKUP_TABLES: tuple = (
     ("schedule",           ("id", "user_id", "name", "direction", "amount_cents", "amount_is_estimate", "account_id", "to_account_id", "bucket", "category", "description", "freq", "interval_n", "weekdays", "day_1", "day_2", "month_of_year", "anchor_on", "end_mode", "ends_on", "end_count", "weekend_shift", "auto_post", "active", "parent_id", "created_at")),
     ("schedule_exception", ("id", "schedule_id", "occurrence_on", "action", "amount_cents", "moved_to", "description", "created_at")),
     ("schedule_txn",       ("schedule_id", "occurrence_on", "txn_id")),
+    # FIRE progress log. Ordinary user data, plain verbatim restore. It matters MORE than most
+    # that this is backed up: the rows cannot be regenerated from anything else, because the FI
+    # target they carry was computed from assumptions that are gone. Lose the table and the
+    # history is lost for good -- there is no recomputing it from the accounts.
+    ("fire_progress",      ("id", "user_id", "on_date", "net_worth_cents", "fi_target_cents", "variant_key", "assumptions", "note", "created_at")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
@@ -110,6 +115,7 @@ _BACKUP_OPTIONAL_TABLES = frozenset({
     "scenario", "goal", "venture", "user_profile", "fund", "fund_txn",
     "household_budget", "household_budget_share",
     "schedule", "schedule_exception", "schedule_txn",
+    "fire_progress",
 })
 
 
@@ -451,8 +457,17 @@ CREATE TABLE IF NOT EXISTS link_code (
 -- (tests/test_s1_1_qa_matrix.py's `_v6_schema`/`_v7_schema`, cut at the "Sinking funds"
 -- marker) never see these tables either -- same reasoning as `fund`/`fund_txn`'s and
 -- `user_alias`/`link_code`'s own placement notes above; they didn't exist that far back.
+-- AUTOINCREMENT on `id` is load-bearing, not tidiness (BUG-0017). Existing databases are
+-- converted by migration 17 rather than by this line, so removing it does not immediately break
+-- anything -- which is exactly why it is worth stating here: this declaration is where the schema
+-- tells the truth about itself, and a reader should not have to find a migration to learn it. A plain INTEGER PRIMARY KEY
+-- lets SQLite reissue a deleted row's id to the next insert: reproduced by creating line 2
+-- "Netflix", hard-deleting it, and creating an unrelated line, which came back as id 2. Anything
+-- holding a bare line id for later validation -- which the invite redemption path in
+-- docs/household-invite-design.md does exactly -- would then resolve to a line nobody chose to
+-- share. AUTOINCREMENT keeps a high-water mark in sqlite_sequence so an id is never reused.
 CREATE TABLE IF NOT EXISTS household_budget (
-  id          INTEGER PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT    NOT NULL,                 -- "Rent", "Groceries"
   bucket      TEXT    NOT NULL,                 -- server bucket key (DEC-010) = the actuals matching key
   type        TEXT    NOT NULL CHECK (type IN ('split','pooled')),
@@ -460,6 +475,36 @@ CREATE TABLE IF NOT EXISTS household_budget (
   status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
   created_by  TEXT    NOT NULL,                 -- scopeId who created it (audit/honesty; not an owner gate)
   created_at  TEXT    NOT NULL
+);
+
+-- ── FIRE progress log ───────────────────────────────────────────────────────────────────────
+-- One row per time the user says "this is where I am now". It stores the net worth AND the FI
+-- target as it stood at that moment, with the assumptions that produced the target.
+--
+-- STORING THE TARGET IS THE WHOLE POINT, and it is why this cannot be derived after the fact.
+-- The FI number is a function of spending, withdrawal rate and variant choices, all of which
+-- change and none of which were ever recorded. There is no way to know what the target WAS last
+-- March. Back-filling today's target across old net-worth snapshots would draw a confident line
+-- describing a plan the user never had -- the same class as the sparkline that opened on six
+-- virtual zeros, removed for exactly that reason (BUG-0057).
+--
+-- So history starts the day logging starts. The chart is empty on day one, and that is honest.
+--
+-- `assumptions` is the JSON the target was computed from. Kept verbatim rather than as columns
+-- because the FIRE engine's inputs have changed twice already and will change again; a reader
+-- needs to know what the number MEANT, and a column set frozen at today's engine would quietly
+-- stop describing it.
+CREATE TABLE IF NOT EXISTS fire_progress (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id         TEXT    NOT NULL,
+  on_date         TEXT    NOT NULL,          -- 'YYYY-MM-DD', the day being claimed
+  net_worth_cents INTEGER NOT NULL,
+  fi_target_cents INTEGER NOT NULL,          -- the FI number AS IT STOOD, never recomputed
+  variant_key     TEXT    NOT NULL DEFAULT '',  -- '' = the main target; else 'lean'/'fat'/custom
+  assumptions     TEXT,                      -- JSON: what produced fi_target_cents
+  note            TEXT,
+  created_at      TEXT    NOT NULL,
+  UNIQUE (user_id, on_date, variant_key)     -- one reading per day per target; re-logging replaces
 );
 
 -- Child: each member's participation. user_id = the member's DATA-SCOPE id (the same
@@ -1105,7 +1150,99 @@ def _mig_add_schedule_tables(conn) -> None:
              r["bucket"], r["category"], int(due) if due else 1, anchor, active, now))
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables]
+def _mig_household_budget_autoincrement(conn) -> None:
+    """Migration 17 (BUG-0017) -- v16 -> v17. Stop SQLite reusing a deleted line's id.
+
+    Verified before the fix: created "Netflix" at id 2, hard-deleted it, created an unrelated
+    line, and got id 2 back. Any stored reference to that id then points at a line nobody chose to
+    share, which is why the invite design has been gated on this bug.
+
+    AUTOINCREMENT cannot be added by ALTER, so this is the standard SQLite table rebuild. Three
+    things make it safe to re-enter, which matters because `import_all` runs pending migrations
+    after restoring a backup:
+
+      * a NO-OP when the table already declares AUTOINCREMENT -- checked against sqlite_master
+        rather than user_version, so even a half-applied state converges;
+      * `household_budget_share.line_id` REFERENCES this table ON DELETE CASCADE, so the drop must
+        happen with foreign keys OFF or every child row cascades away with it. The pragma is
+        restored in a `finally` whatever happens;
+      * ids are copied VERBATIM, so every existing reference stays valid, and the high-water mark
+        is seeded from MAX(id) so the next insert cannot collide with a live row either.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='household_budget'").fetchone()
+    if row is None:
+        return                       # table not created yet; the base schema ships it correct
+    if "AUTOINCREMENT" in (row[0] or "").upper():
+        return                       # already converted (fresh DB, or a re-entered restore)
+
+    # PRAGMA foreign_keys IS SILENTLY IGNORED INSIDE A TRANSACTION. That is not a footnote here:
+    # the first version of this migration turned them off, did the rebuild (which opens an implicit
+    # transaction on the first write), and then "restored" them in the finally -- where the pragma
+    # did nothing at all. Its own test caught it: foreign keys were left OFF for the rest of the
+    # connection's life, which disables integrity enforcement everywhere, long after this function
+    # returns. Commit on both sides so each pragma is executed outside a transaction.
+    fk_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("""CREATE TABLE household_budget__new (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          name        TEXT    NOT NULL,
+          bucket      TEXT    NOT NULL,
+          type        TEXT    NOT NULL CHECK (type IN ('split','pooled')),
+          total_cents INTEGER,
+          status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+          created_by  TEXT    NOT NULL,
+          created_at  TEXT    NOT NULL
+        )""")
+        conn.execute(
+            "INSERT INTO household_budget__new (id, name, bucket, type, total_cents, status, created_by, created_at) "
+            "SELECT id, name, bucket, type, total_cents, status, created_by, created_at FROM household_budget")
+        conn.execute("DROP TABLE household_budget")
+        conn.execute("ALTER TABLE household_budget__new RENAME TO household_budget")
+        # This was an INSERT seeding sqlite_sequence, with a comment claiming the sequence would
+        # otherwise start below the live rows. That claim was FALSE and a surviving mutant proved
+        # it: SQLite maintains the high-water mark itself on an explicit-id insert (verified —
+        # copying ids 1, 5, 9 leaves seq=9 and the next auto id is 10). The write could not fail
+        # and could not matter.
+        #
+        # A check that CAN fail is worth more than a write that cannot. If a future edit changes
+        # the copy above to anything that does not carry ids verbatim, this stops the migration
+        # instead of letting the next insert collide with a live row.
+        top = conn.execute("SELECT COALESCE(MAX(id), 0) FROM household_budget").fetchone()[0]
+        seq_row = conn.execute(
+            "SELECT seq FROM sqlite_sequence WHERE name='household_budget'").fetchone()
+        seq = seq_row[0] if seq_row else 0
+        if top and seq < top:
+            raise RuntimeError(
+                f"migration 17: sqlite_sequence is {seq} but the highest live id is {top} -- "
+                "the next insert would collide with an existing row")
+    finally:
+        conn.commit()
+        conn.execute(f"PRAGMA foreign_keys={'ON' if fk_on else 'OFF'}")
+        # Verified, not assumed. A pragma that silently no-ops is exactly what went wrong the
+        # first time, and a migration that leaves integrity checking off must fail loudly rather
+        # than hand back a connection that quietly accepts orphans.
+        if conn.execute("PRAGMA foreign_keys").fetchone()[0] != fk_on:
+            raise RuntimeError(
+                "migration 17 could not restore PRAGMA foreign_keys -- refusing to continue with "
+                "integrity enforcement in the wrong state")
+
+
+def _mig_add_fire_progress(conn) -> None:
+    """Migration 18 -- v17 -> v18. The FIRE progress log.
+
+    Purely additive: CREATE TABLE IF NOT EXISTS, which is a no-op on any DB that already got the
+    table from SCHEMA (the goal/venture/fund/household/schedule convention). Nothing is backfilled
+    and nothing could be -- the whole reason this table exists is that historical FI targets are
+    unreconstructable, so a backfill would have to invent them.
+    """
+    conn.executescript(SCHEMA[SCHEMA.index("CREATE TABLE IF NOT EXISTS fire_progress ("):
+                              SCHEMA.index(");", SCHEMA.index("CREATE TABLE IF NOT EXISTS fire_progress (")) + 2])
+
+
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables, _mig_household_budget_autoincrement, _mig_add_fire_progress]
 
 
 def _now() -> str:
@@ -3999,6 +4136,94 @@ def list_schedules(conn, user_id, include_inactive=True) -> list[dict]:
     if not include_inactive:
         sql += " AND active = 1"
     return [_schedule_dict(r) for r in conn.execute(sql + " ORDER BY name", (user_id,)).fetchall()]
+
+
+def _fire_progress_dict(r) -> dict:
+    import json as _json
+    try:
+        assumptions = _json.loads(r["assumptions"]) if r["assumptions"] else None
+    except (ValueError, TypeError):
+        assumptions = None          # a row written by an older shape must not break the list
+    return {
+        "id": r["id"],
+        "on": r["on_date"],
+        "netWorth": round(r["net_worth_cents"] / 100.0, 2),
+        "fiTarget": round(r["fi_target_cents"] / 100.0, 2),
+        "pctToFi": (round(r["net_worth_cents"] / r["fi_target_cents"], 6)
+                    if r["fi_target_cents"] else None),
+        "variantKey": r["variant_key"] or None,
+        "assumptions": assumptions,
+        "note": r["note"],
+        "createdAt": r["created_at"],
+    }
+
+
+def log_fire_progress(conn, user_id, on: str, net_worth: float, fi_target: float,
+                      variant_key: str | None = None, assumptions=None, note=None) -> dict:
+    """Record where the user stands against their FI target, ON A GIVEN DAY.
+
+    `fi_target` is stored, not derived. That is the point: it is a function of spending, withdrawal
+    rate and variant choices that change over time and were never recorded, so a target read back
+    later can only be the one that was true when the row was written.
+
+    Re-logging the same day and target REPLACES the row rather than adding a second. A day has one
+    net worth; logging twice because the first figure was wrong is the common case, and two
+    contradictory points on one date is not a history, it is a bug the chart would render.
+    """
+    import json as _json
+    try:
+        on = datetime.strptime(str(on or "").strip(), "%Y-%m-%d").date().isoformat()
+    except (TypeError, ValueError):
+        raise ValueError(f"on must be YYYY-MM-DD, got {on!r}")
+
+    def _cents(v, field):
+        try:
+            c = round(float(v) * 100)
+        except (TypeError, ValueError):
+            raise ValueError(f"{field} must be a number, got {v!r}")
+        if c < 0:
+            raise ValueError(f"{field} must not be negative")
+        return int(c)
+
+    # Net worth MAY be zero or anything upward -- a reading of nothing is a real reading, and
+    # somebody starting from nothing is exactly who this chart is for.
+    nw_c = _cents(net_worth, "netWorth")
+    fi_c = _cents(fi_target, "fiTarget")
+    if fi_c <= 0:
+        # A target of zero would make pctToFi a division by zero and the chart meaningless.
+        raise ValueError("fiTarget must be greater than zero")
+    key = (variant_key or "").strip()
+    payload = _json.dumps(assumptions, sort_keys=True) if assumptions is not None else None
+    conn.execute(
+        "INSERT INTO fire_progress (user_id, on_date, net_worth_cents, fi_target_cents,"
+        " variant_key, assumptions, note, created_at) VALUES (?,?,?,?,?,?,?,?)"
+        " ON CONFLICT (user_id, on_date, variant_key) DO UPDATE SET"
+        "   net_worth_cents=excluded.net_worth_cents, fi_target_cents=excluded.fi_target_cents,"
+        "   assumptions=excluded.assumptions, note=excluded.note, created_at=excluded.created_at",
+        (user_id, on, nw_c, fi_c, key, payload, (note or None), _now()))
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM fire_progress WHERE user_id=? AND on_date=? AND variant_key=?",
+        (user_id, on, key)).fetchone()
+    return _fire_progress_dict(row)
+
+
+def list_fire_progress(conn, user_id, variant_key: str | None = None, limit: int = 500) -> list[dict]:
+    """Oldest first -- the order a chart plots, so no caller has to remember to reverse it."""
+    sql = "SELECT * FROM fire_progress WHERE user_id=?"
+    args: list = [user_id]
+    if variant_key is not None:
+        sql += " AND variant_key=?"
+        args.append(variant_key or "")
+    sql += " ORDER BY on_date ASC, id ASC LIMIT ?"
+    args.append(int(limit))
+    return [_fire_progress_dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def delete_fire_progress(conn, user_id, entry_id) -> bool:
+    cur = conn.execute("DELETE FROM fire_progress WHERE user_id=? AND id=?", (user_id, entry_id))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def schedules_in_window(conn, user_id, start: str, end: str, cap: int = 400) -> list[dict]:

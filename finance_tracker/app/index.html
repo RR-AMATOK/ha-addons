@@ -186,11 +186,26 @@
   }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--selected-bg); color: var(--selected-ink); border-color: var(--selected-bg); font-weight: var(--fw-semibold); }
-  main {
-    display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
+  /* THE TAX VIEW'S two-column shell. Keyed on #tab-tax, not on the bare `main` element.
+     It was `main { … }` because `main` used to mean exactly one thing — the Tax panel — and the
+     element selector was standing in for an identity. TODO-254 gave every tab panel a <main>
+     landmark, at which point this silently applied to all eight: a `minmax(320px, 420px)` first
+     column plus a `1fr` second forced a 390px viewport to lay out ~510px wide, and the Budget and
+     Setup suites failed on overflow that had nothing to do with the rules that caused it.
+
+     The lesson is in the selector: an element type used as a proxy for identity holds only while
+     that element stays unique, and nothing warns you on the day it stops. */
+  /* NO `display` DECLARATION HERE, and that omission is the whole point. An id selector is
+     (1,0,0) and beats both `.tab-panel { display:none }` (0,1,0) and the UA `[hidden]` rule, so
+     putting `display:grid` on the id pinned this panel VISIBLE on every tab — measured at 4224px
+     tall behind Overview and Setup, which is what shifted the strategy composer by a pixel.
+     Display stays governed by the .tab-panel rules; this carries only the Tax view's own grid
+     geometry, which is inert until something turns the grid on. */
+  #tab-tax {
+    grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
     padding: 16px 24px; max-width: 1400px; margin: 0 auto;
   }
-  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 900px) { #tab-tax { grid-template-columns: minmax(0, 1fr); } }
   section.card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
     padding: 14px 16px 16px; margin-bottom: 14px;
@@ -384,10 +399,6 @@
      then bgbTotals set style.display='' to show it, which cleared the inline value entirely and
      left a plain block, stacking the label and the amount with no gap. Layout belongs in a class
      precisely so a visibility toggle cannot destroy it. */
-  .bgb-roundup { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3);
-                 padding: 4px 8px; border-top: 1px dashed var(--line); }
-  .bgb-roundup[hidden] { display: none; }
-  .bgb-rusum   { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   .fv-list  { --fv-c-name: 128px; --fv-c-basis: 124px; --fv-c-amt: 112px; --fv-c-swr: 88px; --fv-c-pt: 112px; --fv-c-act: 30px; }
   .fv-head,
@@ -793,9 +804,16 @@
   #tabbar .tab-btn.active,
   #tabbar .tab-btn.active:hover { background:var(--selected-bg); color:var(--selected-ink); }
   #tabbar .tab-btn:active { transform:translateY(1px); }
+  /* Visually hidden until focused — the standard skip-link treatment. It must be REACHABLE by
+     keyboard at all times (so not display:none, which removes it from the tab order entirely) and
+     invisible until it matters. */
+  .skip-link { position:absolute; left:-9999px; top:0; z-index:1000;
+               background:var(--accent); color:#fff; padding:10px 16px; border-radius:0 0 6px 0;
+               font-size:var(--fs-sm); font-weight:var(--fw-medium); text-decoration:none; }
+  .skip-link:focus { left:0; }
   .tab-panel { display:none; }
   .tab-panel.active { display:block; }
-  main.tab-panel.active { display:grid; }     /* preserve the Tax view's 2-column grid */
+  #tab-tax.tab-panel.active { display:grid; }   /* the Tax view's 2-column grid; see #tab-tax above */
   /* Page inset for the plain-div tab panels (match Tax's main: 1400/24px).
      Tax (#tab-tax = main) and Overview (#tab-overview, inline-padded children)
      are deliberately excluded so neither double-pads. */
@@ -837,6 +855,15 @@
   .result-list li span:last-child { font-variant-numeric:tabular-nums; font-weight:var(--fw-semibold); }
   .warn-box { background:var(--warnbox-surface); border:1px solid var(--warnbox-border); color:var(--warnbox-text); border-radius:8px; padding:8px 12px; font-size:var(--fs-sm); margin:6px 0; line-height:1.4; }
   .note-box { color:var(--muted); font-size:var(--fs-xs); margin:6px 0; line-height:var(--lh-base); }
+  /* NEWS, not a warning and not a footnote. The two boxes above cover "something is wrong"
+     (.warn-box, red) and "here is a qualifier you may ignore" (.note-box, muted and deliberately
+     boxless). Neither fits "your income changes on the 7th": .warn-box would paint a pay rise as a
+     problem, and .note-box renders it as more grey prose in a tab that is already full of it.
+     Geometry is .warn-box's exactly — same radius, padding, border width, margin — so this reads
+     as the same family at a different temperature; only the colour role changes, and it is built
+     from --accent, which every theme already sets, rather than a new palette entry. */
+  .news-box { background:var(--accent-tint); border:1px solid var(--accent); color:var(--text);
+              border-radius:8px; padding:8px 12px; font-size:var(--fs-sm); margin:6px 0; line-height:1.4; }
   /* Accessibility: visible keyboard focus (inputs deliberately clear outline otherwise) */
   .input-pair input:focus-visible, select:focus-visible, button:focus-visible,
   .chip:focus-visible, .tab-btn:focus-visible, .unit:focus-visible, [data-cad-toggle]:focus-visible {
@@ -1061,11 +1088,13 @@
   /* A solo screen collapses its tab to one column: a single card rendered in half the width
      with an empty column beside it looks broken, not focused. Covers both panel shapes — Tax is
      a grid `main` with bare column divs, the others wrap content in .panel-inner. */
-  .tab-panel.screen-solo, main.screen-solo { grid-template-columns: 1fr !important; }
+  /* `.tab-panel` covers every panel now that they are all <main>; the second selector was for
+     the one that used to be. */
+  .tab-panel.screen-solo { grid-template-columns: 1fr !important; }
   .screen-solo .panel-inner { display:block !important; }
   /* `hidden` must win over a card's own display. Screens rely on it, and a card that ignored it
      would appear on every screen at once. */
-  .tab-panel [hidden], main.tab-panel [hidden] { display:none !important; }
+  .tab-panel [hidden] { display:none !important; }
 
   /* MEASURE. Giving a card the whole screen fixed the squeeze but created the opposite defect:
      the content inside was written for a ~430px column. `.row` is `1fr auto`, so at 1350px a
@@ -1283,6 +1312,13 @@
      span that IS a flex item, which is exactly the straggler worth catching. */
   .card .note-box, .card .warn-box, .card p.mini, .card p.muted,
   .card .mini.muted { max-width: 780px; }
+  .card p.mini.bgb-help { max-width: none; }
+  /* .news-box is deliberately NOT in that list, and it was until 2026-08-26. The 780px measure is
+     right for bare prose, where the limit is invisible and the only effect is a readable line. A
+     FILLED box has a visible edge: capped at 780px inside a 1,545px card it stops just past
+     halfway and reads as a layout bug rather than as typography. The message is two short
+     sentences, so a full-width line is nowhere near the length the measure exists to prevent. */
+  .card .news-box { max-width: none; }
 
   /* The tab index (Direction A). Uses ONLY tokens the tab pills already use -- --muted at rest,
      --accent-tint on hover, --selected-bg/--selected-ink for the current section, --line for the
@@ -1376,6 +1412,29 @@
      end of the bar and a baseline of its own, rather than floating between two control rows. */
   .bgb-set > .bgb-set-read { margin-left:auto; text-align:right; align-self:center; }
   @media (max-width:480px) {
+    /* BUG-0038. Measured at 390px: every visible checkbox rendered 13x13 -- under a third of the
+       44px floor in WCAG 2.5.8 and DESIGN.md §5, on a device that is only ever touched. Scaled
+       rather than resized because `width`/`height` on a native checkbox is honoured
+       inconsistently across engines while `transform` is not, and the transform leaves the
+       checkbox's own hit area intact. The negative margin absorbs the growth so nothing around it
+       reflows; the label's padding supplies the rest of the target. */
+    input[type="checkbox"], input[type="radio"] {
+      transform: scale(1.7);
+      transform-origin: left center;
+      margin-right: 9px;
+    }
+    label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+    }
+    /* The other shape: a `.row` holding a sibling label + checkbox, where the label is associated
+       by `for=` rather than by wrapping. The ROW is the comfortable target there — the label is
+       clickable once associated, and it and the box share the row's height. */
+    .row:has(> input[type="checkbox"]), .row:has(> input[type="radio"]) {
+      min-height: 44px;
+      align-items: center;
+    }
     /* Full-bleed, DESIGN.md §4.3: a 148px control beside a 340px .input-pair is the defect that
        rule exists for. */
     .bgb-set > .nw-field { flex:1 1 100%; }
@@ -1749,6 +1808,13 @@
 </head>
 <body>
 
+<!-- The first focusable thing in the document. There was no skip link anywhere (zero grep hits),
+     so a keyboard user arrived at the top of an eight-item tab bar on every single page load and
+     had to tab through all of it to reach the content, on every tab switch, forever.
+     It targets the ACTIVE panel rather than a fixed id, because which <main> is live changes with
+     the tab -- a static href would send you to a hidden panel six times out of eight. -->
+<a href="#" class="skip-link" id="skipToContent">Skip to content</a>
+
 <header>
   <div class="brand">
     <h1>Finance</h1>
@@ -1987,7 +2053,7 @@
   <button type="button" id="btnDisclaimerX" class="disclaimer-x" aria-label="Dismiss disclaimer" title="Dismiss">&times;</button>
 </div>
 
-<div class="tab-panel active" id="tab-overview">
+<main class="tab-panel active" id="tab-overview" tabindex="-1">
   <div id="ov_out" style="padding:16px 24px 0;max-width:1100px;margin:0 auto">Calculating your money picture…</div>
   <div style="padding:6px 24px 24px;max-width:1100px;margin:0 auto">
     <div class="subhead">Net worth forecast</div>
@@ -2040,9 +2106,9 @@
       <div id="nw_chart" style="margin-top:14px" class="mini">Enter your current net worth to forecast.</div>
     </section>
   </div>
-</div>
+</main>
 
-<div class="tab-panel" id="tab-fire">
+<main class="tab-panel" id="tab-fire" tabindex="-1" hidden>
   <div style="padding:16px 24px 24px;max-width:1100px;margin:0 auto">
 
     <!-- 1. Disclaimer strip -->
@@ -2209,9 +2275,9 @@
     </section>
 
   </div>
-</div>
+</main>
 
-<main id="tab-tax" class="tab-panel">
+<main id="tab-tax" class="tab-panel" tabindex="-1" hidden>
   <div>
     <!-- Compensation -->
     <section class="card" id="tax_comp_card">
@@ -2307,14 +2373,14 @@
           <div class="row"><label class="mini">FMV at purchase / share</label><span class="input-pair"><input id="espp_pfmv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
           <div class="row"><label class="mini">FMV at grant / share</label><span class="input-pair"><input id="espp_gfmv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
           <div class="row"><label class="mini">Sale price / share</label><span class="input-pair"><input id="espp_sp" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
-          <div class="row"><label class="mini">Qualifying disposition <span class="hint">(&gt;2yr grant &amp; &gt;1yr purchase)</span></label><input id="espp_qual" type="checkbox" checked></div>
-          <div class="row"><label class="mini">If disqualifying, gain is long-term</label><input id="espp_lt" type="checkbox"></div>
+          <div class="row"><label class="mini" for="espp_qual">Qualifying disposition <span class="hint">(&gt;2yr grant &amp; &gt;1yr purchase)</span></label><input id="espp_qual" type="checkbox" checked></div>
+          <div class="row"><label class="mini" for="espp_lt">If disqualifying, gain is long-term</label><input id="espp_lt" type="checkbox"></div>
 
           <div class="subhead">RSU shares sold</div>
           <div class="row"><label class="mini">Shares sold</label><span class="input-pair"><input id="rsu_shares" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">sh</span></span></div>
           <div class="row"><label class="mini">Cost basis (FMV at vest) / share</label><span class="input-pair"><input id="rsu_vfmv" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
           <div class="row"><label class="mini">Sale price / share</label><span class="input-pair"><input id="rsu_sp" type="text" inputmode="decimal" data-fmt="usd" value="0"/><span class="unit">$</span></span></div>
-          <div class="row"><label class="mini">Long-term <span class="hint">(held &gt;1yr after vest)</span></label><input id="rsu_lt" type="checkbox" checked></div>
+          <div class="row"><label class="mini" for="rsu_lt">Long-term <span class="hint">(held &gt;1yr after vest)</span></label><input id="rsu_lt" type="checkbox" checked></div>
           <div class="mini muted" style="margin:2px 0 8px">RSU vest income is already in your wages — this is just the gain/loss since vesting.</div>
 
           <div class="subhead">Estimated tax / safe harbor</div>
@@ -2478,8 +2544,6 @@
           <span class="input-pair"><input id="addlMedRate" type="number" step="0.001" value="0.9" /><span class="unit">%</span></span>
         </div>
 
-        <!-- California removed from the tool -->
-        <div id="caBrackets" style="display:none"></div>
       </div>
     </section>
   </div>
@@ -2658,6 +2722,9 @@
       <div class="jc-sec-body"><div class="jc-fields">
       <div class="row"><label>Last day worked</label>
         <span class="input-pair"><input id="jc_a_last" type="date"></span></div>
+      <div class="row"><label for="jc_a_takehome">Take-home you get now <span class="hint">(per month)</span></label>
+        <span class="input-pair"><input id="jc_a_takehome" type="text" inputmode="decimal" data-fmt="usd" data-fmt-blank="keep"><span class="unit">$</span><span class="unit">/mo</span></span></div>
+      <p class="mini muted measure" id="jc_a_takehome_note" style="margin:-2px 0 8px"></p>
       <div class="row"><label>Gross wages so far</label>
         <span class="input-pair"><input id="jc_a_wages" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></div>
       <div class="row"><label>Bonus paid so far</label>
@@ -2675,6 +2742,8 @@
           <option value="semimonthly" selected>Twice a month (24)</option>
           <option value="monthly">Monthly (12)</option>
         </select></div>
+      <div class="mini muted" id="jc_firstpay_note" style="margin:-2px 0 0"></div>
+
       </div><div class="jc-stats" id="jc_stats_pay"></div></div>
       </section>
 
@@ -2743,6 +2812,10 @@
       <div class="row"><label>Aiming for</label>
         <span class="jc-target"><select id="jc_t_ira_mode"><option value="cap">The annual cap</option><option value="custom">A number I choose</option></select>
           <span class="input-pair" id="jc_t_ira_wrap" hidden><input id="jc_t_ira" type="text" inputmode="decimal" data-fmt="usd" value="0"><span class="unit">$</span></span></span></div>
+      <div class="row"><label for="jc_ira_apr15">Fund it after December</label>
+        <span class="mini"><input id="jc_ira_apr15" type="checkbox" style="width:auto">
+          use the <b>15 April</b> deadline for this year&rsquo;s contribution</span></div>
+      <div class="mini muted" id="jc_ira_apr15_note" style="margin:-2px 0 0"></div>
       </div><div class="jc-stats" id="jc_stats_ira"></div></div>
       </section>
 
@@ -2756,7 +2829,7 @@
   </div>
 </main>
 
-<div class="tab-panel" id="tab-budget"><div class="panel-inner">
+<main class="tab-panel" id="tab-budget" tabindex="-1" hidden><div class="panel-inner">
   <div>
     <section class="card" id="bgb_summary_card">
       <h2>Budget summary</h2>
@@ -2819,6 +2892,9 @@
     </label>
     <div id="bgb_summary" class="mini bgb-set-read"></div>
   </div>
+  <!-- "A new budget is coming." Sits ABOVE the hint because it is news, not a qualifier: the
+       number below it is still today's, and this says when that stops being true. -->
+  <div id="bgb_jc_banner" hidden></div>
   <div class="mini muted" id="bgb_base_hint" style="margin-top:6px"></div>
   <div class="mini muted" id="bgb_ru_note" style="margin:6px 0 0;display:none;line-height:1.5"></div>
 
@@ -2834,7 +2910,10 @@
   </details>
   <!-- Moved down from the top of the card, where it stood between the heading and the first
        control describing something two blocks below it. -->
-  <p class="mini" style="margin:14px 0 6px">Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups.</p>
+  <!-- Exempt from the 780px prose measure: this is a CAPTION for the full-width table directly
+       under it, not body prose. Held to 780px inside a 1,545px card it wrapped two thirds of the
+       way across and read as trimmed rather than as a readable measure — reported as such. -->
+  <p class="mini bgb-help" style="margin:14px 0 6px">Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups.</p>
   <div id="bgBuilder"></div>
   <button class="seed-btn" id="bgb_addbucket" type="button" style="margin-top:10px">+ Add bucket</button>
 </section>
@@ -2878,9 +2957,9 @@
      replaces it with global What-If Mode: edit these same real fields in place (header
      "What-If Mode" button), with a minimal banner (name / Drafts / Save draft / Activate /
      Discard) shown right under the header while active. -->
-</div>
+</main>
 
-<div class="tab-panel" id="tab-invest"><div class="panel-inner">
+<main class="tab-panel" id="tab-invest" tabindex="-1" hidden><div class="panel-inner">
   <!-- Answer before arithmetic, same as Decisions/Car. The mockup proposed folding these
        nineteen inputs behind a "What this is based on" lid; reordering gets the same result
        without reintroducing a disclosure, which is the thing this whole pass has been
@@ -2913,6 +2992,37 @@
     <button class="calc-btn" id="iv_go" type="button">Build plan</button>
   </section>
 </div>
+<!-- FIRE progress log. Lives on Invest because that is where net worth comes from and where the
+     owner asked for it ("use the investments tab to pull the information, maybe with a box to log
+     it"). It is a <details> because it is a LOG, consulted occasionally, not a readout. -->
+<details class="card" id="fp_card" style="margin-top:16px"><summary>Progress to FI <span class="mini" style="font-weight:var(--fw-normal)">(log where you stand — history starts today)</span></summary>
+  <div class="body">
+    <p class="mini">Each entry stores your net worth <b>and the FI number as it stands right now</b>,
+      so a later change of plan cannot rewrite what you were aiming at.
+      <span class="muted">Nothing before your first entry can be shown — the old targets were never
+      recorded, and inventing them would draw a plan you never had.</span></p>
+    <div class="bgb-set" style="margin-top:10px">
+      <label class="nw-field">Net worth
+        <span class="input-pair"><input id="fp_nw" type="text" inputmode="decimal" data-fmt="usd" data-fmt-blank="keep"/><span class="unit">$</span></span>
+        <span class="nw-src" id="fp_nw_src">from your accounts below</span>
+      </label>
+      <label class="nw-field">FI target
+        <span class="input-pair"><input id="fp_target" type="text" inputmode="decimal" data-fmt="usd" data-fmt-blank="keep"/><span class="unit">$</span></span>
+        <span class="nw-src" id="fp_target_src">from the FIRE tab</span>
+      </label>
+      <label class="nw-field">On
+        <input id="fp_on" type="date"/>
+      </label>
+      <label class="nw-field" style="flex:1 1 200px">Note <span class="muted" style="font-size:var(--fs-2xs)">(optional)</span>
+        <input id="fp_note" type="text" placeholder="e.g. after the bonus"/>
+      </label>
+      <button class="seed-btn" id="fp_log" type="button" style="align-self:flex-end">Log it</button>
+    </div>
+    <div class="mini bad-text" id="fp_err" style="min-height:1em;margin-top:4px"></div>
+    <div id="fp_out" style="margin-top:10px"></div>
+  </div>
+</details>
+
 <section class="card" id="iv_accounts_card" style="margin-top:16px">
   <h2>Your investment accounts</h2>
   <p class="mini iv-lede">Group every account: cash savings, your current employer's 401(k), past-employer rollovers, IRAs, HSA, brokerage. Updating a balance writes a dated snapshot, so the Overview net-worth trajectory and FIRE progress stay honest too.</p>
@@ -3006,10 +3116,10 @@
   <input type="checkbox" id="pj_touched" style="display:none" aria-hidden="true" tabindex="-1">
   <div id="pj_out" class="mini" style="margin-top:10px">Set contributions and project.</div>
 </section>
-</div>
+</main>
 
 
-<div class="tab-panel" id="tab-decisions"><div class="panel-inner">
+<main class="tab-panel" id="tab-decisions" tabindex="-1" hidden><div class="panel-inner">
   <!-- Decisions: the once-every-few-years choices, together where they can be compared.
        House came out of a <details> inside Budget (12 inputs is a tool, not a detail),
        Ventures out of Invest, and Car had a whole tab to itself. None of them belongs in a
@@ -3132,8 +3242,8 @@
     <button class="calc-btn" id="au_go" type="button" style="margin-top:12px">Compare</button>
     <button class="seed-btn" id="au_tobudget" type="button" style="margin-top:8px">→ Send car payment to Budget</button>
   </section>
-</div></div>
-<div class="tab-panel" id="tab-setup"><div class="panel-inner">
+</div></main>
+<main class="tab-panel" id="tab-setup" tabindex="-1" hidden><div class="panel-inner">
   <!-- Setup: configuration that was living inside working tabs behind five lids. The point is
        that these are SECTIONS on a page, not lids on a page -- a section can simply be visible
        here because it is no longer competing with your budget for the space. Category
@@ -3258,8 +3368,8 @@
       </section>
     </div>
   </div>
-</div></div>
-<div class="tab-panel" id="tab-actuals">
+</main></div>
+<main class="tab-panel" id="tab-actuals" tabindex="-1" hidden>
   <!-- Zone A: month context -->
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
     <button class="tab-btn" id="ac_prev" type="button" aria-label="previous month">‹</button>
@@ -3515,7 +3625,7 @@
          with the message it describes. -->
     <div id="ac_ledger" class="mini" style="overflow-x:auto"><span class="muted">No transactions logged yet.</span></div>
   </section>
-</div>
+</main>
 
 <footer>
   Not financial, tax, or legal advice — educational estimates. Figures use <span data-tax-year>2026</span> IRS projections; verify with a CPA before relying on them.
@@ -3802,17 +3912,6 @@ const FALLBACK_FED = [
   { upper: 256225,  rate: 0.32 },
   { upper: 640600,  rate: 0.35 },
   { upper: null,    rate: 0.37 },
-];
-const FALLBACK_CA = [
-  { upper: 10756,   rate: 0.010 },
-  { upper: 25499,   rate: 0.020 },
-  { upper: 40245,   rate: 0.040 },
-  { upper: 55866,   rate: 0.060 },
-  { upper: 70606,   rate: 0.080 },
-  { upper: 360659,  rate: 0.093 },
-  { upper: 432787,  rate: 0.103 },
-  { upper: 721314,  rate: 0.113 },
-  { upper: null,    rate: 0.123 },
 ];
 
 // ---------- Client state ----------
@@ -4598,29 +4697,183 @@ const JC_PAY_FREQ = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 };
 // and removes the trap for anyone else — and for any future caller that passes a MID-YEAR end
 // date, where the northern hemisphere loses the day too (that is how the sibling bug in
 // jcMonthsBetween was found: $2,535/mo where the truth was $2,521/mo).
-function jcPeriodsRemaining(fromIso, yearEndIso, freq) {
-  const perYear = JC_PAY_FREQ[freq] || +freq || 24;
+// Paychecks you will actually RECEIVE in [from, end], counted on the employer's calendar.
+// BUG-0059. Replaced a share-of-the-year estimate, which is now deleted rather than kept as a
+// fallback: once the schedule is derived it had no honest role, and a wrong formula kept alive
+// for old times' sake is how the wrong one gets called again.
+//
+// WHY THE ESTIMATE CANNOT BE PATCHED. It assumes the span begins on a period boundary. Start
+// seven days into a semimonthly period and it bills you for those seven days while the cheque
+// ENDING that period is still ahead of you, and Math.floor eats it. Measured against THIS counter
+// over every start date in 2026: wrong on 319/365 for semimonthly and 344/365 for monthly, ALWAYS
+// LOW BY EXACTLY ONE, never high. Rounding instead of flooring only halves it.
+//
+// (This comment said 331 and 349 until 2026-08-26. Those were measured against a draft with no
+// weekend/holiday roll-back, which shipped in the same commit, and the sweep was never re-run.
+// State the swept space beside any N/365 — without it the number describes whatever the author
+// compared against, not the world.)
+//
+// LOW IS THE DANGEROUS DIRECTION, because these counts are DIVISORS: too few cheques makes each
+// cheque too big. An excess HSA contribution carries a 6% excise under §4973 for every year it
+// stays in. An excess 402(g) deferral is not an excise — left uncorrected past 15 April it is
+// taxed twice, once in the year deferred and again on distribution, which is worse. And §402(g)
+// is a per-PERSON limit, so a new employer's payroll cannot backstop it: it only sees its own
+// deferrals. That is the entire reason this card exists, and why its divisor has to be right.
+//
+// `firstPay` anchors the schedule. It is DERIVED by jcScheduleAnchor rather than asked for — see
+// the note there for what that costs and why the trade was accepted.
+//
+// END OF MONTH IS A CONCEPT, NOT A NUMBER. "15th and last day" pays the 31st in October and the
+// 28th in February. An earlier draft stored that second slot as the number 30 and returned ZERO
+// cheques for a span that is just 31 December, where the answer is one. Any slot at day 28 or
+// later is month-end, clamped per month.
+//
+// Cross-checked against an independent implementation over 1,825 (anchor, start, frequency)
+// combinations: no disagreements.
+//
+// UTC throughout (BUG-0042): two LOCAL midnights either side of a DST change are not a whole
+// number of days apart, and everything here is a day count.
+const JC_EOM = 99;
+const DAY = 864e5;
+
+// US federal holidays, computed rather than tabled so the app does not expire at the end of a
+// hardcoded list. Banks and ACH observe exactly these, which is what decides whether payroll can
+// settle; an employer that works Columbus Day still cannot move money on it.
+function jcFederalHolidays(y) {
+  const out = new Set();
+  const utc = (m, d) => Date.UTC(y, m, d);
+  const dow = t => new Date(t).getUTCDay();                       // 0=Sun .. 6=Sat
+  // Fixed dates, observed Friday when they fall on a Saturday and Monday when on a Sunday.
+  for (const [m, d] of [[0, 1], [5, 19], [6, 4], [10, 11], [11, 25]]) {
+    let t = utc(m, d);
+    if (dow(t) === 6) t -= DAY;
+    else if (dow(t) === 0) t += DAY;
+    out.add(t);
+  }
+  const nth = (m, wd, n) => {                                     // nth <weekday> of month m
+    let t = utc(m, 1);
+    t += ((wd - dow(t)) % 7 + 7) % 7 * DAY;
+    return t + (n - 1) * 7 * DAY;
+  };
+  const lastMon = m => {                                          // last Monday of month m
+    let t = Date.UTC(y, m + 1, 0);
+    return t - ((dow(t) - 1) % 7 + 7) % 7 * DAY;
+  };
+  out.add(nth(0, 1, 3));    // MLK
+  out.add(nth(1, 1, 3));    // Presidents
+  out.add(lastMon(4));      // Memorial
+  out.add(nth(8, 1, 1));    // Labor
+  out.add(nth(9, 1, 2));    // Columbus
+  out.add(nth(10, 4, 4));   // Thanksgiving
+  return out;
+}
+
+const _jcHolCache = {};
+function jcIsHoliday(t) {
+  const y = new Date(t).getUTCFullYear();
+  if (!_jcHolCache[y]) _jcHolCache[y] = jcFederalHolidays(y);
+  return _jcHolCache[y].has(t);
+}
+
+// Paid EARLY when the nominal date is not a banking day — the convention the owner is on
+// ("if the 15th is Saturday/Sunday/federal holiday, I get paid Friday, for the full period").
+// The amount is unchanged, which is why this only ever moves a DATE and never a count directly.
+function jcRollToPayday(t) {
+  for (let i = 0; i < 10; i++) {
+    const d = new Date(t).getUTCDay();
+    if (d !== 0 && d !== 6 && !jcIsHoliday(t)) return t;
+    t -= DAY;
+  }
+  return t;
+}
+
+function jcPaydaySlots(day, freq) {
+  const norm = d => (d >= 28 ? JC_EOM : d);
+  if (freq === 'monthly') return [norm(day)];
+  const a = day, b = a > 15 ? a - 15 : a + 15;
+  return [norm(Math.min(a, b)), norm(Math.max(a, b))];
+}
+
+// The pay schedule, DERIVED from the frequency and the job start date rather than asked for.
+//
+// The owner's call, and the measurement backs it: the whole systematic error was in not counting
+// a calendar at all. Knowing the exact days is worth AT MOST ONE cheque, and only on schedules
+// away from the default — the two commonest semimonthly conventions ({15th, month-end} and
+// {1st, 16th}) give identical counts on 343 of 365 start dates.
+//
+// WHAT THIS COSTS, stated because it is a real trade and not a free win: a genuinely unusual
+// schedule is answered wrongly. A 5th-and-20th employer starting 7 Sep 2026 truly has 7/5/1
+// cheques where this says 8/6/2. Judged an outlier and accepted deliberately; the assumption is
+// printed on the card so it is falsifiable rather than hidden.
+//
+// The FORM of the old input was wrong too, which is most of why it read as redundant. For
+// semimonthly and monthly `jcPaydaysRemaining` reads only the DAY of the anchor — `2019-03-15`
+// and `2031-11-15` returned identical answers — so it collected a whole date to consume one
+// integer, and a field labelled "First payday there" did not act like one: setting it to 30 Sep
+// still counted a 15 Sep cheque.
+function jcScheduleAnchor(startIso, freq) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startIso || ''));
+  if (!m) return '';
+  const y = +m[1], mo = +m[2] - 1, d = +m[3];
+  const pad = n => (n < 10 ? '0' : '') + n;
+  const at = (yy, mm, dd) => yy + '-' + pad(mm + 1) + '-' + pad(dd);
+  if (freq === 'weekly' || freq === 'biweekly') {
+    // Phase cannot be derived, only assumed. Friday is the ordinary US payday, and it is the
+    // count-MAXIMISING phase in nearly every span — which is the safe direction here, because
+    // overcounting spreads a target thinner and undercounting is what overshoots a limit.
+    const t = Date.UTC(y, mo, d);
+    const shift = (5 - new Date(t).getUTCDay() + 7) % 7;      // 5 = Friday
+    const f = new Date(t + shift * 864e5);
+    return at(f.getUTCFullYear(), f.getUTCMonth(), f.getUTCDate());
+  }
+  if (freq === 'monthly') return at(y, mo, new Date(Date.UTC(y, mo + 1, 0)).getUTCDate());
+  return at(y, mo, 15);                                        // semimonthly -> {15th, month-end}
+}
+
+function jcPaydaysRemaining(firstPayIso, fromIso, endIso, freq) {
   const p = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
-                     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; };
-  const from = p(fromIso), end = p(yearEndIso);
-  if (isNaN(from) || isNaN(end) || end < from) return 0;
-  const days = (end - from) / 864e5 + 1;
-  const yearDays = 365;                     // period COUNT, not a calendar; leap day is noise here
-  return Math.max(0, Math.floor(perYear * days / yearDays));
+                     return m ? { y: +m[1], m: +m[2] - 1, d: +m[3],
+                                  t: Date.UTC(+m[1], +m[2] - 1, +m[3]) } : null; };
+  const first = p(firstPayIso), from = p(fromIso), end = p(endIso);
+  if (!first || !from || !end || end.t < from.t) return 0;
+  const mlen = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const hit = t => (t >= from.t && t <= end.t) ? 1 : 0;
+
+  if (freq === 'weekly' || freq === 'biweekly') {
+    const step = (freq === 'weekly' ? 7 : 14) * DAY;
+    // Start a couple of periods early: a nominal date AFTER `end` can still be PAID inside it.
+    let t = first.t;
+    if (from.t > first.t) t = first.t + Math.floor((from.t - first.t) / step) * step;
+    let n = 0;
+    for (; t <= end.t + 2 * step; t += step) n += hit(jcRollToPayday(t));
+    return n;
+  }
+
+  const slots = jcPaydaySlots(first.d, freq);
+  let n = 0;
+  // One month PAST the end on purpose: the 1st-of-January cheque is paid on 31 December every
+  // year from 2024 to 2030 for a 1st-and-16th schedule, and it is that year's income and that
+  // year's contribution. Counting only to `end` loses it every time.
+  let y = from.y, m = from.m;
+  const stopY = end.m === 11 ? end.y + 1 : end.y, stopM = end.m === 11 ? 0 : end.m + 1;
+  for (; y < stopY || (y === stopY && m <= stopM); ) {
+    const len = mlen(y, m);
+    for (const sl of slots) n += hit(jcRollToPayday(Date.UTC(y, m, sl === JC_EOM ? len : Math.min(sl, len))));
+    m++; if (m > 11) { m = 0; y++; }
+  }
+  return n;
 }
 
 // How many months a span covers, as a FRACTION — it is only ever used as a divisor to turn a
 // total into a monthly rate, so 5.95 months is more honest than rounding to 6 and then quoting a
-// rate that does not multiply back. 365-day year like jcPeriodsRemaining; leap day is noise here.
+// rate that does not multiply back. 365-day year; leap day is noise here.
 //
 // Counted in UTC on purpose. Two LOCAL midnights either side of a DST change are not a whole
 // number of days apart: measured in America/Chicago, 2026-01-01 to 2026-06-30 comes out at
 // 179.958 days, so `Math.floor(...) + 1` silently loses a day and every rate divided by that span
 // reads ~0.5% high ($2,535/mo instead of $2,521/mo). Date.UTC has no DST to trip over.
-// NOTE: jcPeriodsRemaining above still counts local midnights and has the same latent off-by-one.
-// It is left alone deliberately — it feeds shipped paycheck COUNTS with tests pinned to them, and
-// changing it moves real numbers, so it wants its own entry and its own counterfactual rather
-// than a fix smuggled in beside a display change.
+// NOTE: this used to warn about jcPeriodsRemaining's own off-by-one. That function is gone —
+// BUG-0059 replaced it with jcPaydaysRemaining, which counts a real calendar.
 function jcMonthsBetween(fromIso, toIso) {
   const p = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
                      return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; };
@@ -4731,6 +4984,25 @@ function jcMatchForgone(o) {
 
 // The blended year, in the shape calculator.py already accepts — which is why the engine needs
 // no changes at all for any of this.
+// Months left to fund a Roth IRA for tax year `taxYear`, as of `today`.
+//
+// `useApril15` is the user's opt-in to the real statutory deadline (15 April of taxYear+1). OFF by
+// default, which runs to 31 December of taxYear — a deliberately conservative planning target, not
+// a claim about the law. See jcCompute's note.
+//
+// Pure and exported because an off-by-one moves the "put in $X per month" figure on screen: the
+// count INCLUDES the current month (you can still contribute this month) and never goes below
+// zero. A deadline already past returns 0, which jcFeasibility reads as "no room left in time"
+// rather than dividing by it.
+function jcIraMonthsLeft(taxYear, today, useApril15) {
+  const y = today.getFullYear(), m = today.getMonth();        // 0-based
+  const deadlineY = useApril15 ? taxYear + 1 : taxYear;
+  const deadlineM = useApril15 ? 3 : 11;                      // April=3, December=11
+  // Whole months from (y,m) up to and including (deadlineY,deadlineM).
+  const months = (deadlineY - y) * 12 + (deadlineM - m) + 1;
+  return Math.max(0, months);
+}
+
 function jcBlendedYear(a, b) {
   const n = v => Math.max(0, +v || 0);
   return {
@@ -4748,8 +5020,9 @@ function jcBlendedYear(a, b) {
 window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, householdCashSalary, sxHouseholdWages, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange,
-  jcPeriodsRemaining, jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
-  jcMatchForgone, jcBlendedYear, jcMonthsBetween };
+  jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
+  jcMatchForgone, jcBlendedYear, jcMonthsBetween, jcIraMonthsLeft,
+  jcPaydaysRemaining, jcPaydaySlots, jcRollToPayday, jcFederalHolidays, jcScheduleAnchor };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
 // separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
 // would throw a ReferenceError at this statement and silently prevent window.__clientMath from
@@ -5233,7 +5506,6 @@ function buildPayload() {
     addlMedThresh: rn($('addlMedThresh').value),
     addlMedRate: (+$('addlMedRate').value || 0) / 100,
     fedBrackets: readBrackets('fedBrackets', 'fed'),
-    caBrackets: readBrackets('caBrackets', 'ca'),
   };
 }
 
@@ -5390,10 +5662,6 @@ function render(r) {
     ['Federal taxable income',      r.wages.fedTaxable, 'After federal standard deduction'],
     ['FICA (Box 3/5)',               r.wages.ficaWages, 'Salary + ER stock + GTLI − HSA (401k Trad not exempt)'],
   ];
-  if (r.inputs.state === 'CA') {
-    wageRows.push(['California wages',   r.wages.caWages,      'Salary + ER stock + GTLI − 401(k) Trad (HSA not exempt in CA)']);
-    wageRows.push(['CA taxable income',  r.wages.stateTaxable, 'After CA standard deduction']);
-  }
   for (const [k, v, note] of wageRows) {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${k}</td><td class="num mono">${fmt$(v)}</td><td class="muted">${note}</td>`;
@@ -5408,10 +5676,6 @@ function render(r) {
     ['Medicare',           r.taxes.medTax],
   ];
   if (r.taxes.addlMedTax > 0) taxRows.push(['Additional Medicare', r.taxes.addlMedTax]);
-  if (r.inputs.state === 'CA') {
-    taxRows.push(['California income tax', r.taxes.stateTax]);
-    taxRows.push(['CA SDI',                 r.taxes.sdiTax]);
-  }
   if (r.inputs.state === 'WA') {
     taxRows.push(['WA Paid Family & Medical Leave', r.taxes.waPfmlTax]);
     taxRows.push(['WA Cares (long-term care)',      r.taxes.waCaresTax]);
@@ -5445,10 +5709,6 @@ function render(r) {
     ['− Medicare',                   -r.taxes.medTax],
   ];
   if (r.taxes.addlMedTax > 0) cashRows.push(["− Add'l Medicare",         -r.taxes.addlMedTax]);
-  if (r.inputs.state === 'CA') {
-    cashRows.push(['− California income tax', -r.taxes.stateTax]);
-    cashRows.push(['− CA SDI',                 -r.taxes.sdiTax]);
-  }
   if (r.inputs.state === 'WA') {
     cashRows.push(['− WA PFML',     -r.taxes.waPfmlTax]);
     cashRows.push(['− WA Cares',    -r.taxes.waCaresTax]);
@@ -5502,7 +5762,6 @@ function render(r) {
     { label: 'Fed tax',     value: r.taxes.fedTax,   color: 'var(--cat-fedtax)' },
     { label: 'FICA',        value: r.taxes.ssTax + r.taxes.medTax + r.taxes.addlMedTax, color: 'var(--cat-fica)' },
     { label: 'CA tax',      value: r.taxes.stateTax, color: 'var(--cat-statetax)' },
-    { label: 'CA SDI',      value: r.taxes.sdiTax,   color: 'var(--cat-statedis)' },
     { label: 'WA PFML',     value: r.taxes.waPfmlTax || 0,  color: 'var(--cat-statetax)' },
     { label: 'WA Cares',    value: r.taxes.waCaresTax || 0, color: 'var(--cat-statedis)' },
   ].filter(s => s.value > 0);
@@ -5751,7 +6010,6 @@ function captureShippedTax() {
     SHIPPED_TAX = {
       scalars: scalars,
       fedBrackets: readBrackets('fedBrackets', 'fed'),
-      caBrackets: readBrackets('caBrackets', 'ca'),
     };
   } catch (e) { SHIPPED_TAX = null; }
 }
@@ -5767,7 +6025,7 @@ function taxTablesEditedCount() {
       const el = $(id); if (!el || !(id in SHIPPED_TAX.scalars)) return;
       if (Math.abs(rn(el.value) - SHIPPED_TAX.scalars[id]) > 0.005) n += 1;
     });
-    [['fedBrackets', 'fed'], ['caBrackets', 'ca']].forEach(([key, prefix]) => {
+    [['fedBrackets', 'fed']].forEach(([key, prefix]) => {
       const now = readBrackets(key, prefix), was = SHIPPED_TAX[key] || [];
       // A row added or removed is itself a difference, not just the values inside it.
       n += Math.abs(now.length - was.length);
@@ -5793,7 +6051,6 @@ function resetTaxTablesToShipped() {
         ? fmtUSDval(SHIPPED_TAX.scalars[id]) : SHIPPED_TAX.scalars[id];
     });
     renderBrackets('fedBrackets', SHIPPED_TAX.fedBrackets, 'fed');
-    renderBrackets('caBrackets', SHIPPED_TAX.caBrackets, 'ca');
     paintTaxTablesScent();
     if (typeof scheduleCalc === 'function') scheduleCalc();
     else if (typeof fetchCalc === 'function') fetchCalc();
@@ -5897,7 +6154,6 @@ function collectState() {
     backdoorRoth: !!($('backdoorRoth') && $('backdoorRoth').checked),
     values,
     fedBrackets: readBrackets('fedBrackets', 'fed'),
-    caBrackets:  readBrackets('caBrackets',  'ca'),
   };
 }
 function save() {
@@ -5935,9 +6191,15 @@ function restoreState(s) {
   // Re-derive linked salary mo/pp displays from salary_yr (without highlighting any field).
   refreshSalaryDisplay();
   if (Array.isArray(s.fedBrackets) && s.fedBrackets.length) renderBrackets('fedBrackets', s.fedBrackets, 'fed');
-  if (Array.isArray(s.caBrackets)  && s.caBrackets.length)  renderBrackets('caBrackets',  s.caBrackets,  'ca');
   if (s.state) {
-    const st = (s.state === 'TX' || s.state === 'none') ? s.state : 'TX';   // CA removed → fall back to TX
+    // Every state the chips OFFER, read off the chips themselves rather than re-listed here.
+    // This was `(s.state === 'TX' || s.state === 'none') ? s.state : 'TX'` — a hardcoded pair
+    // written when CA was dropped from the UI, and it silently swallowed WASHINGTON along with it:
+    // picking WA and reloading put you back on Texas, taking $866.93 of WA Cares tax to $0 with no
+    // sign anything had happened. Measured. A fall-back list that names states individually goes
+    // stale the moment the chip set changes, which is exactly what happened here.
+    const offered = [...document.querySelectorAll('#stateChips .chip')].map(c => c.dataset.state);
+    const st = offered.includes(s.state) ? s.state : 'TX';
     document.querySelectorAll('#stateChips .chip').forEach(c =>
       c.classList.toggle('active', c.dataset.state === st));
   }
@@ -7593,7 +7855,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (resp.ok) {
       const d = await resp.json();
       renderBrackets('fedBrackets', d.fedBrackets, 'fed');
-      renderBrackets('caBrackets',  d.caBrackets,  'ca');
       if (typeof d.k401Limit       === 'number') LIMIT_401K         = d.k401Limit;
       // …and repaint anything already computed against the fallback. jcInit runs on
       // DOMContentLoaded, this hydration awaits first, so the Job-change screen's first paint
@@ -7618,7 +7879,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else throw new Error('no backend');
   } catch (e) {
     renderBrackets('fedBrackets', FALLBACK_FED, 'fed');
-    renderBrackets('caBrackets',  FALLBACK_CA,  'ca');
   }
   // BUG-0050. Every module that paints a hydrated limit at init painted it from the FALLBACK: the feature
   // IIFE runs at parse time and this fetch resolves later. BUG-0028 fixed exactly one of them by
@@ -8002,19 +8262,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   const notes = a => (a || []).map(n => '<div class="note-box">' + n + '</div>').join('');
   const fail = (id, e) => { $(id).innerHTML = '<div class="warn-box">Error: ' + (e.message || e) + '</div>'; };
 
+  // The skip link moves FOCUS, not just the scroll position: `href="#id"` scrolls but leaves
+  // focus on the link, so the next Tab lands back in the tab bar and the whole point is lost.
+  // The panels carry tabindex="-1" so they can receive it programmatically without entering the
+  // tab order themselves.
+  {
+    const skip = $('skipToContent');
+    if (skip) skip.addEventListener('click', e => {
+      e.preventDefault();
+      const panel = document.querySelector('.tab-panel.active');
+      if (!panel) return;
+      panel.focus();
+      panel.scrollIntoView({ block: 'start' });
+    });
+  }
+
   // ---- Tab switching ----
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const t = btn.dataset.tab;
       if (!t) return;   // the Actuals ‹/› month-nav buttons reuse .tab-btn but aren't real tabs
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + t));
+      // `hidden` as well as the class. Every panel is a <main> now, and the HTML spec permits
+      // more than one only when the others are HIDDEN -- and `display:none` from a stylesheet
+      // does not satisfy that, the attribute does. Without it the document would assert eight
+      // main landmarks at once to anything reading the markup rather than the render.
+      document.querySelectorAll('.tab-panel').forEach(p => {
+        const on = p.id === 'tab-' + t;
+        p.classList.toggle('active', on);
+        p.hidden = !on;
+      });
       syncTabAria();
       try { persist('itc.activetab', t); } catch (e) {}   // remember the active tab across reloads
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
-      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); pjTaxSeedRender(); pjResyncHintRender(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
-      if (t === 'budget') { bgbBaseAutoFill(); bgbTotals(); calcBudget(); glLoad(); sfLoad(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
+      if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); pjTaxSeedRender(); pjResyncHintRender(); fpSeed(); fpLoad(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
+      if (t === 'budget') { bgbBaseAutoFill(); try { window.__jobChange.healForward(); } catch (e) {} try { bgbRenderJobChangeBanner(); } catch (e) {} bgbTotals(); calcBudget(); glLoad(); sfLoad(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
       // Decisions owns House and Car, so it owns their bootstrap. Both were once still being kicked
       // off by the tab the section USED to live in: hpOnOpen from Budget behind an `.open` guard
       // that is always undefined now House is a <section> and not a <details>, and vnLoad from
@@ -8426,6 +8709,121 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- The three canonical sources (single source of truth per number) ----
+  // ---- FIRE progress log -------------------------------------------------------------------
+  // The owner asked for "here is where we were last x years vs this is the FIRE". This is the
+  // honest half of that: it records a reading FORWARD from today.
+  //
+  // WHY THERE IS NO BACKFILL, since it is the obvious feature request and the answer is a flat no:
+  // the FI number is a function of spending, withdrawal rate and variant choices, all of which
+  // change and none of which were ever recorded. Applying TODAY's target to old net-worth
+  // snapshots would draw a confident line describing a plan the user never had -- the same class
+  // as the sparkline that opened on six virtual zeros (BUG-0057), removed for that reason. So the
+  // chart is empty on day one, and the copy says so rather than hiding it.
+  let FP_ENTRIES = [], FP_LOAD_OK = true;
+
+  function fpSeed() {
+    const nw = $('fp_nw'), tg = $('fp_target'), on = $('fp_on');
+    // Only ever FILLS a blank field: re-seeding over something the user typed would silently
+    // discard a correction, and this runs on every render of the tab.
+    //
+    // "Blank" has to mean rn(value) <= 0, not !value. formatUSDFields() rewrites an empty
+    // data-fmt="usd" input to "0", which is a TRUTHY string -- so a plain `!value` guard saw both
+    // fields as already filled, skipped the seed, and left a zero target that the log then
+    // rejected. The fields carry data-fmt-blank="keep" now so they stay genuinely empty, and this
+    // guard reads the NUMBER either way.
+    const blank = el => !el || rn(el.value) <= 0;
+    if (blank(nw)) { const v = nwResolveCurrent(); if (v != null && nw) nw.value = fmtUSDval(Math.round(v)); }
+    if (blank(tg)) {
+      const f = window.__fireResult;
+      if (f && f.fireNumber && tg) tg.value = fmtUSDval(Math.round(f.fireNumber));
+    }
+    if (on && !on.value) on.value = isoLocalDate(new Date());
+    const src = $('fp_target_src');
+    if (src) src.textContent = (window.__fireResult && window.__fireResult.fireNumber)
+      ? 'from the FIRE tab' : 'calculate on the FIRE tab first';
+  }
+
+  async function fpLoad() {
+    try {
+      FP_ENTRIES = (await getJSON('/api/tracking/fire-progress')).entries || [];
+      FP_LOAD_OK = true;
+    } catch (e) { FP_ENTRIES = []; FP_LOAD_OK = false; }
+    fpRender();
+  }
+
+  function fpRender() {
+    const el = $('fp_out'); if (!el) return;
+    if (!FP_LOAD_OK) {
+      // Never an empty-state claim over a transport failure -- BUG-0056's rule.
+      el.innerHTML = '<div class="warn-box">Could not load your progress log — nothing has been deleted.</div>';
+      return;
+    }
+    const rows = FP_ENTRIES.filter(e => !e.variantKey);
+    if (!rows.length) {
+      el.innerHTML = '<div class="mini muted">No entries yet. Log one and the comparison starts building from today.</div>';
+      return;
+    }
+    const first = rows[0], last = rows[rows.length - 1];
+    const dNw = last.netWorth - first.netWorth;
+    const dPct = (last.pctToFi || 0) - (first.pctToFi || 0);
+    let h = '';
+    if (rows.length > 1) {
+      // The one thing a log is FOR: movement. A single entry has none, and saying "+0 since
+      // 2026-08-23" on the day you started would be noise dressed as insight.
+      h += '<div class="tiles" style="margin-bottom:10px">'
+        + '<div class="tile ' + (dNw >= 0 ? 'good' : 'warn') + '"><div class="k">Since ' + esc(first.on) + '</div>'
+        + '<div class="v">' + (dNw >= 0 ? '+' : '−') + f2(Math.abs(dNw)) + '</div>'
+        + '<div class="s">' + (dPct >= 0 ? '+' : '−') + Math.abs(dPct * 100).toFixed(1) + ' points toward FI</div></div>'
+        + '<div class="tile"><div class="k">Latest</div>'
+        + '<div class="v">' + ((last.pctToFi || 0) * 100).toFixed(1) + '%</div>'
+        + '<div class="s">' + f2(last.netWorth) + ' of ' + f2(last.fiTarget) + '</div></div></div>';
+    }
+    h += '<table class="res-table"><thead><tr><th>Date</th><th class="num">Net worth</th>'
+      + '<th class="num">FI target</th><th class="num">% there</th><th></th></tr></thead><tbody>';
+    // Newest first for READING; the array stays oldest-first because that is what a chart plots.
+    [...rows].reverse().forEach(e => {
+      h += '<tr><td>' + esc(e.on) + (e.note ? ' <span class="mini muted">' + esc(e.note) + '</span>' : '') + '</td>'
+        + '<td class="num">' + f2(e.netWorth) + '</td>'
+        + '<td class="num">' + f2(e.fiTarget) + '</td>'
+        + '<td class="num">' + ((e.pctToFi || 0) * 100).toFixed(1) + '%</td>'
+        + '<td style="text-align:right"><button type="button" class="ac-tool" data-fpdel="' + e.id + '">Remove</button></td></tr>';
+    });
+    el.innerHTML = h + '</tbody></table>';
+  }
+
+  async function fpLog() {
+    const err = $('fp_err'); if (err) err.textContent = '';
+    const nwRaw = (($('fp_nw') || {}).value || '').trim();
+    const nw = rn(nwRaw), tg = rn(($('fp_target') || {}).value);
+    const on = ($('fp_on') || {}).value || isoLocalDate(new Date());
+    if (!(tg > 0)) { if (err) err.textContent = 'Enter your FI target — calculate on the FIRE tab and it fills in.'; return; }
+    // The RAW string, not the parsed number. rn('') is 0, so a blank field would otherwise record
+    // a net worth of zero — "I did not fill this in" written down as "I have nothing", and this is
+    // a log whose whole value is that its entries are true. Typing 0 deliberately still works, and
+    // is a real reading for anyone starting from nothing.
+    if (!nwRaw) { if (err) err.textContent = 'Enter your net worth — type 0 if that is genuinely where you are.'; return; }
+    if (!(nw >= 0)) { if (err) err.textContent = 'Net worth cannot be negative.'; return; }
+    const f = window.__fireResult;
+    try {
+      await post('/api/tracking/fire-progress', {
+        on: on, netWorth: nw, fiTarget: tg,
+        note: (($('fp_note') || {}).value || '').trim() || null,
+        // WHAT THE TARGET MEANT, stored beside it. Without this a reader two years out sees a
+        // number and cannot tell whether it moved because they spent more or because they changed
+        // the withdrawal rate.
+        assumptions: f ? { annualSpend: (f.inputs || {}).annualSpend, swr: (f.inputs || {}).swr,
+                           nominalReturn: (f.inputs || {}).nominalReturn,
+                           currentAge: (f.inputs || {}).currentAge,
+                           targetFiAge: (f.inputs || {}).targetFiAge } : null,
+      });
+      const n = $('fp_note'); if (n) n.value = '';
+      showToast('Logged for ' + on);
+      await fpLoad();
+    } catch (e) {
+      if (err) err.textContent = 'Could not log that — ' + (errDetail(e) || 'the server refused it');
+    }
+  }
+
   function nwResolveCurrent() {
     const total = (ivAcct.accounts || []).reduce((s, a) => s + (ivBal(a) || 0), 0);
     return total > 0 ? total : null;
@@ -12191,18 +12589,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
         });
         h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button>';
-        // The round-up made visible, and emitted LAST in the bucket body on purpose. Its delta is
-        // computed from the direct items, the groups AND the shared lines together, so rendered
-        // above the groups it read as though it rounded only the items above it -- measured as
-        // "Round up $21.70" with a $2,435.00 group drawn underneath. A derived figure has to come
-        // after everything it derives from; here that is the closing line of the bucket.
-        //
-        // Hidden here and unhidden by bgbTotals when the difference is non-zero, because the
-        // renderer runs BEFORE the totals and cannot know it yet -- the same order .bgb-bsum and
-        // .bgb-gsum already live with. It carries no controls: an editable round-up is not one.
-        h += '<div class="bgb-roundup mini muted" data-b="' + bi + '" hidden>'
-          + '<span>Round up</span>'
-          + '<span class="bgb-rusum" data-b="' + bi + '"></span></div>';
+        // The bucket-footer round-up row is GONE. It stated the same fact as the header's
+        // "incl. $1.80 rounded up" note, twice on one screen, and the owner read the second one as
+        // a defect ("what's with this line? we already have it on top"). The header keeps it: it
+        // sits against the total it qualifies, which is the number the round-up actually changes,
+        // and it costs no vertical space in a card that is already long.
         h += '</div>';
       }
       h += '</div>';
@@ -12315,15 +12706,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         setBucketSum(bi, cats[bi].total, d);
       }
     }
-    // Paint the per-bucket round-up rows the renderer left empty (same pattern as .bgb-bsum:
-    // bgbRender runs first and cannot know the figure, bgbTotals fills it).
-    root.querySelectorAll('.bgb-rusum').forEach(el => {
-      const d = roundUpByBucket[+el.dataset.b] || 0;
-      el.textContent = f2(d);
-      const row = el.closest('.bgb-roundup');
-      if (row) row.hidden = !(d > 0.005);
-    });
-
     const rem = base - allocated, partner = household - allocated;
     // In total scope the ALLOCATED figure is the one that was rounded, so this line is its
     // header and has to carry the same disclosure the bucket headers do.
@@ -12705,11 +13087,69 @@ document.addEventListener('DOMContentLoaded', async () => {
   // What the base tracks when it is locked. Mirrors bgbBaseAutoFill's old choice exactly: the
   // catch-up take-home while a catch-up sprint is on (the budget should reflect the tighter
   // cash), otherwise the steady take-home.
+  // What a job change means for the budget, read from the figure jcRefreshForwardMonthly computed
+  // rather than recomputed here. `null` whenever there is no usable job change — every caller
+  // treats that as "carry on".
+  //
+  // WHY THE NEW JOB'S OWN ANNUAL FIGURE, not a share of the blended year: payroll withholds on
+  // the salary THAT EMPLOYER pays, annualised. A $173,000 job starting in September withholds as
+  // though you earn $173,000 all year; it has no idea what you earned before you arrived. So the
+  // cash that actually lands from September is the new job's own monthly take-home. An earlier
+  // version of this allocated the blended year's true liability across the two periods, which is
+  // the right answer to a different question (what you will OWE) and was $788/mo wrong about the
+  // one that matters here (what you can SPEND).
+  function bgbJobChangeForward() {
+    const f = window.__jcPay;                        // set by jcRefreshForwardMonthly; see there
+    if (!f || !f.from) return null;
+    const fwd = +f.forward;
+    if (!(fwd > 0)) return null;                     // not computed yet, or not usable
+    const cur = +f.current;
+    return { from: f.from, monthly: Math.round(fwd),
+             current: cur > 0 ? Math.round(cur) : null, salary: rn(f.salary) };
+  }
+
   function bgbResolveBase() {
+    // A job change that has ALREADY STARTED is the live answer: the old salary is not coming back
+    // and budgeting on it plans money that no longer arrives. Before the start date it is news,
+    // not the base — see bgbRenderJobChangeBanner.
+    const fwd = bgbJobChangeForward();
+    if (fwd && isoLocalDate(new Date()) >= fwd.from) return fwd.monthly;
+    // BEFORE the start date, budget against what the CURRENT job actually pays in a month — not
+    // the blended year "Apply" wrote into the Tax tab. You cannot spend a 12-month average of a
+    // year you are two thirds of the way through: it is dragged toward the salary you no longer
+    // earn by the months you already worked at it.
+    if (fwd && fwd.current != null) return fwd.current;
     const cu = window.__catchupCash;
     if (bgbCatchupMode && cu && cu.takeHomeMo != null) return Math.round(cu.takeHomeMo);
     const c = (window.__taxResult && window.__taxResult.cash) || {};
     return c.takeHome ? Math.round(c.takeHome / 12) : null;
+  }
+
+  // Says a new budget is coming, and when. Only before the date — once it has passed the figure
+  // IS the base and a banner announcing it would be describing the present tense as the future.
+  function bgbRenderJobChangeBanner() {
+    const el = $('bgb_jc_banner'); if (!el) return;
+    const fwd = bgbJobChangeForward();
+    if (!fwd || isoLocalDate(new Date()) >= fwd.from) { el.hidden = true; el.innerHTML = ''; return; }
+    // Compared against whatever the base RESOLVES to today, which before the start date is the
+    // current job's monthly by construction — the captured pre-Apply take-home if Apply has run,
+    // and the live Tax take-home if it has not. Both describe one month at the current job, so the
+    // subtraction is like-for-like.
+    //
+    // Deliberately NOT bgb.baseMonthly: that is the field's value, which the owner may have
+    // unlocked and typed into, and subtracting a hand-entered number from a computed one produces
+    // a "raise" figure that is not one.
+    const now = bgbResolveBase();
+    const delta = now != null && now > 0 ? fwd.monthly - now : null;
+    const when = new Date(fwd.from + 'T00:00:00')
+      .toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
+    el.hidden = false;
+    el.innerHTML = '<div class="news-box" style="margin:8px 0 0">'
+      + '<b>From ' + esc(when) + ' your monthly take-home becomes ' + fmt$(fwd.monthly) + '</b>'
+      + (delta != null ? ' \u2014 ' + (delta >= 0 ? 'up ' : 'down ') + fmt$(Math.abs(delta))
+                         + '/mo on ' + fmt$(now) + ' at your current job' : '')
+      + '. <span class="mini muted">Both figures are take-home for one month at that job alone, '
+      + 'at the contributions set on Job change.</span></div>';
   }
   let bgbCatchupMode = !!bgb.catchupMode;   // budget against "take-home during catch-up" instead of steady take-home
   if (bgBaseEl) {
@@ -12728,7 +13168,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     bgbBaseField = bindSourcedField({
       inputId: 'bgb_base', lockId: 'bgb_base_lock', resolve: bgbResolveBase,
       noteEl: 'bgb_base_src',
-      noteText: () => (bgbCatchupMode ? 'from catch-up take-home' : 'from Tax take-home'),
+      // The label has to name the ACTUAL source, because the base no longer always comes from the
+      // Tax tab: with a job change pending it is that job's own monthly, and after the start date
+      // it is the new job's. Saying "from Tax take-home" over a number the Tax tab did not produce
+      // is the same defect as showing an estimate in the voice of a count.
+      noteText: () => {
+        const fwd = bgbJobChangeForward();
+        if (fwd && isoLocalDate(new Date()) >= fwd.from) return 'from Job change \u2014 your new job';
+        if (fwd && fwd.current != null) return 'from Job change \u2014 your current job';
+        return bgbCatchupMode ? 'from catch-up take-home' : 'from Tax take-home';
+      },
       noteTextUnlocked: 'Your number \u2014 not tracking Tax',
       noSourceText: 'Calculate on the Tax tab to source this',
       hintEl: 'bgb_base_hint', label: 'Take-home',
@@ -12778,6 +13227,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (mo != null) { bgb.baseMonthly = mo; saveBgb(); bgbTotals(); }
   }
   window.bgbBaseAutoFill = bgbBaseAutoFill;   // called from render() so the budget base tracks every take-home change
+  // Exported for the same reason bgbBaseAutoFill is: the job-change block is a SEPARATE top-level
+  // IIFE, so it cannot see this closure. Calling the bare name from there is a ReferenceError, and
+  // because that call site sits in a try/catch it fails silently — the figure computes, the banner
+  // never repaints, and nothing appears in the console to say why.
+  window.bgbRenderJobChangeBanner = bgbRenderJobChangeBanner;
   // Kept as a window shim because its two callers (max-out Apply, What-If restore) are declared
   // thousands of lines earlier. RE-LOCK is the honest name: it re-arms tracking by putting the
   // field back on its source, and now says so on screen instead of flipping a hidden boolean.
@@ -14441,6 +14895,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Escape') { e.preventDefault(); stratEditKey = null; bgbRenderStrategyManage(); }
   });
 
+  wire('fp_log', fpLog);
+  {
+    // Delegated: the rows are rebuilt on every load, so a per-button listener would leak.
+    const out = $('fp_out');
+    if (out) out.addEventListener('click', async ev => {
+      const b = ev.target.closest('[data-fpdel]');
+      if (!b) return;
+      // A logged reading is a fact the user recorded; deleting one is not undoable and the row
+      // cannot be regenerated from anything else, so it asks.
+      const row = FP_ENTRIES.find(e => String(e.id) === b.dataset.fpdel);
+      if (!confirm('Remove the entry for ' + (row ? row.on : 'this date') + '? It cannot be recovered — the FI target it recorded is gone once it is deleted.')) return;
+      try { await del('/api/tracking/fire-progress/' + b.dataset.fpdel); await fpLoad(); }
+      catch (e) { showToast('Could not remove that — ' + (errDetail(e) || 'the server refused it')); }
+    });
+  }
+
   bgbRenderStrategySelect();
   bgbRenderRoundUp();
   ['bgb_ru_scope', 'bgb_ru_unit', 'bgb_ru_bucket'].forEach(id => {
@@ -14563,7 +15033,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (btn) btn.click();
     else {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + t));
+      // `hidden` as well as the class. Every panel is a <main> now, and the HTML spec permits
+      // more than one only when the others are HIDDEN -- and `display:none` from a stylesheet
+      // does not satisfy that, the attribute does. Without it the document would assert eight
+      // main landmarks at once to anything reading the markup rather than the render.
+      document.querySelectorAll('.tab-panel').forEach(p => {
+        const on = p.id === 'tab-' + t;
+        p.classList.toggle('active', on);
+        p.hidden = !on;
+      });
       syncTabAria();
     }
     // A shortcut that adds something must land on the screen that shows it.
@@ -18761,8 +19239,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function jcCompute() {
     const i = jcInputs();
-    const p401k = jcPeriodsRemaining(i.elig401k, i.yearEnd, i.freq);
-    const pHsa = jcPeriodsRemaining(i.eligHsa, i.yearEnd, i.freq);
+    // Always counted, never estimated. The share-of-the-year estimate this replaced was low on
+    // 319/365 semimonthly and 344/365 monthly start dates, and it had no honest fallback role
+    // once the schedule could be derived instead of asked for.
+    const anchor = jcScheduleAnchor(i.start, i.freq);
+    const periods = from => jcPaydaysRemaining(anchor, from, i.yearEnd, i.freq);
+    const p401k = periods(i.elig401k);
+    const pHsa = periods(i.eligHsa);
     const hsaMonths = jcHsaMonths(i);
     const hsaCap = jcHsaLimit(currentHsaLimit(), hsaMonths);
 
@@ -18781,7 +19264,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     // A Roth IRA is yours, not your employer's: no eligibility wait, and it can be funded in a
     // lump right up to the filing deadline — so periods are months left, not paychecks.
-    const monthsLeft = Math.max(0, 12 - (new Date().getMonth() + (yearOf(i.start) === new Date().getFullYear() ? 1 : 0)) + 1);
+    // How long there is left to fund a Roth IRA for the year this screen is planning.
+    //
+    // DEFAULT: the end of December, which is NOT the legal deadline — a contribution for tax year
+    // N can be made until 15 April of N+1. That is deliberate and is the owner's call: planning to
+    // finish by December is the prudent target, and quietly assuming the extension would size
+    // "per month you need to put in" against months the user never intended to use. The extra
+    // window is opt-in, so nobody's figure moves unless they ask for it.
+    //
+    // WITH THE FLAG: run to 15 April of the following year instead. `jcIraMonthsLeft` is pure and
+    // exported for client-math, because an off-by-one here changes the monthly figure on screen.
+    const monthsLeft = jcIraMonthsLeft(i.year, new Date(), !!($('jc_ira_apr15') || {}).checked);
     // BUG-0036: the cap is MAGI-dependent and the SERVER owns that computation — the client
     // READS limits.rothIraMax and never re-derives it (D2, 2026-07-26: a client-side shadow
     // formula disagreed with the server near the boundary, Tax tab $81,300 vs Invest $79,848).
@@ -18835,11 +19328,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Paychecks between starting and becoming eligible — match earned in them is gone, because
     // most plans do not true up at year end.
-    const missed = Math.max(0, jcPeriodsRemaining(i.start, i.yearEnd, i.freq) - p401k);
+    const missed = Math.max(0, periods(i.start) - p401k);
     const forgone = jcMatchForgone({ perPeriodPay: i.perPeriodPay, missedPeriods: missed,
                                      matchRate: i.b.mrate, matchUpToPct: i.b.mpct });
 
-    const perNew = jcPeriodsRemaining(i.start, i.yearEnd, i.freq);
+    const perNew = periods(i.start);
     const wagesB = i.perPeriodPay * perNew;
     // Read the wage base and rate from the Tax tab's own editable fields, exactly as
     // buildPayload() does — they are inputs, not constants, and a user who edits them there
@@ -18978,9 +19471,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // The screen can only answer once it knows when the new job starts and what it pays. Before
-  // that, `jcPeriodsRemaining('')` is 0 — indistinguishable from a gap that really did eat the
-  // year — so the cold screen accused you of finishing $24,500 short of a target you had never
-  // set, in the `bad` tone, as the first thing on the card.
+  // that, the paycheck count for an empty start date is 0 — indistinguishable from a gap that
+  // really did eat the year — so the cold screen accused you of finishing $24,500 short of a
+  // target you had never set, in the `bad` tone, as the first thing on the card.
   function jcUsable(r) { return !!(r.i.start && r.i.salary > 0); }
 
   // Echo each bucket's verdict onto its section heading. The tiles say the same thing, but they
@@ -19235,6 +19728,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       setAnnualOnField(id, Math.round(v));
       e.dispatchEvent(new Event('input', { bubbles: true }));
     };
+    // CAPTURE BEFORE THE OVERWRITE, AND ONLY ONCE. Every line below replaces a Tax field with its
+    // blended-year value, so the take-home falling out of them stops describing any single job.
+    //
+    // ONLY ONCE is the whole point, and getting it wrong is what made this number nonsense on the
+    // owner's device: pressing Apply a SECOND time finds the Tax tab already blended and captures
+    // THAT — $77,516 against a true blended figure of $78,495, i.e. the blend, not the old job.
+    // Apply is not idempotent with respect to what it destroys, so the capture has to be.
+    //
+    // The field is editable, so a value already there is the owner's answer or a good earlier
+    // capture; either outranks anything derivable here.
+    const cur = (window.__taxResult && window.__taxResult.cash && window.__taxResult.cash.takeHome) || 0;
+    const th = $('jc_a_takehome');
+    if (th && cur > 0 && !(rn(th.value) > 0)) th.value = fmtUSDval(Math.round(cur / 12));
     set('salary_yr', b.salary);
     set('bonus', b.bonus);
     set('trad401k', b.trad401k);
@@ -19244,23 +19750,180 @@ document.addEventListener('DOMContentLoaded', async () => {
     set('emp_match', b.employerMatch);
     set('rothIra', b.rothIra);
     recompute();
+    // The capture above is a FIELD, so it only reaches storage through jcCollect — and jcSave is
+    // reached through jcRender, which nothing here calls. Without this the original take-home
+    // survived until the next reload and no further: the Budget tab fell back to the blended
+    // figure, silently, exactly once the page was refreshed.
+    jcSave();
+    // And re-derive, but AFTER the writes above have settled: each set() dispatches an input event
+    // that kicks the debounced recompute, and this needs the __taxResult that recompute produces.
+    setTimeout(jcRefreshForwardMonthly, 900);
     showToast('Applied — your Tax tab now shows the blended year.');
   }
 
   const jcCollect = () => {
     const o = {};
-    ['jc_a_last','jc_a_wages','jc_a_bonus','jc_a_trad','jc_a_roth','jc_a_hsa','jc_a_mega','jc_a_match',
+    ['jc_a_last','jc_a_wages','jc_a_bonus','jc_a_trad','jc_a_roth','jc_a_hsa','jc_a_mega','jc_a_match','jc_a_takehome',
      'jc_a_ira','jc_start','jc_wait_401k','jc_wait_401k_unit','jc_wait_hsa','jc_wait_hsa_unit',
      'jc_hsa_cover','jc_b_salary','jc_b_bonus','jc_b_freq','jc_b_mrate','jc_b_mpct','jc_b_current','jc_b_kind',
      'jc_t_401k_mode','jc_t_401k','jc_t_hsa_mode','jc_t_hsa','jc_t_ira_mode','jc_t_ira']
       .forEach(id => { const e = $(id); if (e) o[id] = e.value; });
+    // The April-15 flag is a CHECKBOX: `.value` is the literal string "on" whatever its state, so
+    // storing it alongside the text inputs would persist "on" for a box the user had cleared and
+    // restore it ticked. Kept as a real boolean under its own key.
+    const apr = $('jc_ira_apr15');
+    if (apr) o.jc_ira_apr15 = !!apr.checked;
     return o;
   };
   const jcSave = () => { try { persist(JC_KEY, JSON.stringify(jcCollect())); } catch (e) {} };
+
+  // Compute the new job's own monthly take-home and hold it, so the Budget tab can read a number
+  // instead of making a server round-trip from a synchronous resolver. Held in memory, not
+  // persisted — see the note on `write` below for the bug that caused.
+  //
+  // The whole tax payload is reused and only the job-specific fields are swapped, so every setting
+  // already made (filing status, state, medical/dental/vision, ESPP) carries over. Rebuilding a
+  // bare payload here would quietly answer for a different person.
+  //
+  // Guarded by a sequence number: this runs on every edit in the job-change form, and a stale
+  // response arriving after a newer one must not overwrite it.
+  let _jcFwdSeq = 0;
+  async function jcRefreshForwardMonthly() {
+    const seq = ++_jcFwdSeq;
+    const start = S('jc_start'), salary = V('jc_b_salary');
+    const write = v => {
+      if (seq !== _jcFwdSeq) return;                 // a newer request already answered
+      // Deliberately NOT persisted. It lived in the job-change blob first, and the profile sync
+      // engine hydrated the server's copy straight over it — the server blob has no such key, so
+      // the freshly-computed figure vanished a beat after it was written. It is cheap to derive and
+      // jcInit re-derives it on every boot, so memory is the honest home for it.
+      window.__jcPay = v;
+      // Both reached through window on purpose — see the export beside bgbBaseAutoFill.
+      try { if (window.bgbRenderJobChangeBanner) window.bgbRenderJobChangeBanner(); } catch (e) {}
+      try { if (window.bgbBaseAutoFill) window.bgbBaseAutoFill(); } catch (e) {}
+    };
+    if (!start || !(salary > 0)) { write(null); return; }
+    // NOTHING LEAVES THIS CARD UNTIL APPLY. The card's whole contract is that typing here changes
+    // nothing until the button is pressed, and the copy beside it says so. The banner broke that:
+    // editing a date made the Budget tab announce an income change the owner had not committed to,
+    // and half-typed figures drove it. Reported from the sandbox as "I get the banner pop up
+    // instead of waiting until I apply the changes".
+    //
+    // jc_a_takehome is written ONLY by jcApply, so its presence is the signal that Apply has run.
+    // Gating here rather than in the banner covers the budget base too — an un-applied job change
+    // must not move the number the plan is built on either.
+    const captured = rn(S('jc_a_takehome'));      // per MONTH, matching its label
+    if (!(captured > 0)) { write(null); return; }
+    // WAIT FOR THE TAX TAB TO HAVE CALCULATED. This builds its payload from the Tax fields, and at
+    // DOMContentLoaded they are not populated yet. Measured on a real reload, the payload went out
+    // with fedBrackets [], rothIra 0 and employer401kMatch 0 — real deductions simply missing —
+    // and the answer came back $625/mo HIGH. It looked stable because every cold boot reproduced
+    // the same wrong number; only comparing it against the figure computed after Apply, when the
+    // fields ARE populated, showed the two disagreeing.
+    //
+    // Returning WITHOUT writing leaves any good previous answer in place; jcHealForwardFromStore
+    // retries on the next Budget-tab open, by which time __taxResult exists.
+    if (!window.__taxResult || !window.__taxResult.cash) return;
+    const monthly = async body => {
+      const resp = await fetch('/api/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) throw new Error(`backend error: HTTP ${resp.status}`);
+      const r = await resp.json();
+      return r && r.cash && r.cash.takeHome ? Math.round(r.cash.takeHome / 12) : null;
+    };
+    try {
+      const base = buildPayload();
+
+      // THE NEW JOB, on its own terms. Payroll withholds on the salary THAT EMPLOYER pays,
+      // annualised, knowing nothing about what came before.
+      const fwdBody = Object.assign({}, base, {
+        salary: salary,
+        bonus: V('jc_b_bonus') || 0,
+        trad401k: 0, roth401k: 0,
+      });
+      const pct = V('jc_b_current') / 100;
+      if (pct > 0) {
+        if ((S('jc_b_kind') || 'trad') === 'roth') fwdBody.roth401k = salary * pct;
+        else fwdBody.trad401k = salary * pct;
+      }
+
+      // THE OLD JOB IS NOT RECONSTRUCTED. A first attempt annualised gross wages to date over the
+      // fraction of the year worked. The owner's real figures put that $1,120/mo BELOW the
+      // take-home they actually receive — year-to-date wages are not a reliable proxy for the
+      // salary behind them, and a budget base low by that much is not a rounding error.
+      //
+      // `captured` above is the Tax tab's OWN take-home, taken the moment before Apply overwrote
+      // it with the blended year. Apply is the only thing that destroys it, so Apply is what
+      // preserves it.
+      const forward = await monthly(fwdBody);
+      write(forward != null && forward > 0
+        ? { from: start, forward: forward, current: Math.round(captured), salary: salary }
+        : null);
+    } catch (e) { write(null); }
+  }
   function jcRestore() {
     let o; try { o = JSON.parse(load(JC_KEY)); } catch (e) {}
     if (!o) return;
-    Object.keys(o).forEach(id => { const e = $(id); if (e && o[id] != null) e.value = o[id]; });
+    Object.keys(o).forEach(id => {
+      const e = $(id); if (!e || o[id] == null) return;
+      if (e.type === 'checkbox') e.checked = !!o[id];   // never assign a boolean to .value
+      else e.value = o[id];
+    });
+  }
+
+  // Says what the flag did, with the real date and the real month count — the two things that
+  // change the "$X per month" figure beside it. An unchecked box states the default rather than
+  // staying silent, because "ends in December" is a planning CHOICE here and not the law.
+  // Shows the paycheck count every target is divided by, AND the schedule it assumed to get there.
+  //
+  // The assumption is printed because it is no longer asked for. That is the whole safety
+  // mechanism for the derived schedule: a reader whose employer pays the 5th and the 20th sees a
+  // sentence that is plainly untrue of them, rather than a count with nothing to check it against.
+  // The defect this replaced hid for exactly the opposite reason — a guess was displayed in the
+  // same voice as a count, with no way to tell which it was.
+  // Says what the take-home field is FOR, because it is the one number on this card that the
+  // Budget tab plans against directly, and it is the one Apply cannot recover if it is wrong.
+  function jcTakeHomeNote() {
+    const el = $('jc_a_takehome_note'); if (!el) return;
+    const v = rn(S('jc_a_takehome'));
+    el.textContent = v > 0
+      ? 'Your budget runs on this until ' + (S('jc_start') ? jcHumanDate(S('jc_start')) : 'the new job starts')
+        + '. Filled in from the Tax tab when you pressed Apply — correct it here if it is not what lands.'
+      : 'What actually reaches your account in a month today. Apply fills it in from the Tax tab, '
+        + 'because Apply replaces that tab with the blended year and the figure is gone afterwards.';
+  }
+
+  function jcFirstPayNote() {
+    const el = $('jc_firstpay_note'); if (!el) return;
+    const start = S('jc_start'), freq = S('jc_b_freq') || 'semimonthly';
+    if (!start) { el.textContent = ''; return; }
+    const year = yearOf(start) || new Date().getFullYear();
+    const n = jcPaydaysRemaining(jcScheduleAnchor(start, freq), start, year + '-12-31', freq);
+    const assumed = {
+      semimonthly: 'the 15th and the last day of each month',
+      monthly: 'the last day of each month',
+      biweekly: 'every second Friday',
+      weekly: 'every Friday',
+    }[freq] || 'the 15th and the last day of each month';
+    el.textContent = n + (n === 1 ? ' paycheck' : ' paychecks') + ' from ' + jcHumanDate(start)
+      + ' to the end of ' + year + ', assuming you are paid ' + assumed
+      + ' \u2014 earlier when that falls on a weekend or federal holiday. Targets are divided by that.';
+  }
+
+  function jcIraDeadlineNote() {
+    const el = $('jc_ira_apr15_note'); if (!el) return;
+    const on = !!($('jc_ira_apr15') || {}).checked;
+    const year = yearOf(S('jc_start') || S('jc_a_last')) || new Date().getFullYear();
+    const months = jcIraMonthsLeft(year, new Date(), on);
+    const when = on ? ('15 April ' + (year + 1)) : ('31 December ' + year);
+    el.textContent = (on
+      ? 'Counting to ' + when + ' — the statutory deadline for a ' + year + ' contribution. '
+      : 'Counting to ' + when + '. The legal deadline is actually 15 April ' + (year + 1) + '; tick the box to use it. ')
+      + (months > 0 ? months + (months === 1 ? ' month' : ' months') + ' left to spread it over.'
+                    : 'That date has passed — no room left in time.');
   }
 
   function jcSyncTargetFields() {
@@ -19268,13 +19931,61 @@ document.addEventListener('DOMContentLoaded', async () => {
       .forEach(([sel, wrap]) => { const s = $(sel), w = $(wrap); if (s && w) w.hidden = s.value !== 'custom'; });
   }
 
+  // Heal a cold start. jcInit runs at DOMContentLoaded, but the job-change data can arrive AFTER
+  // it: a first load on a new device, or a profile hydrate that lands a moment late. jcRestore has
+  // already run against an empty store by then, so the form is blank, the forward figure is null,
+  // and the Budget tab's banner never appears however many times it is opened. Reported from the
+  // sandbox as simply "no banner", and reproduced by setting the blob after boot.
+  //
+  // Heals the BLANK case ONLY. If the form already holds a start date, storage is not consulted at
+  // all, because persist() is debounced: storage is legitimately a keystroke behind the form, and
+  // restoring from it mid-edit would revert what the user just typed.
+  function jcHealForwardFromStore() {
+    if (window.__jcPay) return;                      // already computed — nothing to heal
+    if (S('jc_start')) {
+      // THE FORM IS FINE, THE FIGURE IS NOT. This is the common case and the first version of
+      // this function missed it entirely: it returned here, so a figure that failed to compute at
+      // boot stayed null forever and the banner never appeared however many times the tab opened.
+      // The boot attempt runs at DOMContentLoaded, when the Tax fields it builds its payload from
+      // may not be seeded yet; one rejected request was enough to lose the banner for the session.
+      // Nothing to restore — just ask again.
+      jcRefreshForwardMonthly();
+      return;
+    }
+    // Form blank: the data may have landed in storage after jcInit read it (first load on a
+    // device, or a profile hydrate a moment late). Restore, THEN compute.
+    //
+    // Storage is only consulted on this path. persist() is debounced, so storage runs a keystroke
+    // behind the form, and restoring from it while the form holds anything would revert an edit in
+    // progress — which is why the branch above never touches it.
+    let o; try { o = JSON.parse(load(JC_KEY)); } catch (e) {}
+    if (!o || !o.jc_start) return;                   // storage has nothing either
+    jcRestore();
+    jcSyncTargetFields();
+    jcIraDeadlineNote();
+    jcFirstPayNote();
+    jcTakeHomeNote();
+    jcRender();
+    jcRefreshForwardMonthly();                       // repaints the banner when it resolves
+  }
+
   function jcInit() {
     if (!$('jc_card')) return;
     jcRestore();
     jcSyncTargetFields();
+    jcIraDeadlineNote();
+    jcFirstPayNote();
+    jcTakeHomeNote();
     const root = $('jc_card');
-    root.addEventListener('input', () => { jcSyncTargetFields(); jcRender(); });
-    root.addEventListener('change', () => { jcSyncTargetFields(); jcRender(); });
+    // No debounce helper exists in this file; this is the local-timer idiom used elsewhere.
+    let _jcEditTimer = null;
+    const jcAfterEdit = () => {
+      clearTimeout(_jcEditTimer);
+      _jcEditTimer = setTimeout(() => { jcRefreshForwardMonthly(); }, 400);
+    };
+    root.addEventListener('input', () => { jcSyncTargetFields(); jcIraDeadlineNote(); jcFirstPayNote(); jcTakeHomeNote(); jcRender(); jcAfterEdit(); });
+    root.addEventListener('change', () => { jcSyncTargetFields(); jcIraDeadlineNote(); jcFirstPayNote(); jcTakeHomeNote(); jcRender(); jcAfterEdit(); });
+    jcRefreshForwardMonthly();
     const btn = $('jc_apply');
     if (btn) btn.addEventListener('click', jcApply);
     jcRender();
@@ -19283,7 +19994,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   else jcInit();
 
   window.__jobChange = { compute: jcCompute, render: jcRender, apply: jcApply,
-                         eligibleDate: jcEligibleDate, heads: JC_HEAD, tones: JC_TONE };
+                         eligibleDate: jcEligibleDate, heads: JC_HEAD, tones: JC_TONE,
+                         healForward: jcHealForwardFromStore };
 })();
 
 </script>

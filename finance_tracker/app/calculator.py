@@ -43,21 +43,15 @@ MFJ_FED_BRACKETS: list[Bracket] = [
     Bracket(None,    0.37),
 ]
 
-# 2025 California Single brackets (2026 CA release pending; editable).
-DEFAULT_CA_BRACKETS: list[Bracket] = [
-    Bracket(10_756,  0.010),
-    Bracket(25_499,  0.020),
-    Bracket(40_245,  0.040),
-    Bracket(55_866,  0.060),
-    Bracket(70_606,  0.080),
-    Bracket(360_659, 0.093),
-    Bracket(432_787, 0.103),
-    Bracket(721_314, 0.113),
-    Bracket(None,    0.123),
-]
 
 
-State = Literal["none", "TX", "CA", "WA"]
+# California was REMOVED 2026-08-24 at the owner's request. It had never been selectable in the
+# UI (the chips have only ever offered Federal-only / Texas / Washington in this app's shipped
+# life), its figures lived in code rather than tax_data/<year>.json so the annual refresh never
+# touched them, its bracket table was still 2025's, and its married-filing-jointly schedule was
+# missing entirely (BUG-0009). Carrying unreachable, unmaintained, knowingly-incomplete tax law is
+# worse than not carrying it: it reads as supported.
+State = Literal["none", "TX", "WA"]
 FilingStatus = Literal["single", "mfj"]
 
 
@@ -77,7 +71,7 @@ class Inputs:
     # 401(k)/HSA/MDV/employer match are NOT split per earner (this field only adds a
     # second wage, not a second set of deductions). The true rule — corrected in the
     # 2026-08-05 fix round; a prior version of this comment wrongly said "primary-only"
-    # — is that they reduce HOUSEHOLD fed_wages/ca_wages but only the PRIMARY's own
+    # — is that they reduce HOUSEHOLD fed_wages/state_wages but only the PRIMARY's own
     # FICA base. See the "Wage bases" comment in calculate() for the full rationale.
     spouse_salary: float = 0.0
 
@@ -103,7 +97,7 @@ class Inputs:
     gtli: float = 0.0              # §79 imputed income on GTLI > $50k
 
     # Jurisdiction
-    state: State = "CA"
+    state: State = "none"
     # Filing status. Informational on a directly-constructed Inputs (whose defaults are
     # Single); use Inputs.for_filing_status("mfj", ...) to also swap in the MFJ brackets,
     # standard deduction, NIIT / Add'l-Medicare / LTCG thresholds, and Roth MAGI band.
@@ -188,11 +182,6 @@ class Inputs:
     addl_medicare_rate: float = 0.009
 
     # California
-    ca_std_deduction: float = 5_540.0
-    ca_brackets: list[Bracket] = field(default_factory=lambda: list(DEFAULT_CA_BRACKETS))
-    ca_sdi_rate: float = 0.012                    # uncapped since 2024
-    ca_mhst_threshold: float = 1_000_000.0
-    ca_mhst_rate: float = 0.01
 
     # Washington — no wage income tax; two payroll deductions plus a capital-gains
     # excise at filing (2026 values, sources in state_compare.py / TODO-224).
@@ -219,7 +208,20 @@ class Inputs:
 
 # Federal constants that differ by filing status. ``single`` is the Inputs() default,
 # so only the MFJ deltas are listed here (2026, IRS Rev. Proc. 2025-32). FICA is
-# per-person and unchanged; CA figures are independent of federal filing status.
+# per-person and genuinely unchanged across statuses.
+#
+# "CA figures are independent of federal filing status" used to stand here and IS WRONG. It is the
+# reason no CA MFJ figures were ever added, and therefore the reason BUG-0009 exists: California
+# has its own married-filing-jointly brackets (broadly the single schedule doubled) and its own
+# doubled standard deduction, and this table supplies neither — so an MFJ request still receives
+# single-filer CA math. The claim is corrected here rather than acted on because inventing the
+# numbers from memory is precisely how BUG-0006 shipped five states of superseded law. BUG-0009
+# stays open with the sourcing named: FTB Schedule Y / the 2026 CA indexed figures, verified
+# against the FTB publication, the way tax_data/<year>.json entries carry a `sources` string.
+#
+# LIMIT WORTH KNOWING WHEREVER THIS TABLE IS READ: these MFJ values live in CODE, not in
+# tax_data/<year>.json, so scripts/update_tax_values.py refreshes the single-filer constants each
+# year and leaves these frozen.
 FILING_STATUS_OVERRIDES: dict[str, dict] = {
     "mfj": {
         "fed_std_deduction": 32_200.0,
@@ -271,7 +273,7 @@ def calculate(i: Inputs) -> dict:
     mdv = i.medical + i.dental + i.vision
 
     # Second-earner (spouse) wage, clamped ONCE here and reused everywhere it flows
-    # below (fed_wages, ca_wages, fica_wages_spouse, take_home, total_comp,
+    # below (fed_wages, state_wages, fica_wages_spouse, take_home, total_comp,
     # cash.totalGross, and the "inputs" echo) — a negative spouse_salary must not cut
     # federal/CA tax while leaving FICA untouched, and must not be echoed back as if
     # it had any effect (adversarial-review finding D, TODO-247 fix round 2026-08-05;
@@ -300,7 +302,7 @@ def calculate(i: Inputs) -> dict:
     #
     # 401(k)/HSA/MDV/employer match are NOT split per earner — they stay single,
     # household-shaped inputs — but they do NOT apply symmetrically to every wage base
-    # below. They reduce these HOUSEHOLD fed_wages/ca_wages figures (this line), exactly
+    # below. They reduce these HOUSEHOLD fed_wages/state_wages figures (this line), exactly
     # as before TODO-247. Of the four, only hsa/mdv also reduce the PRIMARY's own FICA
     # base (fica_wages_primary, below) — never the spouse's; trad_401k is FICA-taxable
     # (see the field annotation at line ~85) and employer match is excluded from
@@ -310,7 +312,7 @@ def calculate(i: Inputs) -> dict:
     # employer withholds against its own employee's own wages), so a deduction elected
     # against the primary's paycheck cannot reduce a wage base the primary never earned.
     # The two max(0.0, ...) clamps below therefore bind at DIFFERENT granularities on
-    # purpose: fed_wages/ca_wages floor the JOINT RETURN total at $0 (correct — a joint
+    # purpose: fed_wages/state_wages floor the JOINT RETURN total at $0 (correct — a joint
     # return's combined taxable wage can't go negative), while fica_wages_primary floors
     # the PRIMARY's OWN W-2 at $0 independently of the spouse's W-2 (also correct — one
     # employee's payroll deductions can't spill over and reduce a different employer's
@@ -359,7 +361,7 @@ def calculate(i: Inputs) -> dict:
     # above, which rules out the bound ever being exceeded by real payroll); it is
     # PINNED, not "fixed", by
     # test_second_earner_clamp_asymmetry_fed_wages_household_vs_fica_primary_only /
-    # ..._ca_wages_household_vs_sdi_primary_only in tests/test_calculator.py.
+    # ..._state_wages_household_vs_sdi_primary_only in tests/test_calculator.py.
     #
     # A STRONGER, ASSUMPTION-FREE ARGUMENT (not merely "safe", adversarial-review
     # finding B, 2026-08-05 fix round): even setting the reachability analysis above
@@ -379,7 +381,7 @@ def calculate(i: Inputs) -> dict:
     # when reachable, because it doesn't assume the deduction belongs to whichever
     # earner is in the "primary" box.
     fed_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k - i.hsa - mdv)
-    ca_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k + i.employer_hsa - mdv)
+    state_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k + i.employer_hsa - mdv)
 
     # FICA wage bases (TODO-247): Social Security is capped PER PERSON, so it (and the
     # other per-person payroll items below — CA SDI, WA PFML, WA Cares) must be computed
@@ -440,23 +442,15 @@ def calculate(i: Inputs) -> dict:
     addl_med_tax = max(0.0, fica_wages - i.addl_medicare_threshold) * i.addl_medicare_rate
 
     # State
+    # state_tax / state_taxable stay as the GENERIC slot a future state would fill. Neither
+    # supported state taxes wage income today, so both are structurally zero — kept rather
+    # than removed because the shape of the result should not change the next time a state
+    # with an income tax is added.
     state_tax = 0.0
-    sdi_tax = 0.0
     state_taxable = 0.0
     wa_pfml_tax = 0.0
     wa_cares_tax = 0.0
-    if i.state == "CA":
-        state_taxable = max(0.0, ca_wages - i.ca_std_deduction)
-        state_tax = apply_brackets(state_taxable, i.ca_brackets)
-        if state_taxable > i.ca_mhst_threshold:
-            state_tax += (state_taxable - i.ca_mhst_threshold) * i.ca_mhst_rate
-        # CA SDI is an uncapped flat rate, so per-person vs. combined-base are
-        # arithmetically identical (see TODO-247 cross-check). Structured as a
-        # sum-of-function-per-earner anyway, for consistency with SS/WA PFML (which DO
-        # move) and so a per-person cap added to SDI in the future doesn't silently
-        # regress to the household-total shape.
-        sdi_tax = fica_wages_primary * i.ca_sdi_rate + fica_wages_spouse * i.ca_sdi_rate
-    elif i.state == "WA":
+    if i.state == "WA":
         # No wage income tax. PFML rides the FICA wage concept capped at the SS wage
         # base PER PERSON (the caps track each other by law, TODO-247); WA Cares is
         # uncapped per person (same "identical either way, split for consistency"
@@ -471,7 +465,7 @@ def calculate(i: Inputs) -> dict:
         )
         wa_cares_tax = fica_wages_primary * i.wa_cares_rate + fica_wages_spouse * i.wa_cares_rate
 
-    total_tax = fed_tax + ss_tax + med_tax + addl_med_tax + state_tax + sdi_tax + wa_pfml_tax + wa_cares_tax
+    total_tax = fed_tax + ss_tax + med_tax + addl_med_tax + state_tax + wa_pfml_tax + wa_cares_tax
 
     # Cash flow: ER stock and GTLI are non-cash → they add to tax but not to take-home
     # MDV premiums are a cash pre-tax deduction (like trad_401k / hsa).
@@ -482,7 +476,7 @@ def calculate(i: Inputs) -> dict:
     # `spouse`, above) flows straight through (no per-earner deduction to net against
     # it, by locked scope).
     #
-    # NOT SPLIT-INVARIANT, BY DESIGN -- distinct from fed_wages/ca_wages/total_comp/
+    # NOT SPLIT-INVARIANT, BY DESIGN -- distinct from fed_wages/state_wages/total_comp/
     # totalGross above, which ARE pure sums of salary + spouse and so are unchanged
     # whether a household's income is entered as one earner or split across two.
     # take_home is NOT: it nets out total_tax, and total_tax embeds ss_tax/
@@ -513,11 +507,7 @@ def calculate(i: Inputs) -> dict:
     # spouse_salary is 0, so single-filer/no-spouse output is unchanged).
     if fica_wages_primary < i.ss_wage_base:
         marginal_all_in += i.ss_rate
-    if i.state == "CA":
-        marginal_all_in += find_marginal(state_taxable, i.ca_brackets) + i.ca_sdi_rate
-        if state_taxable > i.ca_mhst_threshold:
-            marginal_all_in += i.ca_mhst_rate
-    elif i.state == "WA":
+    if i.state == "WA":
         marginal_all_in += i.wa_cares_rate
         # JUDGMENT CALL (TODO-247 — not explicitly enumerated in the locked spec, flagged
         # per its own instruction to say so rather than decide silently): WA PFML is
@@ -552,20 +542,9 @@ def calculate(i: Inputs) -> dict:
         - max(0.0, fica_wages - i.addl_medicare_threshold)
     ) * i.addl_medicare_rate
     bonus_state = 0.0
-    bonus_sdi = 0.0
     bonus_wa_pfml = 0.0
     bonus_wa_cares = 0.0
-    if i.state == "CA":
-        bonus_state = (
-            apply_brackets(state_taxable + i.bonus, i.ca_brackets)
-            - apply_brackets(state_taxable, i.ca_brackets)
-            + (
-                max(0.0, state_taxable + i.bonus - i.ca_mhst_threshold)
-                - max(0.0, state_taxable - i.ca_mhst_threshold)
-            ) * i.ca_mhst_rate
-        )
-        bonus_sdi = i.bonus * i.ca_sdi_rate
-    elif i.state == "WA":
+    if i.state == "WA":
         # JUDGMENT CALL (TODO-247, flagged per the spec's own instruction rather than
         # decided silently): same reasoning as bonus_ss above — WA PFML is capped at the
         # SS wage base per person, mechanically identical to SS, so the (primary-only)
@@ -575,7 +554,7 @@ def calculate(i: Inputs) -> dict:
             min(fica_wages_primary + i.bonus, i.ss_wage_base) - min(fica_wages_primary, i.ss_wage_base)
         ) * i.wa_pfml_total_rate * i.wa_pfml_employee_share
         bonus_wa_cares = i.bonus * i.wa_cares_rate
-    bonus_total = bonus_fed + bonus_ss + bonus_med + bonus_addl + bonus_state + bonus_sdi + bonus_wa_pfml + bonus_wa_cares
+    bonus_total = bonus_fed + bonus_ss + bonus_med + bonus_addl + bonus_state + bonus_wa_pfml + bonus_wa_cares
     bonus_net = i.bonus - bonus_total
     bonus_eff = bonus_total / i.bonus if i.bonus > 0 else 0.0
     # Supplemental-wage withholding gap: a bonus/RSU vest has federal income tax WITHHELD
@@ -740,7 +719,9 @@ def calculate(i: Inputs) -> dict:
             "ficaWages": fica_wages,              # HOUSEHOLD aggregate — unchanged meaning
             "ficaWagesPrimary": fica_wages_primary,  # TODO-247: primary earner's own base
             "ficaWagesSpouse": fica_wages_spouse,    # TODO-247: spouse's own base
-            "caWages": ca_wages,
+            # Was "caWages". The concept — wages subject to a state income tax — outlives
+            # California; the name was the only part specific to it.
+            "stateWages": state_wages,
             "stateTaxable": state_taxable,
         },
         "taxes": {
@@ -749,7 +730,6 @@ def calculate(i: Inputs) -> dict:
             "medTax": med_tax,
             "addlMedTax": addl_med_tax,
             "stateTax": state_tax,
-            "sdiTax": sdi_tax,
             "waPfmlTax": wa_pfml_tax,
             "waCaresTax": wa_cares_tax,
             "totalTax": total_tax,
@@ -815,7 +795,6 @@ def calculate(i: Inputs) -> dict:
             "medTax": bonus_med,
             "addlMedTax": bonus_addl,
             "stateTax": bonus_state,
-            "sdiTax": bonus_sdi,
             "waPfmlTax": bonus_wa_pfml,
             "waCaresTax": bonus_wa_cares,
             "totalTax": bonus_total,
@@ -886,7 +865,6 @@ __all__ = [
     "FilingStatus",
     "DEFAULT_FED_BRACKETS",
     "MFJ_FED_BRACKETS",
-    "DEFAULT_CA_BRACKETS",
     "FILING_STATUS_OVERRIDES",
     "apply_brackets",
     "find_marginal",

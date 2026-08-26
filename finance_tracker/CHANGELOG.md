@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.7.7
+
+Your budget now knows about your job change, and two numbers it had been quietly getting wrong
+are right.
+
+**The budget follows the job change**
+
+- Enter a job change and press **Apply**, and the Budget tab now says what is coming: *"From
+  September 7 your monthly take-home becomes $9,190 — up $1,635/mo on $7,555 at your current
+  job."* Both figures are one month at one job, so the difference is the one you would actually
+  feel. Before the start date your budget stays on the money that is still arriving; on the day,
+  it switches, and the banner retires itself.
+- **Apply no longer costs you your take-home.** Apply rewrites the Tax tab as the *blended year* —
+  the old salary and the new one averaged across twelve months. That is the right figure to file
+  taxes on and the wrong one to spend, and it was what the budget was being planned against. On
+  one real setup it reported being $1,226/mo over budget purely because of this. The take-home you
+  had before Apply is now kept, shown on the Job change card, and editable if it is not right.
+- Nothing leaves the Job change card until you press Apply. Typing in it used to move the budget
+  and pop the banner before you had committed to anything.
+
+**Paychecks are counted now, not estimated**
+
+- Contribution targets are worked out per paycheck, so they depend on how many paychecks are left
+  in the year — and that count was a fraction of the year rather than a count of real paydays. It
+  was **low by one on 319 of 365 possible start dates**, never high. A target spread over too few
+  paychecks makes every paycheck too big: on one real setup the 401(k) figure was **100% too
+  high**, the HSA 20% too high.
+- Paydays are now counted on your employer's calendar, including the ones paid early because they
+  land on a weekend or a federal holiday — and the 1 January cheque that is really paid on 31
+  December, which belongs to the earlier tax year. The card says which schedule it assumed.
+
+**Also**
+
+- **Progress to FI**: log your net worth over time against your FIRE target and see the gap close.
+- California is gone from the tax engine. It was never finished, and a half-built state is worse
+  than no state — selecting Washington could land you on California's numbers.
+- Filing status is now enforced by the engine itself, not just the screen.
+- Keyboard and screen-reader users get proper landmarks and a skip link; several checkboxes that
+  announced nothing now have names; the smallest tap targets have grown.
+- The round-up amount is stated once per bucket instead of twice, and the line-items caption no
+  longer stops two thirds of the way across the card.
+
 ## 0.7.6
 
 The Budget tab lost a screen it should never have had, and the bills you track moved onto one

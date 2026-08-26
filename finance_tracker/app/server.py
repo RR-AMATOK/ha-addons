@@ -344,27 +344,34 @@ class InputModel(BaseModel):
     er_stock: float = Field(0, alias="erStock")
     gtli: float = 0
     # Jurisdiction
-    state: str = "CA"
+    # A LITERAL, not a free string, and the default is "none" rather than a jurisdiction.
+    # It was `str = "CA"`, so a caller who omitted `state` silently received California math —
+    # and after California's removal the same omission would have silently received nothing under
+    # a name nobody chose. "none" means what it says: you did not tell me a state. An explicit
+    # "CA" now 422s with the supported list rather than quietly computing federal-only under a
+    # California request; the app's own chips have never offered it, so nothing it stores can hit
+    # this, and a direct API caller deserves to be told rather than guessed at.
+    state: Literal["none", "TX", "WA"] = "none"
     filing_status: Literal["single", "mfj"] = Field("single", alias="filingStatus")
     # Federal
-    fed_std_deduction: float = Field(16_100, alias="fedStd")
+    # THE EIGHT FEDERAL CONSTANTS THAT DIFFER BY FILING STATUS DEFAULT TO None, NOT TO THE
+    # SINGLE-FILER FIGURE — that is the whole of the BUG-0002/BUG-0009 fix. With a concrete
+    # default the server could not tell "the caller sent the single value on purpose" from "the
+    # caller sent nothing", so a request carrying filingStatus="mfj" and no constants silently got
+    # single-filer math LABELLED mfj. None means unset, and unset resolves through
+    # calc.Inputs.for_filing_status() below. Anything the caller actually sends still wins.
+    fed_std_deduction: float | None = Field(None, alias="fedStd")
     fed_brackets: list[BracketModel] = Field(default_factory=list, alias="fedBrackets")
     # FICA
     ss_wage_base: float = Field(184_500, alias="ssBase")
     ss_rate: float = Field(0.062, alias="ssRate")
     medicare_rate: float = Field(0.0145, alias="medRate")
-    addl_medicare_threshold: float = Field(200_000, alias="addlMedThresh")
+    addl_medicare_threshold: float | None = Field(None, alias="addlMedThresh")
     addl_medicare_rate: float = Field(0.009, alias="addlMedRate")
-    # California
-    ca_std_deduction: float = Field(5_540, alias="caStd")
-    ca_brackets: list[BracketModel] = Field(default_factory=list, alias="caBrackets")
-    ca_sdi_rate: float = Field(0.012, alias="caSdi")
-    ca_mhst_threshold: float = Field(1_000_000, alias="caMhstThresh")
-    ca_mhst_rate: float = Field(0.01, alias="caMhstRate")
     # Roth IRA phase-out
     roth_ira_limit: float = Field(7_500, alias="rothIraLimit")
-    roth_ira_phase_in: float = Field(153_000, alias="rothIraPhaseIn")
-    roth_ira_phase_out: float = Field(168_000, alias="rothIraPhaseOut")
+    roth_ira_phase_in: float | None = Field(None, alias="rothIraPhaseIn")
+    roth_ira_phase_out: float | None = Field(None, alias="rothIraPhaseOut")
     # Backdoor / mega-backdoor Roth and bonus
     backdoor_roth: bool = Field(False, alias="backdoorRoth")
     bonus: float = 0
@@ -378,9 +385,9 @@ class InputModel(BaseModel):
     qualified_dividends: float = Field(0, alias="qualifiedDividends")
     ordinary_dividends: float = Field(0, alias="ordinaryDividends")
     taxable_interest: float = Field(0, alias="taxableInterest")
-    ltcg_0pct_upper: float = Field(49_450, alias="ltcg0pctUpper")
-    ltcg_15pct_upper: float = Field(545_500, alias="ltcg15pctUpper")
-    niit_threshold: float = Field(200_000, alias="niitThreshold")
+    ltcg_0pct_upper: float | None = Field(None, alias="ltcg0pctUpper")
+    ltcg_15pct_upper: float | None = Field(None, alias="ltcg15pctUpper")
+    niit_threshold: float | None = Field(None, alias="niitThreshold")
     # ESPP / RSU dispositions (share sales)
     espp_shares_sold: float = Field(0, alias="esppSharesSold")
     espp_purchase_price_per_share: float = Field(0, alias="esppPurchasePrice")
@@ -1183,7 +1190,6 @@ def defaults() -> dict:
     d = {
         # ---- Tax brackets ----
         "fedBrackets": [{"upper": b.upper, "rate": b.rate} for b in calc.DEFAULT_FED_BRACKETS],
-        "caBrackets": [{"upper": b.upper, "rate": b.rate} for b in calc.DEFAULT_CA_BRACKETS],
         # ---- Federal / FICA ----
         "fedStd": 16_100,
         "ssBase": 184_500,
@@ -1192,10 +1198,6 @@ def defaults() -> dict:
         "addlMedThresh": 200_000,
         "addlMedRate": 0.009,
         # ---- California ----
-        "caStd": 5_540,
-        "caSdi": 0.012,
-        "caMhstThresh": 1_000_000,
-        "caMhstRate": 0.01,
         # ---- 2026 contribution limits ----
         "k401Limit": 24_500,
         "iraLimit": 7_500,
@@ -1274,6 +1276,22 @@ def calculate_endpoint(inp: InputModel) -> dict:
     # intentionally NOT fixed here (out of scope for a spouse-salary clamp; it deserves
     # its own change). filing_status is honored HERE — for the spouse_salary clamp only.
     spouse_salary = inp.spouse_salary if inp.filing_status == "mfj" else 0.0
+
+    # The status-correct baseline for every federal constant the caller left unset. `single` is the
+    # dataclass default; `mfj` layers calc.FILING_STATUS_OVERRIDES on top — the SAME table that
+    # builds the `filingStatusDefaults` the client repopulates from, so the two can never disagree.
+    # A value the caller actually sent always wins over it: the constants stay editable, which is
+    # the point of exposing them at all.
+    #
+    # KNOWN LIMIT, recorded rather than silently accepted: the MFJ figures live in calculator.py,
+    # not in tax_data/<year>.json. The annual refresh (scripts/update_tax_values.py) therefore
+    # updates the single-filer constants and leaves MFJ frozen in code. That is a smaller problem
+    # than shipping single-filer math under an MFJ label, which is what this replaces, but it is
+    # the same static-data class BUG-0048 was about and it wants its own change.
+    _fs_base = calc.Inputs.for_filing_status(inp.filing_status)
+    def _fs(sent, attr):
+        return getattr(_fs_base, attr) if sent is None else sent
+
     inputs = calc.Inputs(
         salary=inp.salary,
         spouse_salary=spouse_salary,
@@ -1291,21 +1309,18 @@ def calculate_endpoint(inp: InputModel) -> dict:
         gtli=inp.gtli,
         state=inp.state,  # type: ignore[arg-type]
         filing_status=inp.filing_status,  # type: ignore[arg-type]
-        fed_std_deduction=inp.fed_std_deduction,
-        fed_brackets=_to_brackets(inp.fed_brackets, calc.DEFAULT_FED_BRACKETS),
+        fed_std_deduction=_fs(inp.fed_std_deduction, 'fed_std_deduction'),
+        # Empty means unset here, the same as None above -- and the fallback is now the
+        # STATUS's bracket table rather than the single-filer one.
+        fed_brackets=_to_brackets(inp.fed_brackets, _fs_base.fed_brackets),
         ss_wage_base=inp.ss_wage_base,
         ss_rate=inp.ss_rate,
         medicare_rate=inp.medicare_rate,
-        addl_medicare_threshold=inp.addl_medicare_threshold,
+        addl_medicare_threshold=_fs(inp.addl_medicare_threshold, 'addl_medicare_threshold'),
         addl_medicare_rate=inp.addl_medicare_rate,
-        ca_std_deduction=inp.ca_std_deduction,
-        ca_brackets=_to_brackets(inp.ca_brackets, calc.DEFAULT_CA_BRACKETS),
-        ca_sdi_rate=inp.ca_sdi_rate,
-        ca_mhst_threshold=inp.ca_mhst_threshold,
-        ca_mhst_rate=inp.ca_mhst_rate,
         roth_ira_limit=inp.roth_ira_limit,
-        roth_ira_phase_in=inp.roth_ira_phase_in,
-        roth_ira_phase_out=inp.roth_ira_phase_out,
+        roth_ira_phase_in=_fs(inp.roth_ira_phase_in, 'roth_ira_phase_in'),
+        roth_ira_phase_out=_fs(inp.roth_ira_phase_out, 'roth_ira_phase_out'),
         backdoor_roth=inp.backdoor_roth,
         bonus=inp.bonus,
         after_tax_401k=inp.after_tax_401k,
@@ -1316,9 +1331,9 @@ def calculate_endpoint(inp: InputModel) -> dict:
         qualified_dividends=inp.qualified_dividends,
         ordinary_dividends=inp.ordinary_dividends,
         taxable_interest=inp.taxable_interest,
-        ltcg_0pct_upper=inp.ltcg_0pct_upper,
-        ltcg_15pct_upper=inp.ltcg_15pct_upper,
-        niit_threshold=inp.niit_threshold,
+        ltcg_0pct_upper=_fs(inp.ltcg_0pct_upper, 'ltcg_0pct_upper'),
+        ltcg_15pct_upper=_fs(inp.ltcg_15pct_upper, 'ltcg_15pct_upper'),
+        niit_threshold=_fs(inp.niit_threshold, 'niit_threshold'),
         espp_shares_sold=inp.espp_shares_sold,
         espp_purchase_price_per_share=inp.espp_purchase_price_per_share,
         espp_purchase_fmv_per_share=inp.espp_purchase_fmv_per_share,
@@ -2544,6 +2559,52 @@ def schedules_catch_up_endpoint(today: str | None = None, request: Request = Non
     day = _today_or(today)
     with closing(tracking_store.connect()) as c:
         return tracking_store.materialize_due_schedules(c, scope, day)
+
+
+class FireProgressModel(BaseModel):
+    """A reading: where you stand against the FI target AS IT STOOD that day.
+
+    `fiTarget` is supplied by the caller and STORED, never recomputed. That is the contract, not a
+    shortcut — the FI number depends on spending, withdrawal rate and variant choices that change
+    over time and were never recorded, so a target recomputed later would silently rewrite history
+    to match today's plan.
+    """
+    on: str | None = None                     # defaults to today
+    net_worth: float = Field(..., alias="netWorth")
+    fi_target: float = Field(..., alias="fiTarget")
+    variant_key: str | None = Field(None, alias="variantKey")
+    assumptions: dict | None = None
+    note: str | None = None
+    model_config = {"populate_by_name": True}
+
+
+@app.get("/api/tracking/fire-progress")
+def list_fire_progress_endpoint(variantKey: str | None = None, request: Request = None) -> dict:
+    """Oldest first — the order a chart plots."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return {"entries": tracking_store.list_fire_progress(c, scope, variant_key=variantKey)}
+
+
+@app.post("/api/tracking/fire-progress")
+def log_fire_progress_endpoint(m: FireProgressModel, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            return tracking_store.log_fire_progress(
+                c, scope, _today_or(m.on), m.net_worth, m.fi_target,
+                variant_key=m.variant_key, assumptions=m.assumptions, note=m.note)
+        except ValueError as ex:
+            raise HTTPException(status_code=422, detail=str(ex))
+
+
+@app.delete("/api/tracking/fire-progress/{entry_id}")
+def delete_fire_progress_endpoint(entry_id: int, request: Request = None) -> dict:
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        if not tracking_store.delete_fire_progress(c, scope, entry_id):
+            raise HTTPException(status_code=404, detail="no such entry")
+    return {"deleted": entry_id}
 
 
 @app.get("/api/tracking/schedules/occurrences")
