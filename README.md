@@ -98,6 +98,12 @@ actually feel. Contribution targets are divided by paychecks **counted on your
 employer's calendar** — including the ones paid early because they fall on a weekend
 or federal holiday, and the 1 January cheque that really arrives on 31 December.
 
+And because benefits rarely open on day one, the card ends by showing **what each
+remaining paycheck actually looks like** (since 0.7.9) — one column for each shape it
+takes as the HSA and the 401(k) come online, with the dates, the number of paydays,
+every payslip line, and what lands. The cheques before your deductions start are the
+biggest you will see all year, and they are the easiest to mistake for the new normal.
+
 **Multi-user, per household login (since 0.3.0):** every Home Assistant user who
 opens the panel gets their own transactions, accounts, budget, goals, and tax
 inputs, synced to their profile instead of one shared dataset. If one person has

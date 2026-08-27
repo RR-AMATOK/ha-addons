@@ -3653,6 +3653,89 @@ def _household_split_allocation(total_cents: int, shares: list[dict]) -> dict[st
     return out
 
 
+def orphaned_share_members(conn: sqlite3.Connection) -> list[dict]:
+    """Members named by a shared line who are not on this install's roster. BUG-0060.
+
+    Restoring a backup carries `household_budget` and `household_budget_share` (they are
+    financial data) but deliberately NOT `users`/`user_alias` — "identity is install-local, not
+    user financial data" (see the schema notes on both tables). Those two correct decisions meet
+    here: a share is financial data KEYED BY an identity the backup does not carry, so after a
+    restore onto a different install — or after the owner seat has moved — every share row can
+    point at somebody this install has never heard of.
+
+    Nothing is lost when that happens: the rows are intact and the ratios are exact. What breaks
+    is only the resolution of user_id -> person, and the visible consequence is worse than it
+    sounds, because `list_household_budget` correctly shows a non-participant nothing at all. The
+    household's whole shared plan reads as GONE. A user with no way to see why has every reason
+    to type it in again, and THAT would destroy the real data.
+
+    So this exists to make the situation nameable. It reports, per unknown member, which lines
+    they are on — enough for a caller to say "9 shared lines were restored, but they name 2
+    members this install does not know" and offer a remap, rather than rendering an empty plan
+    and saying nothing.
+    """
+    known = set(household_member_scopes(conn).keys())
+    rows = conn.execute(
+        "SELECT s.user_id AS uid, b.id AS line_id, b.name AS line_name, b.status AS status"
+        "  FROM household_budget_share s"
+        "  JOIN household_budget b ON b.id = s.line_id"
+        " ORDER BY s.user_id, b.id"
+    ).fetchall()
+    by_uid: dict[str, dict] = {}
+    for r in rows:
+        uid = r["uid"]
+        if uid in known:
+            continue
+        e = by_uid.setdefault(uid, {"userId": uid, "lineIds": [], "lineNames": [], "activeLines": 0})
+        e["lineIds"].append(r["line_id"])
+        e["lineNames"].append(r["line_name"])
+        if r["status"] == "active":
+            e["activeLines"] += 1
+    return [by_uid[k] for k in sorted(by_uid)]
+
+
+def remap_share_member(conn: sqlite3.Connection, from_user_id: str, to_user_id: str) -> dict:
+    """Move every share row from an unrecognised member onto a current one. BUG-0060.
+
+    NOT done automatically on restore, and that is the whole design. Silently re-pointing an
+    orphaned share at whoever happens to be restoring would hand one person their partner's half
+    of the rent — a wrong answer that looks right, which is strictly worse than the empty plan it
+    would replace. This runs only when somebody has said, explicitly, who was who.
+
+    Ratios are carried across untouched: this changes WHO a share belongs to, never how much.
+
+    A collision — the target already has a share on a line the source is also on — is refused for
+    the whole call rather than merged. Merging would have to invent an answer (add the ratios?
+    keep the larger?) and the two shares genuinely mean different things; a caller that wants one
+    of them gone can delete it deliberately first.
+    """
+    if not from_user_id or not to_user_id:
+        raise ValueError("both from_user_id and to_user_id are required")
+    if from_user_id == to_user_id:
+        raise ValueError("from_user_id and to_user_id are the same member")
+    known = set(household_member_scopes(conn).keys())
+    if to_user_id not in known:
+        raise ValueError(f"userId {to_user_id!r} is not a current household member")
+    if from_user_id in known:
+        raise ValueError(f"userId {from_user_id!r} is a current member — nothing to remap")
+
+    clash = conn.execute(
+        "SELECT b.name AS name FROM household_budget_share a"
+        "  JOIN household_budget_share t ON t.line_id = a.line_id AND t.user_id = ?"
+        "  JOIN household_budget b ON b.id = a.line_id"
+        " WHERE a.user_id = ?", (to_user_id, from_user_id)).fetchall()
+    if clash:
+        names = ", ".join(sorted({r["name"] for r in clash}))
+        raise ValueError(
+            f"{to_user_id!r} already has a share on: {names}. Remove one side first — "
+            f"merging two real shares would have to invent a ratio.")
+
+    cur = conn.execute("UPDATE household_budget_share SET user_id = ? WHERE user_id = ?",
+                       (to_user_id, from_user_id))
+    conn.commit()
+    return {"movedShares": cur.rowcount, "fromUserId": from_user_id, "toUserId": to_user_id}
+
+
 def household_your_share_cents(line: dict, scope: str) -> int:
     """The calling *scope*'s own share of *line* (a `_household_budget_dict` shape), in
     cents (§4/§6.5's fold — this is the exact figure a later slice's Budget-tab overlay

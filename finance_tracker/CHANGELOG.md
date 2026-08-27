@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.9
+
+The Job change card now shows what actually lands, and when it changes.
+
+**Your new paycheck, one column per stretch of the year**
+
+- A new job rarely opens its benefits on day one. The HSA might start after a month and the
+  401(k) after ninety days, and until this release the card only told you the *year* — which
+  averages away the fact that your first few cheques are the biggest ones you will see and the
+  easiest to mistake for your new normal.
+- Under **Your year, blended** there is now a payslip table with one column for each shape your
+  remaining paycheck takes: nothing deducted yet, then one bucket running, then both. Each
+  column says which deductions are on, the dates it covers and how many paydays fall inside it,
+  and each row is a real payslip line down to **what lands each payday**. A footer multiplies
+  each column out, and the caption gives the cash total for the rest of the year.
+- A bucket you are putting nothing into does not get a column. Elect neither and you get one
+  column, because every remaining cheque really is the same.
+- If the plan asks for more than the cheque can carry — catching a whole year of 401(k) room in
+  two December paydays, say — the table says so with the real negative figure rather than
+  rounding it away. That is a finding, not a rendering error.
+- A bonus and a Roth IRA are deliberately not on it: one is a separate cheque, the other comes
+  out of your bank. Neither is withheld from a payday.
+
+**Fixed: the "What you elect today" box could silently break your budget**
+
+- That field is dollars *per paycheck* — its own unit says so. One place was reading it as a
+  percentage, so typing $500 there described a deferral five times your salary. The effect was
+  not a wrong number on screen but a missing one: the Budget tab's job-change banner and its
+  budget base both quietly disappeared. If you have ever filled that box in and wondered where
+  the banner went, this was why.
+
 ## 0.7.8
 
 A shared-expense group was reporting nothing.

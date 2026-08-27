@@ -76,6 +76,16 @@ version is pushed to the repository (`sh addon/publish_repo.sh` from the dev mac
   > to the new job's own monthly take-home, and a banner on the Budget tab announces the
   > change in advance. Nothing leaves the Job change card until you press Apply.
 
+  > **What your new paycheck actually looks like (since 0.7.9).** Benefits rarely open on
+  > day one, so the rest of the year comes in up to three shapes: nothing deducted yet,
+  > then one bucket running, then both. **Your new paycheck** at the bottom of the card
+  > gives each shape its own column — which deductions are on, the dates it covers, how
+  > many paydays fall inside it, and every payslip line down to what lands. A bucket you
+  > are contributing nothing to gets no column. If the plan asks for more than a cheque
+  > can carry, the figure goes negative and says so rather than being rounded away. A
+  > bonus and a Roth IRA are not on it: one is a separate cheque, the other comes out of
+  > your bank, and neither is withheld from a payday.
+
   > **Paycheck counts.** Contribution targets are per-paycheck, so they depend on how many
   > paydays are left in the year. Those are counted on your employer's calendar — including
   > paydays moved earlier because they fall on a weekend or federal holiday, and the

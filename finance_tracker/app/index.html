@@ -1214,6 +1214,51 @@
   .jc-stat.warn .v { color:var(--warn); }
   .jc-stat.bad  .v { color:var(--bad); }
 
+  /* The rest-of-year paycheck table. `.res-table` carries the shape — DESIGN.md §8 rule 7 asks
+     for reuse before a new one — so everything here is the two-line column head and the scroll
+     guard. Four money columns do not fit a phone, and the wrapper takes the scroll rather than
+     letting the figures wrap mid-number. */
+  /* `overflow-x:auto` ALONE DOES NOT CONTAIN THIS. Measured at 390px: the wrapper sat 520px wide
+     inside a 390px viewport and the whole page scrolled sideways, dragging every other card on
+     the tab with it. A plain block in normal flow still contributes its content's min-content
+     size upwards, and the tab panel's grid item carries `min-width:auto`, so the table's 520px
+     floor propagated all the way out to <body>. The automatic-minimum-size rule that zeroes a
+     scroll container only applies to a flex or grid ITEM — so the host becomes a one-column grid
+     and the wrapper becomes an item with an EXPLICIT `min-width:0`. Same trap, and the same fix,
+     as the `minmax(min(240px,100%),1fr)` floor on .jc-stats above. */
+  #jc_phases { display:grid; grid-template-columns:minmax(0,1fr); }
+  .jc-ph-scroll { min-width:0; overflow-x:auto; -webkit-overflow-scrolling:touch;
+                  margin-top:var(--space-2); }
+  /* Capped, not full-width. `.res-table` is 100% and this card is ~1500px on a laptop, which put
+     roughly 500px of nothing between "HSA (payroll)" and the figure it belongs to — a reader
+     tracking one line across three columns had no guide for most of the trip. 900px keeps the
+     label and its three numbers inside one comfortable scan. The floor is what four money
+     columns need before the digits start wrapping mid-figure; below it the wrapper scrolls. */
+  .jc-ph-table { min-width:520px; max-width:900px; }
+  .jc-ph-table th:first-child, .jc-ph-table td:first-child { white-space:nowrap; }
+  /* The column head is a name over its span. The span is the DENOMINATOR of every figure in the
+     column (DESIGN.md §8: a rate is only honest with its denominator), so it is part of the head
+     rather than a footnote — a reader who does not know how many cheques a column covers cannot
+     check a single number in it. */
+  .jc-ph-name { display:block; text-transform:none; letter-spacing:0; font-size:var(--fs-sm);
+                font-weight:var(--fw-semibold); color:var(--text); }
+  .jc-ph-when { display:block; text-transform:none; letter-spacing:0; font-size:var(--fs-2xs);
+                font-weight:var(--fw-normal); color:var(--muted); margin-top:1px; }
+  /* No column tint and no accent rule on the heading that starts a deduction. The money in this
+     table stays monochrome — colour is reserved for state (DESIGN.md §1), and the column NAMES
+     already say which bucket is running, so a stripe would only repeat them in a louder voice. */
+  /* A line that is zero in some columns and not others IS the finding — that is where the
+     deduction starts — so it stays and greys rather than disappearing and shifting every row
+     under it each time an eligibility date changes. */
+  .jc-ph-table tr.jc-ph-zero td { color:var(--muted); }
+  .jc-ph-table tr.jc-ph-net td { font-weight:var(--fw-bold); border-top:1px solid var(--line);
+                                 border-bottom:none; }
+  /* Deductions can legally exceed the cheque during a catch-up sprint, and the app must say so
+     rather than print a negative and move on. --bad is the same semantic this card already gives
+     an out-of-reach verdict. */
+  .jc-ph-table tr.jc-ph-net td.jc-ph-short { color:var(--bad); }
+  .jc-ph-table tr.jc-ph-sum td { color:var(--muted); font-size:var(--fs-sm); border-bottom:none; }
+
   @media (max-width: 480px) {
     .jc-wait .input-pair { width:100%; }
     /* .mi measured 34px on a phone: the 480px block enumerates .chip/.seed-btn/.mng-row select
@@ -2821,6 +2866,16 @@
 
       <div class="subhead">Your year, blended</div>
       <div id="jc_blended" class="mini"></div>
+
+      <!-- The blended tile above is the YEAR. This is the same plan told as paydays, because a
+           year total is not what you live on and the deductions above do not all start on day
+           one. Not inside role=status: it is a table, it repaints on a debounce behind a network
+           call, and #jc_verdicts already announces the answer — announcing a 12-row table on
+           every keystroke would bury it. -->
+      <div class="subhead" id="jc_phases_head">Your new paycheck</div>
+      <p class="mini muted measure" id="jc_phases_note" style="margin:-2px 0 0"></p>
+      <div id="jc_phases"></div>
+
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="primary" id="jc_apply" type="button">Apply to my Tax inputs</button>
         <span class="mini muted">Nothing changes until you press it.</span>
@@ -5017,12 +5072,74 @@ function jcBlendedYear(a, b) {
   };
 }
 
+// The rest of the year is NOT one paycheck repeated. A 401(k) that opens after 90 days and an HSA
+// that opens after a month cut the remaining paydays into up to three stretches, and the only
+// figure anyone actually cares about — what lands in the account — is different in every one of
+// them. Averaging them produces a paycheck nobody ever receives, and it is wrong in the direction
+// that hurts: the stretch BEFORE the deductions start is the one that looks richest, and it is
+// exactly the stretch a mover has already spent.
+//
+// PURE. Given the pay schedule and the two eligibility dates it returns the stretches in order,
+// each with the paydays inside it and which deductions are running by then. The counting is
+// delegated to jcPaydaysRemaining, which is what the rest of the card counts with — so the phase
+// counts sum back to the whole span EXACTLY. That is not a coincidence to be grateful for, it is
+// the reason this function does no date arithmetic of its own beyond the boundaries: that function
+// tests the PAID date (after weekend/holiday roll-back), and stretches that partition the span by
+// paid date cannot double-count or drop a cheque.
+//
+// `hsaOn` / `k401On` are ELECTIONS, not eligibility. A bucket the user is putting nothing into
+// does not cut the year, so it never earns a column — which is the whole "hide the column" rule.
+//
+// Two boundaries worth stating because each was wrong in a first draft:
+//   · an eligibility date on or before the start date is NOT a cut. The deduction runs from the
+//     first cheque, so there is no "before" stretch to render.
+//   · an eligibility date PAST the end of the year is not a cut either. Left in, the stretch
+//     before it took `to` = the day before a January date and counted January paydays into this
+//     year's table. Dropped instead — a benefit that opens next year runs for no cheque in this
+//     one, and `on()` below reports it off for every stretch, which is the same truth.
+function jcPayPhases(o) {
+  const iso = v => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+  const start = iso(o && o.start), end = iso(o && o.yearEnd), anchor = iso(o && o.anchor);
+  if (!start || !end || !anchor || end < start) return [];
+  const freq = (o && o.freq) || 'semimonthly';
+  const elig401k = iso(o && o.elig401k), eligHsa = iso(o && o.eligHsa);
+  const k401On = !!(o && o.k401On) && !!elig401k;
+  const hsaOn = !!(o && o.hsaOn) && !!eligHsa;
+  const dayBefore = s => {
+    const d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) - 864e5);
+    const p = n => (n < 10 ? '0' : '') + n;
+    return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+  };
+  // ISO dates compare correctly as strings — same width, most significant field first.
+  const cuts = [];
+  if (k401On && elig401k > start && elig401k <= end) cuts.push(elig401k);
+  if (hsaOn && eligHsa > start && eligHsa <= end) cuts.push(eligHsa);
+  cuts.sort();
+  const bounds = [start];
+  cuts.forEach(c => { if (bounds[bounds.length - 1] !== c) bounds.push(c); });
+
+  const out = [];
+  for (let n = 0; n < bounds.length; n++) {
+    const from = bounds[n];
+    const to = n + 1 < bounds.length ? dayBefore(bounds[n + 1]) : end;
+    const paychecks = to < from ? 0 : jcPaydaysRemaining(anchor, from, to, freq);
+    // A stretch with no payday in it is not a column. It happens whenever two eligibility dates
+    // land inside one pay period — real, and there is nothing to show for it.
+    if (paychecks <= 0) continue;
+    out.push({ from, to, paychecks,
+               k401: k401On && elig401k <= from,
+               hsa: hsaOn && eligHsa <= from });
+  }
+  return out;
+}
+
 window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, annualSalary, householdCashSalary, sxHouseholdWages, rothIraCapFromResult, rothIraMagiDelta, pctMode, fieldCadence,
   sniffBackupShape, validateFpsEnvelope, buildBackupEnvelope, collectBackupClientKeys, writeBackupClientKeys, planBackupRestore, resolveCsvRange,
   rosterDisplayName, foldCategoriesByCountsAs, identityChanged, shouldSnapshotDirtyEditOnIdentityChange,
   jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
   jcMatchForgone, jcBlendedYear, jcMonthsBetween, jcIraMonthsLeft,
-  jcPaydaysRemaining, jcPaydaySlots, jcRollToPayday, jcFederalHolidays, jcScheduleAnchor };
+  jcPaydaysRemaining, jcPaydaySlots, jcRollToPayday, jcFederalHolidays, jcScheduleAnchor,
+  jcPayPhases };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
 // separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
 // would throw a ReferenceError at this statement and silently prevent window.__clientMath from
@@ -5542,6 +5659,10 @@ function render(r) {
   // recompute cycle stale relative to whatever just changed MAGI.
   updateLimitHints();
   if (window.bgbBaseAutoFill) window.bgbBaseAutoFill();   // budget base tracks take-home — contributions reduce it live
+  // The Job-change card's paycheck table is priced against THIS result, and it cannot be priced
+  // before the first one lands. This is the only event that knows one has; the call no-ops once
+  // the table exists, so a per-keystroke recompute costs nothing. See jcHealPhases.
+  try { if (window.__jobChange && window.__jobChange.healPhases) window.__jobChange.healPhases(); } catch (e) {}
   // The frameworks are computed from this result, so the recalculation IS their trigger now that
   // the six inputs (and the button that recalculated them) are gone.
   if (typeof calcBudget === 'function') { try { calcBudget(); } catch (e) {} }
@@ -19181,6 +19302,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const V = id => { const e = $(id); return e ? rn(e.value) : 0; };
   const S = id => { const e = $(id); return e ? e.value : ''; };
   const yearOf = iso => (iso && /^\d{4}-/.test(iso)) ? +iso.slice(0, 4) : new Date().getFullYear();
+  // Cheques per year, in ONE place. It was inlined in jcInputs and then needed again by the
+  // forward-monthly payload, and two copies of a table like this drift silently — the second
+  // copy is where BUG-0061 turned a dollars-per-cheque election into a percentage.
+  const JC_PER_YEAR = freq => ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 })[freq] || 24;
 
   function jcEligibleDate(startIso, n, unit) {
     if (!startIso) return '';
@@ -19214,7 +19339,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const elig401k = jcEligibleDate(start, V('jc_wait_401k'), S('jc_wait_401k_unit'));
     const eligHsa = jcEligibleDate(start, V('jc_wait_hsa'), S('jc_wait_hsa_unit'));
     const freq = S('jc_b_freq') || 'semimonthly';
-    const perYear = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 }[freq] || 24;
+    const perYear = JC_PER_YEAR(freq);
     const salary = V('jc_b_salary');
     return {
       year, yearEnd, start, freq, perYear,
@@ -19373,8 +19498,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const monthsAtB = i.start ? jcMonthsBetween(i.start, i.yearEnd) : 0;
     const months401k = i.elig401k ? jcMonthsBetween(i.elig401k, i.yearEnd) : 0;
     const monthsHsa = i.eligHsa ? jcMonthsBetween(i.eligHsa, i.yearEnd) : 0;
+    // `newHsa` is on this list where it was not before. It was computed above, spent on
+    // jcBlendedYear and then dropped — every 401(k) figure was exported and its HSA counterpart
+    // was not, which reads as an oversight and behaved like one: the paycheck table asked
+    // `r.newHsa > 0` to decide whether the HSA cuts the year, got `undefined`, and quietly drew a
+    // year in which the HSA never opens. Nothing announced it, because `undefined > 0` is a
+    // perfectly good `false`.
     return { i, p401k, pHsa, hsaMonths, hsaCap, f401k, fHsa, fIra, iraMonths: Math.max(1, monthsLeft),
-             iraCapKnown, iraCap, newDeferral, newTrad, newRoth, newMatch, rothShare, perNew,
+             iraCapKnown, iraCap, newDeferral, newTrad, newRoth, newHsa, newMatch, rothShare, perNew,
              lim415, room415, missed, forgone, excessSS, wagesB, blended, ssBase,
              monthsAtA, monthsAtB, months401k, monthsHsa,
              iraMagi: (window.__taxResult && window.__taxResult.limits
@@ -19666,6 +19797,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         '<div class="tile"><div class="k">' + name + '</div><div class="v">&mdash;</div>'
         + '<div class="s">Fill in when the new job starts and what it pays.</div></div>').join('');
       $('jc_blended').innerHTML = '<p class="mini muted" style="margin:0">Nothing to blend yet.</p>';
+      // Clear the paycheck table HERE, synchronously, rather than waiting for the debounce that
+      // owns it: clearing the start date must not leave a priced table sitting under a card that
+      // has just said it has nothing to work with. Bumping the sequence is the load-bearing half
+      // — a request already in flight for the previous, valid form would otherwise land and
+      // repaint the table a beat later.
+      _jcPhaseSeq += 1;
+      jcPhasesMessage('Fill in when the new job starts and what it pays, and this shows what each '
+                    + 'remaining paycheck looks like.');
       $('jc_elig_401k_out').textContent = '';
       $('jc_elig_hsa_out').textContent = '';
       jcHeads(null);
@@ -19854,10 +19993,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         bonus: V('jc_b_bonus') || 0,
         trad401k: 0, roth401k: 0,
       });
-      const pct = V('jc_b_current') / 100;
-      if (pct > 0) {
-        if ((S('jc_b_kind') || 'trad') === 'roth') fwdBody.roth401k = salary * pct;
-        else fwdBody.trad401k = salary * pct;
+      // BUG-0061. `jc_b_current` is DOLLARS PER PAYCHECK — its unit chips say "$ /pay" and
+      // jcFeasibility subtracts it from needPerPeriod, which is dollars. This read it as a
+      // percentage (`/100`) and multiplied the SALARY by it, so a $500/pay election became
+      // salary × 5 — a deferral five times the wage — and the take-home this writes is the
+      // Budget tab's base after a job change. Latent only because the field defaults to 0.
+      // Annualised properly: dollars per cheque × cheques per year.
+      const perPay = V('jc_b_current');
+      if (perPay > 0) {
+        const annual = perPay * JC_PER_YEAR(S('jc_b_freq'));
+        if ((S('jc_b_kind') || 'trad') === 'roth') fwdBody.roth401k = annual;
+        else fwdBody.trad401k = annual;
       }
 
       // THE OLD JOB IS NOT RECONSTRUCTED. A first attempt annualised gross wages to date over the
@@ -19874,6 +20020,268 @@ document.addEventListener('DOMContentLoaded', async () => {
         : null);
     } catch (e) { write(null); }
   }
+  // ---- the rest of the year, told as paydays ----
+  //
+  // The blended tile above answers "what will my W-2 say". This answers the question the owner
+  // actually asked, which the tile cannot: WHAT LANDS, and when it changes. The two eligibility
+  // waits already on this card mean the remaining paychecks come in up to three shapes — nothing
+  // deducted, one bucket running, both running — and the first of those is the fattest cheque of
+  // the year and the easiest to mistake for the new normal.
+  //
+  // WHY THIS IS ASYNC WHEN THE REST OF THE CARD IS NOT. Every other figure here is arithmetic the
+  // client owns. Federal withholding is not: the server owns tax (D2), and a client-side shadow
+  // formula for it is precisely the defect BUG-0036 was. So each distinct stretch is priced by
+  // /api/calculate on that stretch's OWN deductions, annualised — which is not a workaround, it
+  // is what a real payroll does on every single cheque.
+  //
+  // NOT gated on jc_a_takehome the way jcRefreshForwardMonthly is. That gate exists so an
+  // un-applied job change cannot move the BUDGET. This table never leaves the card, so the same
+  // gate would only hide the answer the user came for behind a button that overwrites their Tax
+  // tab first.
+  const jcShortDate = iso => {
+    const d = new Date(iso + 'T00:00:00');
+    return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  };
+
+  // What the column is called. The name says which deductions are running, because that is what
+  // makes the numbers under it what they are. "Only" is used just when the OTHER bucket is also
+  // elected and simply has not started — with one bucket elected there is no "only" to draw.
+  function jcPhaseLabel(ph, hasK, hasH) {
+    const on = [];
+    if (ph.k401) on.push('401(k)');
+    if (ph.hsa) on.push('HSA');
+    const elected = (hasK ? 1 : 0) + (hasH ? 1 : 0);
+    if (!elected) return 'Every paycheck';
+    if (!on.length) return 'No ' + (hasK && hasH ? '401(k) or HSA' : hasK ? '401(k)' : 'HSA') + ' yet';
+    if (on.length === elected) return on.join(' + ');
+    return on[0] + ' only';
+  }
+
+  // The payslip lines for one priced stretch, ANNUAL — the caller divides. Order and wording
+  // follow the Tax tab's own Cash flow table on purpose: this is the same instrument at a
+  // different cadence, and two vocabularies for one payslip is how a reader ends up with two sets
+  // of books.
+  //
+  // FIXED LENGTH, ALWAYS, zeros included. The first version pushed the optional lines
+  // conditionally (`if addlMedTax > 0`) the way the Cash flow table does — but that table has one
+  // column and this one has three, and the conditions are not column-invariant: additional
+  // Medicare is charged on FICA wages, HSA reduces FICA wages, and the HSA is exactly what
+  // differs between these columns. A salary either side of the threshold would have produced a
+  // 12-row column beside an 11-row one, and the renderer reads values positionally. Emitting the
+  // zero and letting the renderer drop rows that are zero EVERYWHERE keeps every column the same
+  // shape by construction rather than by luck.
+  //
+  // The NET is the sum of these rows, not `cash.takeHome`. They agree — the payload below zeroes
+  // everything take_home subtracts that a payslip does not (spouse wage, bonus, Roth IRA,
+  // after-tax 401(k)) — and summing what is on screen means a reader can check the column with a
+  // finger, which a total sourced from elsewhere cannot be.
+  function jcPhaseLines(res) {
+    if (!res || !res.cash || !res.taxes) return null;
+    const c = res.cash, t = res.taxes, n = v => +v || 0;
+    return [
+      ['Gross pay', n(c.salary)],
+      ['− 401(k) Traditional', -n(c.trad401k)],
+      ['− 401(k) Roth', -n(c.roth401k)],
+      ['− HSA (payroll)', -n(c.hsa)],
+      ['− Medical premium', -n(c.medical)],
+      ['− Dental premium', -n(c.dental)],
+      ['− Vision premium', -n(c.vision)],
+      ['− EE stock (ESPP)', -n(c.eeStock)],
+      ['− Federal income tax', -n(t.fedTax)],
+      ['− Social Security', -n(t.ssTax)],
+      ['− Medicare', -n(t.medTax)],
+      ["− Add'l Medicare", -n(t.addlMedTax)],
+      ['− State income tax', -n(t.stateTax)],
+      ['− WA PFML', -n(t.waPfmlTax)],
+      ['− WA Cares', -n(t.waCaresTax)],
+    ];
+  }
+
+  function jcPhasesMessage(text) {
+    const host = $('jc_phases'); if (host) host.innerHTML = '';
+    const note = $('jc_phases_note'); if (note) note.textContent = text || '';
+  }
+
+  let _jcPhaseSeq = 0;
+  async function jcRefreshPhases() {
+    const host = $('jc_phases'); if (!host) return;
+    const seq = ++_jcPhaseSeq;
+    const r = jcCompute();
+    if (!jcUsable(r)) {
+      jcPhasesMessage('Fill in when the new job starts and what it pays, and this shows what each '
+                    + 'remaining paycheck looks like.');
+      return;
+    }
+    // Same readiness gate, and the same reason, as jcRefreshForwardMonthly: this builds its
+    // payload from the Tax tab's fields, and at DOMContentLoaded they are not populated yet.
+    // Pricing against empty brackets returns a confidently wrong number rather than an error.
+    if (!window.__taxResult || !window.__taxResult.cash) {
+      jcPhasesMessage('Waiting on your tax figures — open the Tax tab once and this fills in.');
+      return;
+    }
+
+    const perYear = r.i.perYear;
+    // The PLAN's contributions, not today's election: this card exists to size a catch-up, and
+    // the catch-up is what will actually come off the cheque. Divided by the paychecks each
+    // bucket is open for — which is the same count jcCompute spread the target across, so the
+    // columns multiply back to the totals in the tile above rather than nearly to them.
+    const kTrad = r.p401k > 0 ? r.newTrad / r.p401k : 0;
+    const kRoth = r.p401k > 0 ? r.newRoth / r.p401k : 0;
+    const hsaPP = r.pHsa > 0 ? r.newHsa / r.pHsa : 0;
+    const hasK = (kTrad + kRoth) > 0, hasH = hsaPP > 0;
+
+    const phases = jcPayPhases({
+      start: r.i.start, yearEnd: r.i.yearEnd, freq: r.i.freq,
+      anchor: jcScheduleAnchor(r.i.start, r.i.freq),
+      elig401k: r.i.elig401k, eligHsa: r.i.eligHsa,
+      k401On: hasK, hsaOn: hasH,
+    });
+    if (!phases.length) { jcPhasesMessage('No paychecks left at the new job this year.'); return; }
+
+    if (!host.innerHTML) jcPhasesMessage('Working out what each paycheck looks like…');
+
+    // THE PAYSLIP PAYLOAD. The Tax tab's own settings carry over — filing status, state, medical
+    // /dental/vision, ESPP, the brackets and wage bases — exactly as jcRefreshForwardMonthly
+    // reuses them, because rebuilding a bare payload here would quietly answer for a different
+    // person. What is zeroed is everything that is NOT on a payslip, and each one is a wrong
+    // number on screen if left in:
+    //   spouseSalary  — not your cheque, and your employer does not withhold on it
+    //   bonus         — a separate cheque, taxed on its own schedule (the tile above carries it)
+    //   rothIra       — funded from your bank, never withheld
+    //   afterTax401k  — the new job's mega-backdoor is not part of this plan (jcCompute sets 0)
+    //   investments   — capital gains, dividends and interest are settled at filing. Leaving them
+    //                   in put tax on a stock sale into a "Federal income tax" line the reader
+    //                   would compare against a payslip that has never heard of it.
+    const base = buildPayload();
+    const bodyFor = ph => Object.assign({}, base, {
+      salary: r.i.salary, spouseSalary: 0, bonus: 0, rothIra: 0, afterTax401k: 0,
+      trad401k: ph.k401 ? kTrad * perYear : 0,
+      roth401k: ph.k401 ? kRoth * perYear : 0,
+      hsa: ph.hsa ? hsaPP * perYear : 0,
+      longTermGains: 0, shortTermGains: 0, qualifiedDividends: 0, ordinaryDividends: 0,
+      taxableInterest: 0,
+      esppSharesSold: 0, rsuSharesSold: 0,
+    });
+
+    // Stretches with the same deductions price identically, so they are asked for once. With at
+    // most three columns this saves at most one round trip — it is here because the alternative
+    // is three requests that can disagree, not because it is fast.
+    const keyOf = ph => (ph.k401 ? 'K' : '-') + (ph.hsa ? 'H' : '-');
+    const wanted = [];
+    phases.forEach(ph => { if (!wanted.some(w => w.key === keyOf(ph))) wanted.push({ key: keyOf(ph), ph }); });
+
+    let priced;
+    try {
+      priced = await Promise.all(wanted.map(async w => {
+        const resp = await fetch('/api/calculate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyFor(w.ph)),
+        });
+        if (!resp.ok) throw new Error('backend error: HTTP ' + resp.status);
+        return { key: w.key, lines: jcPhaseLines(await resp.json()) };
+      }));
+    } catch (e) {
+      if (seq !== _jcPhaseSeq) return;
+      jcPhasesMessage('Could not price the new paychecks just now — the tax service did not '
+                    + 'answer. Everything else on this card is unaffected.');
+      return;
+    }
+    if (seq !== _jcPhaseSeq) return;                  // a newer edit already answered
+
+    const byKey = {};
+    priced.forEach(p => { byKey[p.key] = p.lines; });
+    if (priced.some(p => !p.lines)) {
+      jcPhasesMessage('Could not price the new paychecks just now — the tax service answered '
+                    + 'with something this card did not recognise.');
+      return;
+    }
+    jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH);
+  }
+
+  // Heal a cold start, the same way jcHealForwardFromStore does for the Budget banner. jcInit runs
+  // at DOMContentLoaded, when the Tax tab has not calculated yet, so the first attempt correctly
+  // refuses to price anything and says so — and then NOTHING re-ran it. The table sat on "waiting
+  // on your tax figures" until the user happened to type inside the card, which on the ordinary
+  // path (open the tab, read the answer) is never.
+  //
+  // Called from render(), the one place that knows a result has just landed, and guarded on the
+  // table being ABSENT: recompute fires on every keystroke of the Tax tab, and an unguarded call
+  // would put three requests behind each one.
+  function jcHealPhases() {
+    const host = $('jc_phases');
+    if (!host || host.querySelector('.jc-ph-table')) return;        // no card, or already priced
+    if (!window.__taxResult || !window.__taxResult.cash) return;    // still nothing to price with
+    jcRefreshPhases();
+  }
+
+  function jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH) {
+    const host = $('jc_phases'); if (!host) return;
+    const perYear = r.i.perYear;
+    const cols = phases.map(ph => ({ ph, lines: byKey[keyOf(ph)] }));
+    // Every column is the same fixed row list in the same order — see jcPhaseLines — so the
+    // labels come from the first column and the values are read positionally.
+    const labels = cols[0].lines.map(l => l[0]);
+    const per = v => v / perYear;
+    const nets = cols.map(c => c.lines.reduce((s, l) => s + l[1], 0) / perYear);
+    // Each column's cash, ROUNDED ONCE, and the caption's total is the sum of exactly these.
+    // Totalling the unrounded figures instead leaves a caption that is a dollar or two off the
+    // row printed above it — small, invisible in testing, and precisely the kind of thing that
+    // makes a reader stop trusting a table they were meant to be able to check by adding it up.
+    const stretchCash = cols.map((c, n) => Math.round(nets[n] * c.ph.paychecks));
+    const totalCash = stretchCash.reduce((s, v) => s + v, 0);
+    const totalPays = cols.reduce((s, c) => s + c.ph.paychecks, 0);
+
+    let h = '<div class="jc-ph-scroll"><table class="res-table jc-ph-table">'
+          + '<thead><tr><th scope="col">Per paycheck</th>';
+    cols.forEach(c => {
+      h += '<th scope="col" class="num"><span class="jc-ph-name">'
+         + jcEsc(jcPhaseLabel(c.ph, hasK, hasH)) + '</span><span class="jc-ph-when">'
+         + jcEsc(jcShortDate(c.ph.from) + ' – ' + jcShortDate(c.ph.to)) + ' · '
+         + c.ph.paychecks + (c.ph.paychecks === 1 ? ' paycheck' : ' paychecks')
+         + '</span></th>';
+    });
+    h += '</tr></thead><tbody>';
+
+    labels.forEach((label, n) => {
+      // A line that is zero in EVERY column is not a fact about this job, it is an unused
+      // feature — dropped. A line that is zero in only some columns is exactly the finding, so
+      // it stays and greys.
+      const vals = cols.map(c => per(c.lines[n][1]));
+      if (vals.every(v => Math.abs(v) < 0.5) && n > 0) return;
+      const zero = vals.every(v => Math.abs(v) < 0.5);
+      h += '<tr' + (zero ? ' class="jc-ph-zero"' : '') + '><td>' + jcEsc(label) + '</td>'
+         + vals.map(v => '<td class="num mono">' + fmt$(Math.round(v)) + '</td>').join('')
+         + '</tr>';
+    });
+
+    h += '<tr class="jc-ph-net"><td>What lands each payday</td>'
+       + nets.map(v => '<td class="num mono' + (v < 0 ? ' jc-ph-short' : '') + '">'
+                     + fmt$(Math.round(v)) + '</td>').join('')
+       + '</tr>'
+       + '<tr class="jc-ph-sum"><td>Cash from this stretch</td>'
+       + stretchCash.map(v => '<td class="num mono">' + fmt$(v) + '</td>').join('')
+       + '</tr></tbody></table></div>';
+    host.innerHTML = h;
+
+    // The caption states the denominators the table is built on, because DESIGN.md §8 asks a rate
+    // to carry its own: which paychecks, whose settings, and what is deliberately not on it.
+    const note = $('jc_phases_note');
+    if (note) {
+      const negative = nets.some(v => v < 0);
+      note.textContent =
+        (phases.length === 1
+          ? 'Every remaining paycheck at the new job looks the same, so there is one column. '
+          : 'Your ' + totalPays + ' remaining paychecks come in ' + phases.length + ' shapes, because '
+            + 'the deductions do not all start on day one. ')
+        + fmt$(totalCash) + ' in total between ' + jcShortDate(phases[0].from)
+        + ' and the end of ' + r.i.year + '. Priced on your Tax tab\'s own settings — filing '
+        + 'status, state, premiums — with the contributions this card is planning. A bonus is a '
+        + 'separate cheque and a Roth IRA comes out of your bank, so neither is on it.'
+        + (negative ? ' One stretch asks for more than the cheque holds: the plan does not fit '
+                    + 'payroll as it stands.' : '');
+    }
+  }
+
   function jcRestore() {
     let o; try { o = JSON.parse(load(JC_KEY)); } catch (e) {}
     if (!o) return;
@@ -19960,6 +20368,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // may not be seeded yet; one rejected request was enough to lose the banner for the session.
       // Nothing to restore — just ask again.
       jcRefreshForwardMonthly();
+      jcRefreshPhases();
       return;
     }
     // Form blank: the data may have landed in storage after jcInit read it (first load on a
@@ -19977,6 +20386,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     jcTakeHomeNote();
     jcRender();
     jcRefreshForwardMonthly();                       // repaints the banner when it resolves
+    jcRefreshPhases();                               // and the paycheck table on the card itself
   }
 
   function jcInit() {
@@ -19991,11 +20401,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     let _jcEditTimer = null;
     const jcAfterEdit = () => {
       clearTimeout(_jcEditTimer);
-      _jcEditTimer = setTimeout(() => { jcRefreshForwardMonthly(); }, 400);
+      // Both server-priced figures ride the same debounce. jcRefreshPhases fires up to three
+      // requests, so it must never run per keystroke; each carries its own sequence guard, so a
+      // slow answer to an old edit cannot overwrite a fast answer to a new one.
+      _jcEditTimer = setTimeout(() => { jcRefreshForwardMonthly(); jcRefreshPhases(); }, 400);
     };
     root.addEventListener('input', () => { jcSyncTargetFields(); jcIraDeadlineNote(); jcFirstPayNote(); jcTakeHomeNote(); jcRender(); jcAfterEdit(); });
     root.addEventListener('change', () => { jcSyncTargetFields(); jcIraDeadlineNote(); jcFirstPayNote(); jcTakeHomeNote(); jcRender(); jcAfterEdit(); });
     jcRefreshForwardMonthly();
+    jcRefreshPhases();
     const btn = $('jc_apply');
     if (btn) btn.addEventListener('click', jcApply);
     jcRender();
@@ -20005,7 +20419,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   window.__jobChange = { compute: jcCompute, render: jcRender, apply: jcApply,
                          eligibleDate: jcEligibleDate, heads: JC_HEAD, tones: JC_TONE,
-                         healForward: jcHealForwardFromStore };
+                         healForward: jcHealForwardFromStore,
+                         // Exported so a CDP test can await the priced table instead of sleeping
+                         // and hoping the debounce has fired.
+                         refreshPhases: jcRefreshPhases, phaseLabel: jcPhaseLabel,
+                         healPhases: jcHealPhases };
 })();
 
 </script>
