@@ -2404,6 +2404,10 @@ def delete_household_budget_endpoint(line_id: int, hard: bool = False, confirm: 
 
 # ----- recurring expectations (monthly bills/income seeded from the budget) -----
 
+# Kept only because the two route tests that exercised it are being retired with the routes;
+# nothing constructs it any more. It goes with the model cleanup when the legacy store functions
+# do — which is gated on the backwards-compatibility tests no longer needing to build old-shaped
+# databases, not on tidiness.
 class RecurringModel(BaseModel):
     category: str
     direction: Literal["in", "out"] = "out"
@@ -2772,31 +2776,22 @@ def split_schedule_endpoint(schedule_id: int, m: SplitScheduleModel, request: Re
             raise HTTPException(status_code=422, detail=str(e))
 
 
-@app.post("/api/tracking/recurring")
-def upsert_recurring_endpoint(m: RecurringModel, request: Request = None) -> dict:
-    scope = resolve_user(request)["scopeId"]
-    with closing(tracking_store.connect()) as c:
-        try:
-            return tracking_store.upsert_recurring(
-                c, scope, m.category, direction=m.direction, bucket=m.bucket,
-                due_day=m.due_day, expected_cents=_cents(m.expected), active=m.active)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-
-
-@app.get("/api/tracking/recurring")
-def list_recurring_endpoint(request: Request = None) -> dict:
-    scope = resolve_user(request)["scopeId"]
-    with closing(tracking_store.connect()) as c:
-        return {"recurring": tracking_store.list_recurring(c, scope)}
-
-
-@app.delete("/api/tracking/recurring/{recurring_id}")
-def delete_recurring_endpoint(recurring_id: int, request: Request = None) -> dict:
-    scope = resolve_user(request)["scopeId"]
-    with closing(tracking_store.connect()) as c:
-        tracking_store.delete_recurring(c, scope, recurring_id)
-    return {"deleted": recurring_id}
+# THE `/api/tracking/recurring` ROUTES ARE GONE (TODO-257, 2026-08-27).
+#
+# They were the last way into the legacy `recurring` table over HTTP, and leaving them was how
+# the divergence happened in the first place: migration 16 converted the rows that existed at
+# migration time and the setup checklist went on POSTing here afterwards, so a bill ticked after
+# that date lived only in a table nothing reads. Found on the owner's own database — "Car
+# Payment", $900/mo, present in `recurring` and absent from `schedule`, invisible in every
+# surface of the app. Migration 19 converts what was stranded and empties the table; removing
+# these closes the door behind it. An empty table nothing can write to cannot diverge again.
+#
+# THE TABLE ITSELF IS DELIBERATELY STILL THERE, and so are `tracking_store.upsert_recurring` /
+# `list_recurring` / `delete_recurring`. `_mig_add_schedule_tables` READS that table to convert a
+# pre-v16 backup on restore, it stays in `_BACKUP_TABLES` so older envelopes keep validating, and
+# the store functions are what the backwards-compatibility tests use to build old-shaped
+# databases. Dropping any of that is a one-way migration older code cannot boot past; emptying it
+# is not. See the migration's docstring for the full reasoning.
 
 
 @app.post("/api/tracking/transactions/import")
@@ -3362,9 +3357,108 @@ async def import_backup_endpoint(request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(e))
     with closing(tracking_store.connect()) as c:
         try:
-            return tracking_store.import_all(c, payload)
+            result = tracking_store.import_all(c, payload)
         except tracking_store.RestoreError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        # WHAT THE RESTORE DID TO THE HOUSEHOLD'S SHARED PLAN (BUG-0060, BUG-0019).
+        #
+        # Folded in HERE rather than inside import_all, so that function's pinned return contract
+        # is untouched — several tests and the client's own restore path assert its exact shape.
+        #
+        # `orphans` is BUG-0060: shares restored against identities this install does not know.
+        # Without this the plan reads as GONE and the app says nothing.
+        #
+        # `sharedLines` / `sharedMembers` is BUG-0019's honest answer. That bug is filed as
+        # "restoring a backup resurrects revoked participation", and it cannot be fixed as framed:
+        # restoring a backup from before a change undoes that change — that is what restore MEANS.
+        # Its own diagnosis says there is no durable record of "revoked" for the restore to
+        # consult, and adding one would not help either, because a PRE-revocation backup predates
+        # that record too. What was actually missing is that nobody was told. So the response now
+        # states what participation the restore just installed, and the client says it out loud.
+        try:
+            result["household"] = {
+                "orphans": tracking_store.orphaned_share_members(c),
+                "sharedLines": c.execute(
+                    "SELECT COUNT(*) FROM household_budget WHERE status = 'active'").fetchone()[0],
+                "sharedMembers": c.execute(
+                    "SELECT COUNT(DISTINCT user_id) FROM household_budget_share").fetchone()[0],
+            }
+        except Exception:
+            # A summary is an ADDITION to a restore that has already succeeded and committed.
+            # Failing to compute it must never turn a good restore into an error the user reads as
+            # "my data did not come back".
+            result["household"] = None
+        return result
+
+
+# ----- orphaned shares after a restore (BUG-0060) -----------------------------------------
+#
+# A backup carries `household_budget` and `household_budget_share` — they are financial data —
+# but deliberately NOT `users`/`user_alias`: "identity is install-local, not user financial data".
+# Both decisions are right on their own. Together they mean a share is financial data KEYED BY an
+# identity the backup does not carry, so restoring onto a different install (or after the owner
+# seat has moved) leaves every share row pointing at somebody this install has never heard of —
+# and `list_household_budget` correctly shows a non-participant nothing at all. The household's
+# whole shared plan reads as GONE, silently, and somebody who cannot see why has every reason to
+# retype it. THAT is what would actually destroy it.
+#
+# Owner-only, exactly like /api/tracking/import: this reads and rewrites who a household's money
+# belongs to.
+
+
+class ShareRemapPair(BaseModel):
+    from_user_id: str = Field(..., alias="from", min_length=1)
+    to_user_id: str = Field(..., alias="to", min_length=1)
+    model_config = {"populate_by_name": True}
+
+
+class ShareRemapModel(BaseModel):
+    pairs: list[ShareRemapPair] = Field(default_factory=list)
+
+
+@app.get("/api/tracking/household/shares/orphans")
+def household_share_orphans_endpoint(request: Request = None) -> dict:
+    """Members named by a shared line that this install's roster does not know.
+
+    Read-only. Enough for the client to say "9 shared lines were restored, but they name 2 members
+    this install does not know" and offer a remap, rather than rendering an empty plan in silence.
+    """
+    require_owner(request)
+    with closing(tracking_store.connect()) as c:
+        return {"orphans": tracking_store.orphaned_share_members(c)}
+
+
+@app.post("/api/tracking/household/shares/remap")
+def household_share_remap_endpoint(m: ShareRemapModel, request: Request = None) -> dict:
+    """Move every share row from unrecognised members onto current ones. NEVER automatic.
+
+    The owner chose this shape over the alternatives (2026-08-26) because it is the only one where
+    a wrong outcome requires somebody to actively choose it. Silently re-pointing an orphaned share
+    at whoever happens to be restoring would hand one person their partner's half of the rent —
+    worse than the empty plan it replaces, because it looks right.
+
+    ONE TRANSACTION for the whole list. A mid-list refusal — the target is not a current member,
+    the source IS one, or a collision on a line both already sit on — rolls the whole call back, so
+    a half-applied remap cannot exist. That matters more than it sounds: the failure mode being
+    prevented is a household whose shared lines are half attributed to one person and half to
+    another, which no screen would show as wrong.
+    """
+    require_owner(request)
+    if not m.pairs:
+        raise HTTPException(status_code=422, detail="pairs must not be empty")
+    with closing(tracking_store.connect()) as c:
+        try:
+            # The STORE owns the transaction, not this handler. An earlier version looped over
+            # the single-pair `remap_share_member` here — which commits per call — so a refusal
+            # on a later pair left the earlier ones committed and the rollback had nothing to
+            # undo. Caught by the rollback test, which is the only reason it is not shipping.
+            applied = tracking_store.remap_share_members(
+                c, [(p.from_user_id, p.to_user_id) for p in m.pairs])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        return {"applied": applied,
+                "movedShares": sum(a["movedShares"] for a in applied),
+                "orphans": tracking_store.orphaned_share_members(c)}
 
 
 # ----- CSV export (analysis / tax-prep — NOT a backup: no app tag, never importable) -----

@@ -1150,6 +1150,80 @@ def _mig_add_schedule_tables(conn) -> None:
              r["bucket"], r["category"], int(due) if due else 1, anchor, active, now))
 
 
+def _mig_retire_legacy_recurring_rows(conn) -> None:
+    """Migration 19 (TODO-257) -- v18 -> v19. Empty the legacy `recurring` table, converting
+    anything still stranded in it first.
+
+    THE DIVERGENCE THIS CLOSES. Migration 16 converted the rows that existed AT MIGRATION TIME
+    and left the table in place. The setup checklist went on writing to it afterwards, so a bill
+    ticked after that date lived ONLY in the old table -- and nothing reads the old table any
+    more, so the bill was tracked by nothing at all. Found on the owner's own database:
+    "Car Payment", $900.00/mo on day 21, present in `recurring` id 11 and absent from `schedule`,
+    invisible in every surface of the app. The client write path was closed separately (the
+    checklist now POSTs a schedule); this closes the data.
+
+    THE TABLE IS NOT DROPPED, and that is deliberate -- the same reasoning migration 16 recorded
+    for not dropping it, which is still true:
+      * `_mig_add_schedule_tables` READS it to convert a pre-v16 backup on restore. Drop it and a
+        backup taken before 2026-08-22 restores with its whole bill checklist silently missing.
+      * it stays in `_BACKUP_TABLES` so older backup envelopes keep validating.
+      * dropping a table is the one migration shape older code cannot boot past: a downgrade
+        would find `export_all` selecting from a table that no longer exists.
+    What IS removed is every row, plus the three HTTP routes that could write new ones. An empty
+    shell nothing can write to cannot diverge again.
+
+    MATCHING IS DELIBERATELY NARROW -- exact (user_id, direction, bucket, category), the same key
+    as the `recurring_key` unique index. A row that fails to match gets converted, so the two
+    ways to be wrong are:
+      * matched when it should not have been -> the row is deleted and the bill is tracked by
+        nothing. SILENT.
+      * unmatched when it was already migrated -> a second schedule appears. VISIBLE, and the
+        user can delete it.
+    Narrow matching biases toward the second. A visible duplicate is a complaint; a silent loss is
+    a bill that stops being paid.
+
+    Re-entrant, which matters because `import_all` runs pending migrations after a restore: once
+    the rows are gone there is nothing to convert, and a restored pre-v19 backup gets exactly the
+    same healing applied to it.
+    """
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "recurring" not in tables or "schedule" not in tables:
+        return
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(recurring)").fetchall()}
+    if not {"category", "direction", "expected_cents"} <= cols:
+        return                      # a pre-scoping shape this migration was never meant to read
+    rows = conn.execute("SELECT * FROM recurring").fetchall()
+    if not rows:
+        return
+    has_user = "user_id" in cols
+    now = _now()
+    for r in rows:
+        user_id = r["user_id"] if has_user else "__owner__"
+        already = conn.execute(
+            "SELECT 1 FROM schedule WHERE user_id = ? AND direction = ?"
+            "   AND IFNULL(bucket,'') = IFNULL(?,'')"
+            "   AND category COLLATE NOCASE = ? LIMIT 1",
+            (user_id, r["direction"], r["bucket"], r["category"])).fetchone()
+        if already:
+            continue
+        # Converted exactly as migration 16 converts, so a row stranded by the gap is
+        # indistinguishable afterwards from one that made it across on time: monthly on the
+        # recorded day, the amount an ESTIMATE (which is what "expected" always meant), and
+        # auto_post OFF -- a checklist tick never implied permission to write to the ledger.
+        due = r["due_day"] if "due_day" in cols else None
+        active = 1 if (due and r["active"]) else 0
+        anchor = f"2000-01-{min(int(due or 1), 28):02d}"
+        conn.execute(
+            "INSERT INTO schedule (user_id, name, direction, amount_cents, amount_is_estimate,"
+            " bucket, category, freq, interval_n, day_1, anchor_on, end_mode, weekend_shift,"
+            " auto_post, active, created_at)"
+            " VALUES (?,?,?,?,1,?,?,'monthly',1,?,?,'never','none',0,?,?)",
+            (user_id, r["category"], r["direction"], int(r["expected_cents"] or 0),
+             r["bucket"], r["category"], int(due) if due else 1, anchor, active, now))
+    conn.execute("DELETE FROM recurring")
+
+
 def _mig_household_budget_autoincrement(conn) -> None:
     """Migration 17 (BUG-0017) -- v16 -> v17. Stop SQLite reusing a deleted line's id.
 
@@ -1242,7 +1316,7 @@ def _mig_add_fire_progress(conn) -> None:
                               SCHEMA.index(");", SCHEMA.index("CREATE TABLE IF NOT EXISTS fire_progress (")) + 2])
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables, _mig_household_budget_autoincrement, _mig_add_fire_progress]
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables, _mig_household_budget_autoincrement, _mig_add_fire_progress, _mig_retire_legacy_recurring_rows]
 
 
 def _now() -> str:
@@ -3695,6 +3769,13 @@ def orphaned_share_members(conn: sqlite3.Connection) -> list[dict]:
 
 
 def remap_share_member(conn: sqlite3.Connection, from_user_id: str, to_user_id: str) -> dict:
+    """One remap, committed. Unchanged contract — `remap_share_members` is the list form."""
+    out = _remap_one(conn, from_user_id, to_user_id)
+    conn.commit()
+    return out
+
+
+def _remap_one(conn: sqlite3.Connection, from_user_id: str, to_user_id: str) -> dict:
     """Move every share row from an unrecognised member onto a current one. BUG-0060.
 
     NOT done automatically on restore, and that is the whole design. Silently re-pointing an
@@ -3732,8 +3813,36 @@ def remap_share_member(conn: sqlite3.Connection, from_user_id: str, to_user_id: 
 
     cur = conn.execute("UPDATE household_budget_share SET user_id = ? WHERE user_id = ?",
                        (to_user_id, from_user_id))
-    conn.commit()
+    # NO COMMIT HERE. The caller owns the transaction boundary: `remap_share_member` commits one
+    # pair, `remap_share_members` commits the whole list exactly once.
     return {"movedShares": cur.rowcount, "fromUserId": from_user_id, "toUserId": to_user_id}
+
+
+def remap_share_members(conn: sqlite3.Connection, pairs) -> list[dict]:
+    """Apply a LIST of remaps as one transaction. Either all of them land or none do.
+
+    Exists because `remap_share_member` commits per call, which is right for the single-pair
+    contract it already ships with and wrong for a list: a refusal on the third pair would leave
+    the first two committed, and a household whose shared lines are half attributed to one person
+    and half to another is a state no screen in this app would show as wrong.
+
+    Re-validating each pair as it goes is load-bearing, not belt-and-braces: pair 2 can only be
+    judged against the roster AS PAIR 1 LEFT IT. Validating the whole list up front against the
+    starting state would accept a pair that collides with a line pair 1 has just moved.
+
+    The per-pair refusals are unchanged and still come from the same place — the target must be a
+    current member, the source must not be, and a collision on a line both sit on is refused for
+    the whole call rather than merged, because merging would have to invent a ratio.
+    """
+    applied: list[dict] = []
+    try:
+        for frm, to in pairs:
+            applied.append(_remap_one(conn, frm, to))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return applied
 
 
 def household_your_share_cents(line: dict, scope: str) -> int:
@@ -4528,6 +4637,14 @@ def due_occurrences(conn, user_id, today: str, catchup_days=None) -> list[dict]:
             out.append({
                 "scheduleId": row["id"], "name": row["name"], "direction": row["direction"],
                 "on": hit["on"].isoformat(),
+                # BUG-0064. `on` is where the occurrence LANDS after weekend/holiday roll-back;
+                # `raw` is the date the RULE produced. Exceptions are keyed on raw — deliberately,
+                # so that changing weekend_shift cannot orphan every exception ever written — and
+                # this payload used to carry only `on`. The client posted that to /skip, the
+                # exception was written against a date the rule never produces, nothing was
+                # filtered, and the row came back on the next load while the UI reported success.
+                # Confirm still uses `on`, and correctly: that is the day the money moves.
+                "raw": hit["raw"].isoformat(),
                 "amount": round(hit.get("amount_cents", row["amount_cents"]) / 100.0, 2),
                 "amountIsEstimate": bool(row["amount_is_estimate"]),
                 "accountId": row["account_id"], "toAccountId": row["to_account_id"],
@@ -5081,6 +5198,75 @@ def _validate_backup(payload: dict, current: int) -> None:
         for i, row in enumerate(rows):
             if not isinstance(row, dict):
                 raise RestoreError(f"tables[{tbl!r}][{i}] must be a dict")
+    _validate_restored_shares(tables)
+
+
+def _validate_restored_shares(tables: dict) -> None:
+    """BUG-0018: a restore must not install a shared line whose split does not add up.
+
+    `import_all` wrote every `household_budget_share` row verbatim with no checking, while the
+    live write path enforces the invariants. Verified in the original report: ratios summing to
+    16499 bps were accepted. `_household_split_allocation`'s documented precondition -- sum =
+    10000, "already enforced at write time" -- was simply false for this path, and a line whose
+    ratios do not sum to 100% divides somebody's rent by a denominator that is not the bill.
+
+    WHAT THIS DELIBERATELY DOES **NOT** CHECK, AND WHY. The original entry also lists "a
+    non-existent userId was accepted" as part of the same defect. That half is now obsolete and
+    must not be built: BUG-0060, filed eighteen days later and with the owner's chosen design,
+    establishes that a backup carries shares keyed to identities the restoring install has never
+    heard of BY CONSTRUCTION -- `users` is excluded from backups on purpose. Rejecting an unknown
+    userId here would fail every cross-install restore and delete the reason
+    `orphaned_share_members` exists. Unknown members are REPORTED after the restore, not refused
+    during it.
+
+    Structural only, and cheap: this runs before the safety copy and before any mutation, so a
+    bad payload costs the user nothing.
+    """
+    shares = tables.get("household_budget_share")
+    if not isinstance(shares, list) or not shares:
+        return
+    lines = tables.get("household_budget")
+    line_type = {}
+    if isinstance(lines, list):
+        for ln in lines:
+            if isinstance(ln, dict) and ln.get("id") is not None:
+                line_type[ln["id"]] = ln.get("type")
+
+    by_line: dict = {}
+    for i, row in enumerate(shares):
+        lid = row.get("line_id")
+        if lid is None:
+            raise RestoreError(f"tables['household_budget_share'][{i}] has no line_id")
+        if line_type and lid not in line_type:
+            raise RestoreError(
+                f"tables['household_budget_share'][{i}] names line_id {lid!r}, which the backup's "
+                "household_budget table does not contain")
+        by_line.setdefault(lid, []).append(row)
+
+    for lid, rows in sorted(by_line.items(), key=lambda kv: str(kv[0])):
+        # A pre-type backup has no `type` to consult; fall back to the rows' own shape, which is
+        # unambiguous — split rows carry split_ratio_bps and pooled rows carry contribution_cents.
+        kind = line_type.get(lid)
+        if kind is None:
+            kind = "split" if any(r.get("split_ratio_bps") is not None for r in rows) else "pooled"
+        if kind != "split":
+            continue
+        total = 0
+        for r in rows:
+            bps = r.get("split_ratio_bps")
+            if bps is None:
+                raise RestoreError(
+                    f"shared line {lid!r} is a split line but a share row carries no "
+                    "split_ratio_bps")
+            try:
+                total += int(bps)
+            except (TypeError, ValueError):
+                raise RestoreError(
+                    f"shared line {lid!r} has a non-numeric split_ratio_bps {bps!r}")
+        if total != 10000:
+            raise RestoreError(
+                f"shared line {lid!r} splits to {total} basis points, not 10000 — restoring it "
+                "would divide a bill by a denominator that is not the bill")
 
 
 def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict:

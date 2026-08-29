@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.10
+
+Your plan comes back on its own if a device loses part of it.
+
+**A device could show the starting defaults while your real plan sat safe on your account**
+
+- Tax and budget would read as though you had never filled them in — on one device, while your
+  shared expenses, transactions and accounts stayed perfectly correct on that same screen, and
+  your other devices were fine. Closing the app and reopening it did not bring anything back.
+- Nothing was ever lost. Browsers are allowed to clear part of a site's saved data on their own —
+  a phone low on space, or tidying up a site you have not opened in a while. This app could not
+  tell the difference between "this device is up to date" and "this device is up to date except
+  most of it is gone": it compared version numbers, they matched, so it left well alone.
+  Permanently, and without saying anything.
+- It now checks what your account actually holds against what the device actually has. If the
+  device is short, it restores your plan on the next load and tells you it has.
+- It repairs itself on purpose, because in the Home Assistant app there is no cache for you to
+  clear. A fix you have to carry out yourself is not a fix on the device this happens on.
+
+**And a damaged device can no longer overwrite the good copy**
+
+- The worse half, which nobody reported and which was found while fixing the first: a device
+  missing part of your plan would send that partial copy up to your account the next time you
+  changed anything, replacing the complete one. A local problem you could have recovered from
+  would have become a permanent loss. It now refuses to send, keeps your edit, and restores
+  instead.
+
+**Reset still means reset**
+
+- Clearing the Max-out planner on purpose looks identical, from the outside, to a device losing
+  that data by accident — the same key missing in the same place. The app now records that you
+  meant it, so a reset still reaches your other devices instead of being helpfully undone.
+
 ## 0.7.9
 
 The Job change card now shows what actually lands, and when it changes.

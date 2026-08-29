@@ -1649,6 +1649,16 @@
   .res-table th:first-child, .res-table td:first-child { text-align:left; }
   .res-table .num { font-variant-numeric:tabular-nums; }
   /* ---- Card rollup section (#ac_cards) ---- */
+  /* The merged schedule list (TODO-257): rule and verdict on one row, so it carries five
+     columns where the two lists it replaced carried three and four. Same containment fix the
+     job-change paycheck table needed — `overflow-x:auto` on a plain block still pushes its
+     content's min-content size up the ancestor chain, and the tab panel's grid item carries
+     min-width:auto, so without the grid host and the explicit min-width:0 the whole PAGE
+     scrolls sideways on a phone instead of the table. */
+  #ac_recurring { display:grid; grid-template-columns:minmax(0,1fr); }
+  .ac-sched-scroll { min-width:0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .ac-sched-table { min-width:520px; }
+  .ac-sched-table td:first-child { white-space:nowrap; }
   .ac-cards-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .ac-cards-table .ac-col-name {
     position: sticky; left: 0; background: var(--panel); z-index: 2;
@@ -2969,6 +2979,37 @@
        under it, not body prose. Held to 780px inside a 1,545px card it wrapped two thirds of the
        way across and read as trimmed rather than as a readable measure — reported as such. -->
   <p class="mini bgb-help" style="margin:14px 0 6px">Tick <b>tax</b> for local sales tax (Netflix $9.99 &rarr; $10.81). Set <b>%</b> to your share of a split item (100 = all you, 50 = 50/50) — totals show <b>your share</b>. <b>Drag the ⠿ handle</b> to reorder or move items between groups.</p>
+  <!-- BUG-0060 steps 3-4. A backup carries the shared LINES and their split ratios but
+       deliberately not `users`/`user_alias` ("identity is install-local"), so after a restore
+       every share can name somebody this install has never heard of — and list_household_budget
+       correctly shows a non-participant nothing at all. The plan reads as GONE, in silence, and
+       somebody who cannot see why has every reason to retype it. That retyping is what would
+       actually destroy it.
+       A BANNER RATHER THAN A DIALOG ON THE RESTORE ITSELF: importFpsFinish reloads the page 900ms
+       after a restore (the S1.2 reload-door), so nothing shown in that window survives. Driving
+       this off the endpoint instead means it also appears for a restore performed on another
+       device, and it comes back if the owner closes it without deciding — which is the point,
+       since the alternative is a household plan that silently stays invisible. -->
+  <div id="hb_orphan_banner" class="wi-banner" hidden role="status" aria-live="polite">
+    <span class="wi-banner-icon" aria-hidden="true">&#9888;</span>
+    <span class="wi-banner-label" id="hb_orphan_label"></span>
+    <span class="wi-banner-actions">
+      <button type="button" id="hb_orphan_open_btn">Sort this out</button>
+    </span>
+  </div>
+  <div id="hb_orphan_panel" class="backup-popup" hidden role="dialog" aria-modal="false"
+       aria-labelledby="hb_orphan_title">
+    <h3 id="hb_orphan_title" style="margin:0 0 6px;font-size:var(--fs-md)">Who are these people?</h3>
+    <p class="mini muted" style="margin:0 0 10px" id="hb_orphan_intro"></p>
+    <div id="hb_orphan_rows"></div>
+    <p class="mini muted" style="margin:10px 0 0">Nothing moves until you press Apply. A share you
+      leave alone stays exactly where it is — you can come back to it.</p>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="calc-btn" id="hb_orphan_apply" type="button" style="width:auto">Apply</button>
+      <button class="ac-tool" id="hb_orphan_cancel" type="button">Cancel</button>
+      <span class="mini bad-text" id="hb_orphan_err" style="min-height:1em"></span>
+    </div>
+  </div>
   <div id="bgBuilder"></div>
   <button class="seed-btn" id="bgb_addbucket" type="button" style="margin-top:10px">+ Add bucket</button>
 </section>
@@ -3525,6 +3566,10 @@
             <button class="ac-tool" type="button" data-pshare="33">⅓</button>
             <button class="ac-tool" type="button" data-pshare="67">⅔</button>
           </div>
+          <!-- TODO-256: which preset is being applied, and where it came from. Named rather than
+               silent — a figure that fills itself in with no explanation is indistinguishable
+               from one the app got wrong. -->
+          <p class="mini muted" id="ac_tx_partner_preset" style="margin:6px 0 0" hidden></p>
         </div>
 
         <!-- Bucket-split editor (hidden until toggled) -->
@@ -3569,13 +3614,22 @@
            ignored. The older Recurring panel below still reads the legacy `recurring` table —
            migration 16 already copied those rows into schedules, so the two describe the same
            bills, and retiring the old panel is the follow-up, not this change. -->
-      <div class="subhead" style="margin-top:14px">Scheduled money <span class="mini muted" id="sch_count"></span></div>
+      <div class="subhead" style="margin-top:14px">Scheduled money</div>
       <!-- What automatic posting could not do. ABOVE the due tray because a schedule the user
            switched auto-post on for is one they stopped watching, so its failure has to come
            looking for them rather than wait to be found. -->
       <div id="sch_problems" hidden></div>
       <div id="sch_due"></div>
-      <div id="sch_list" style="margin-top:8px"></div>
+      <!-- ONE LIST, not two (TODO-257). This card used to draw the same bills three times: the
+           due tray above, a rule list here, and a "Recurring this month" report below — 10 rows,
+           10 rows and 5 rows describing 10 bills, all from the SAME store since the report was
+           rebuilt onto schedules. Reported by the owner as "de dupe the recurring transactions".
+           The two lists are now one row per schedule carrying BOTH halves — the rule (cadence,
+           amount, edit, delete) and this month's verdict (came through / missing / due) — so a
+           bill appears at most twice on the card, and the second time only because it is waiting
+           on a decision. -->
+      <div class="subhead" style="margin-top:18px">Your schedules <span class="mini muted" id="ac_rec_month"></span><span class="mini muted" id="sch_count"></span></div>
+      <div id="ac_recurring"></div>
       <details id="sch_add_wrap" style="margin-top:8px"><summary>Add a scheduled payment or deposit</summary>
         <div class="body" id="sch_form">
           <div class="ac-row">
@@ -3629,8 +3683,6 @@
         </div>
       </details>
 
-      <div class="subhead" style="margin-top:18px">Recurring this month <span class="mini muted" id="ac_rec_month"></span></div>
-      <div id="ac_recurring"></div>
       <details id="ac_rec_setup_wrap" style="margin-top:8px"><summary>Set up recurring (from your budget)</summary><div class="body" id="ac_rec_setup"></div></details>
     </section>
   </div>
@@ -4566,6 +4618,19 @@ let   LIMIT_HSA_FAMILY = 8_750;
 let   LIMIT_415C = 72_000;       // §415(c) overall defined-contribution limit
 let   hsaCoverage = 'self';      // 'self' | 'family'
 function currentHsaLimit() { return hsaCoverage === 'family' ? LIMIT_HSA_FAMILY : LIMIT_HSA_SELF; }
+// WHAT THE EMPLOYEE MAY STILL PUT IN. The HSA cap is COMBINED: employer contributions and payroll
+// deferrals share one legal limit, so an employee's room is the limit minus whatever the employer
+// is putting in. Getting this wrong is not a rounding complaint — an excess HSA contribution
+// carries a 6% excise tax for every year it stays in the account.
+//
+// The Tax tab's own two fields have always clamped against each other (checkAllLimits), and the
+// Max-out planner has always subtracted — it even labels the row "net of employer". Two OTHER
+// surfaces asked for `currentHsaLimit()` and got the gross legal figure: the Job change card's
+// HSA target, and the Invest tab's "HSA room" seed. Both then told the user to defer the whole
+// limit themselves. One helper now, so there is one rule rather than four opinions.
+function currentHsaEmployeeRoom() {
+  return Math.max(0, currentHsaLimit() - resolveAnnual('employerHsa'));
+}
 
 // The tax YEAR is data too, and treating it as anything else is what produced six hardcoded
 // "2026"s in user-visible copy -- including the <title>. It rides the same overlay every figure
@@ -6715,6 +6780,55 @@ function setProfileMeta(patch) {
 // A scopeId mismatch (shared browser, different household member) collapses to 'empty' regardless
 // of meta.dirty, and so does a corrupted "meta says dirty but zero keys present at boot"
 // combination (no special-casing needed — the literal rule already resolves it).
+// A VERSION MATCH IS NOT PROOF OF POSSESSION.
+//
+// `deriveLocalProfileState` asks "is ANY key present"; the sync engine then compares version
+// numbers. Neither question notices that most of the plan is gone. A browser that evicts storage
+// PARTIALLY — Safari/iOS ITP on a site not opened for a while, storage pressure, the Home
+// Assistant companion app's webview — can drop `itc.v3` and `budgetBuilder_v1` while leaving
+// `itc.profile.meta` and `itc.categories.v1` behind. The device then reads as 'present-clean'
+// with L === S and the engine takes the S1 no-op branch: it neither pulls nor pushes, and the
+// user sees factory defaults for tax and budget, permanently, across reloads, in silence.
+//
+// Reproduced end to end (2026-08-29): entered salary 123,456, synced to v1, evicted those two
+// keys, reloaded — the field came back as the built-in default 150,000 while the server still
+// held the real blob. It is per-DEVICE because localStorage is, which is why it presented as "the
+// app resets depending on which device she logs in on", and why every SERVER-side surface
+// (transactions, accounts, the shared budget) stayed correct throughout: none of them live in
+// this blob. That combination is what ruled out three earlier identity-based theories.
+//
+// THE SECOND HALF IS WORSE. `collectBackupClientKeys` silently skips absent keys and put_profile
+// is last-write-wins over the whole blob, so a flush from a partially-evicted device REPLACES the
+// server's complete copy with the partial one — turning a recoverable local eviction into
+// permanent loss. Both halves are guarded at their call sites below.
+//
+// Fails SAFE: if localStorage cannot be read at all we cannot prove anything is missing, so we
+// claim nothing and leave the existing behaviour exactly as it was.
+//
+// DELIBERATE REMOVAL IS NOT EVICTION, and localStorage cannot tell them apart on its own: after
+// `resetMaxout()` the maxout key is absent locally and still present on the server, which is
+// byte-for-byte the eviction state. Reading that as an eviction resurrects the very plan the user
+// just reset away — the exact failure `resetMaxout`'s own comment warns about ("a later hydrate
+// resurrects the old plan"), and TM-42/TM-41b caught this guard doing it. So intent is RECORDED at
+// the moment of removal (`markProfileKeyRemoved` below) and cleared once the omission has actually
+// reached the server. A tombstoned key is absent ON PURPOSE and must be flushed, never recovered.
+function localMissingServerKeys(server) {
+  const keys = (server && server.blob && server.blob.keys) || null;
+  if (!keys) return [];
+  const meta = getProfileMeta();
+  const tombstoned = (meta && Array.isArray(meta.removedKeys)) ? meta.removedKeys : [];
+  const missing = [];
+  for (let i = 0; i < BACKUP_CLIENT_KEYS.length; i++) {
+    const k = BACKUP_CLIENT_KEYS[i];
+    if (keys[k] == null) continue;                 // the server does not hold it either — not missing
+    if (tombstoned.indexOf(k) >= 0) continue;      // removed on purpose — the flush must carry it
+    let local;
+    try { local = localStorage.getItem(k); } catch (e) { return []; }
+    if (local == null) missing.push(k);
+  }
+  return missing;
+}
+
 function deriveLocalProfileState(meta, scopeId, liveKeyFallback) {
   let anyKeyPresent = __profileBootKeysSnapshot.size > 0;
   // BUG-0012: the snapshot above is frozen at true script-start and NEVER updated, so a session
@@ -6805,6 +6919,19 @@ function markProfileDirty() {
   setProfileMeta({ dirty: true, scopeId: window.__scopeId || null, editSeq: nextSeq });
   scheduleProfileFlush();
 }
+// A removal is a mutation (§6.1 Mechanism 1) — but unlike an edit it leaves NOTHING behind to
+// prove it was intended, and the eviction guard above has to be able to tell the two apart. Record
+// the intent, then mark dirty exactly as any other mutation does. Mirrors markProfileDirty's
+// What-If swallow deliberately: if the mark cannot fire, the tombstone must not be written either,
+// or a key would sit permanently exempt from eviction recovery with no flush ever coming to clear
+// it. Cleared by doProfileFlush/doHydrate on success — see both.
+function markProfileKeyRemoved(k) {
+  if (WhatIf.active || WhatIf.suppress) return;
+  const cur = getProfileMeta();
+  const prev = (cur && Array.isArray(cur.removedKeys)) ? cur.removedKeys : [];
+  if (prev.indexOf(k) < 0) setProfileMeta({ removedKeys: prev.concat([k]) });
+  markProfileDirty();
+}
 function scheduleProfileFlush() {
   if (__profileFlushTimer) clearTimeout(__profileFlushTimer);
   __profileFlushTimer = setTimeout(profileFlushExecutor, PROFILE_FLUSH_DEBOUNCE_MS);
@@ -6867,6 +6994,34 @@ async function profileFlushExecutor() {
 async function doProfileFlush(isMigration) {
   const meta = getProfileMeta() || {};
   const blob = { version: 3, keys: collectBackupClientKeys() };
+  // BUG-0068, THE IN-SESSION FORM — and the boot guard is structurally blind to it. An eviction
+  // that happens while the app is OPEN (storage pressure, an OS purge) leaves the debounced flush
+  // to PUT a blob silently missing whatever vanished, and put_profile replaces the row wholesale.
+  // No boot ever runs, so nothing consults the §4 decision table: the server's complete copy is
+  // destroyed from a session that never reloaded. Found by the scoping test in
+  // test_partial_storage_eviction_cdp.py, not by reasoning — the first version of this fix guarded
+  // only the two boot paths and still lost the plan here.
+  //
+  // The comparison needs no server round trip. `meta.syncedKeys` is the key set this device
+  // demonstrably HELD at its last successful sync — written only by this function (what we just
+  // PUT) and by doHydrate (what we just pulled down), never from a bare GET, so it can never
+  // include a key that only some other device has. A key that was in that set, is absent now, and
+  // carries no tombstone did not go anywhere legitimate. Refuse the write: `dirty` stays true, so
+  // nothing local is lost and the next boot's guard performs the recovery.
+  //
+  // `__profileBootKeysSnapshot` was the obvious source here and it is WRONG — it is captured at
+  // script-start, so on a session where the user's plan is created after boot it is empty and the
+  // guard silently never fires. That version of this fix passed the whole S1.2 matrix and still
+  // let the eviction through; only the test asserting on the SERVER's key list caught it.
+  //
+  // Silent on purpose: claiming a restore here would be a lie, since none has happened yet.
+  const tombstoned = Array.isArray(meta.removedKeys) ? meta.removedKeys : [];
+  const lastSynced = Array.isArray(meta.syncedKeys) ? meta.syncedKeys : null;
+  if (lastSynced) {
+    const vanished = lastSynced.filter(k =>
+      tombstoned.indexOf(k) < 0 && !Object.prototype.hasOwnProperty.call(blob.keys, k));
+    if (vanished.length) return false;
+  }
   const baseStateVersion = meta.stateVersion || 0;
   const seqAtCapture = meta.editSeq;
   let res;
@@ -6913,8 +7068,14 @@ async function doProfileFlush(isMigration) {
   const editedDuringFlush = liveMeta.editSeq !== seqAtCapture;
   setProfileMeta(Object.assign(
     { stateVersion: out.stateVersion, scopeId: window.__scopeId || meta.scopeId || null,
+      // Unconditional, unlike the `dirty` clear below: the server really does hold exactly these
+      // keys now, whatever else may have changed locally while this PUT was in flight.
+      syncedKeys: Object.keys(blob.keys),
       lastSyncedAt: out.updatedAt || new Date().toISOString() },
-    editedDuringFlush ? {} : { dirty: false }
+    // Same compare-and-clear discipline as `dirty`, and for the same reason: a tombstone written
+    // while this PUT was in flight came with its own markProfileDirty (so editSeq moved) and was
+    // NOT in the blob just sent. Clearing unconditionally would drop that removal on the floor.
+    editedDuringFlush ? {} : { dirty: false, removedKeys: [] }
   ));
   if (editedDuringFlush) {
     // The blob just PUT no longer matches localStorage -- do not let the caller (or the next
@@ -7006,7 +7167,11 @@ async function doHydrate(server, scopeId, isCrashRecovery) {
     return false;
   }
   setProfileMeta({
-    dirty: false, stateVersion: toVersion, scopeId: scopeId, hydrating: null,
+    // HYDRATE-REPLACE just overwrote local wholesale from the server, so any pending removal
+    // intent has been superseded by what the server actually holds — a stale tombstone would
+    // otherwise exempt a key that is now present from eviction recovery for good.
+    dirty: false, stateVersion: toVersion, scopeId: scopeId, hydrating: null, removedKeys: [],
+    syncedKeys: Object.keys((server && server.blob && server.blob.keys) || {}),
     lastSyncedAt: server.updatedAt || new Date().toISOString(),
   });
   // Fix A (2026-07-27 diagnosis, Defect A): tells every caller a hydrate actually happened, so
@@ -7401,12 +7566,38 @@ async function runProfileSyncEngineImpl() {
     return;
   }
   if (localState === 'present-dirty') {
+    // DATA-LOSS GUARD, and it outranks D1/D2/D3. This device has unflushed edits AND is missing
+    // keys the server holds, so the blob it would PUT is partial — and put_profile replaces
+    // wholesale. Flushing here trades a recoverable local eviction for permanent server-side
+    // loss. Recover instead: those edits were layered on a copy that had already lost most of
+    // itself, which makes them a far smaller loss than the complete plan they would overwrite.
+    // The `true` bypasses doHydrate's own dirty-refusal deliberately — this IS a recovery, the
+    // same reasoning the `hydrating` branch above already uses.
+    const missingDirty = localMissingServerKeys(server);
+    if (missingDirty.length) {
+      if (await doHydrate(server, scopeId, true)) await repaintAfterHydrate();
+      try { showToast('Restored your plan from your account — this device was missing part of it.'); } catch (e) {}
+      return;
+    }
     // D1/D2/D3 — dirty always flushes; never hydrate over dirty local. Version only shapes the note.
     await doProfileFlush(false);
     if (L < S) showProfileConflictNote('two-device');
     return;
   }
   // present-clean
+  // INCOMPLETE BEATS IN-SYNC. Checked BEFORE the version comparison, because the entire failure is
+  // that the versions agree while the data does not. Reaching here means 'present-clean' — nothing
+  // unflushed to lose — so the recovery is silent and safe.
+  //
+  // Self-healing on purpose: the Home Assistant companion app gives no way to clear site data, so
+  // a fix that depends on the user clearing their cache does not exist on the platform where this
+  // actually bites.
+  const missingClean = localMissingServerKeys(server);
+  if (missingClean.length) {
+    if (await doHydrate(server, scopeId)) await repaintAfterHydrate();
+    try { showToast('Restored your plan from your account — this device was missing part of it.'); } catch (e) {}
+    return;
+  }
   if (L === S) return;                                  // S1 — NO-OP, in sync
   if (L < S) {                                           // S2 — another device advanced; safe to hydrate
     const ok = await runPreMigrationSnapshot();
@@ -10314,7 +10505,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // (e.g. a persisted 0 in 401k room) otherwise make the seeded form self-contradictory.
     // Rooms stay editable after, like every other seeded field.
     $('iv_k401').value = LIMIT_401K;
-    $('iv_hsar').value = currentHsaLimit();
+    $('iv_hsar').value = currentHsaEmployeeRoom();   // employee room, net of employer
     $('iv_irar').value = LIMIT_ROTH_IRA;
     formatUSDFields();
     calcInvest();
@@ -10333,7 +10524,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function ivRoomsHeal() {
     if (N('iv_k401') === 0 && N('iv_hsar') === 0 && N('iv_irar') === 0 && N('iv_at401') === 0) {
       $('iv_k401').value = LIMIT_401K;
-      $('iv_hsar').value = currentHsaLimit();
+      $('iv_hsar').value = currentHsaEmployeeRoom();   // employee room, net of employer
       $('iv_irar').value = LIMIT_ROTH_IRA;
       formatUSDFields();
       if (typeof saveTabs === 'function') saveTabs();
@@ -10918,8 +11109,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function resetMaxout() {
     if (wiBlockIfActive('reset the Max-out planner')) return;
     try { localStorage.removeItem(MAXOUT_KEY); } catch (e) {}
-    markProfileDirty();   // S1.2 Mechanism 1 (§6.1): a removal is a mutation too — without this the
-                           // reset never propagates and a later hydrate resurrects the old plan.
+    markProfileKeyRemoved(MAXOUT_KEY);   // S1.2 Mechanism 1 (§6.1): a removal is a mutation too —
+                           // without this the reset never propagates and a later hydrate resurrects
+                           // the old plan. The key form (BUG-0068) also records that this absence is
+                           // DELIBERATE, so the partial-eviction guard flushes it instead of
+                           // "recovering" the plan the user just cleared.
     ['mo_401k', 'mo_hsa', 'mo_ira'].forEach(id => { if ($(id)) $(id).checked = true; });
     if ($('mo_mega')) $('mo_mega').checked = false;
     if ($('mo_roth_pct')) $('mo_roth_pct').value = '0';
@@ -12081,12 +12275,113 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ---- Fetch (on Budget-tab render, §5.1) + the distinct editor's open/close/save/hint handlers ----
+  // ---- BUG-0060: shares naming somebody this install does not know -----------------------
+  //
+  // Owner-only on the server. A member gets 403, which is not an error here — it is the answer
+  // "this is not yours to sort out" — so it degrades to "no orphans" and the banner never shows.
+  // Any other failure does the same, because a banner that appears because a fetch broke is worse
+  // than one that stays quiet: it would send the owner hunting for a problem that may not exist.
+  let hbOrphans = [];
+  async function hbCheckOrphans() {
+    try {
+      const d = await getJSON('/api/tracking/household/shares/orphans');
+      hbOrphans = (d && d.orphans) || [];
+    } catch (e) { hbOrphans = []; }
+    hbRenderOrphanBanner();
+  }
+
+  function hbOrphanName(o) {
+    // A raw scopeId is a 32-character hex string and tells the owner nothing. It is shown, because
+    // it is the only durable handle on the row and a person restoring a second household needs to
+    // tell two unknowns apart — but it is shown SHORTENED and as evidence, never as the label.
+    const id = String(o.userId || '');
+    return id.length > 12 ? id.slice(0, 8) + '…' : id;
+  }
+
+  function hbRenderOrphanBanner() {
+    const bn = $('hb_orphan_banner'), lb = $('hb_orphan_label');
+    if (!bn || !lb) return;
+    if (!hbOrphans.length) { bn.hidden = true; if ($('hb_orphan_panel')) $('hb_orphan_panel').hidden = true; return; }
+    const lines = new Set();
+    hbOrphans.forEach(o => (o.lineNames || []).forEach(n => lines.add(n)));
+    const nL = lines.size, nM = hbOrphans.length;
+    // Says what is TRUE and what is NOT true, in that order. "Nothing has been lost" is the whole
+    // reason this banner exists rather than an empty screen: the ratios are intact and exact, and
+    // the only thing that does not resolve is user_id -> person.
+    lb.textContent = nL + ' shared ' + (nL === 1 ? 'line names' : 'lines name') + ' '
+      + nM + ' ' + (nM === 1 ? 'person' : 'people') + ' this install does not recognise, so '
+      + (nL === 1 ? 'it is' : 'they are') + ' hidden from your plan. Nothing has been lost — the '
+      + 'amounts and the split are intact; only who they belong to is unresolved.';
+    bn.hidden = false;
+  }
+
+  function hbOpenOrphanPanel() {
+    const p = $('hb_orphan_panel'); if (!p || !hbOrphans.length) return;
+    const members = [{ id: '__owner__', name: 'You' }].concat(
+      (hbRoster || []).map(u => ({ id: u.id, name: rosterDisplayName(u).name })));
+    $('hb_orphan_intro').textContent =
+      'Each row below is a person named by a restored shared line. Say who they are on this '
+      + 'install, and their share moves across with its ratio untouched.';
+    $('hb_orphan_rows').innerHTML = hbOrphans.map((o, i) => {
+      const names = (o.lineNames || []).map(n => esc(n)).join(', ');
+      return '<div class="ac-row" style="align-items:center;flex-wrap:wrap;gap:8px"'
+        + ' data-hborow="' + i + '">'
+        + '<label class="ac-field" style="flex:1 1 220px"><span class="ac-lbl">Unknown member</span>'
+        + '<span class="mini"><b>' + esc(hbOrphanName(o)) + '</b> — ' + names + '</span></label>'
+        + '<label class="ac-field" style="flex:0 1 200px"><span class="ac-lbl">Is really</span>'
+        + '<select data-hbo-to="' + i + '">'
+        + '<option value="">Leave it alone</option>'
+        + members.map(m => '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>').join('')
+        + '</select></label></div>';
+    }).join('');
+    $('hb_orphan_err').textContent = '';
+    p.hidden = false;
+    const first = p.querySelector('select'); if (first) first.focus();
+  }
+
+  async function hbApplyOrphanRemap() {
+    const err = $('hb_orphan_err'); if (err) err.textContent = '';
+    const pairs = [];
+    hbOrphans.forEach((o, i) => {
+      const sel = document.querySelector('[data-hbo-to="' + i + '"]');
+      if (sel && sel.value) pairs.push({ from: o.userId, to: sel.value });
+    });
+    if (!pairs.length) {
+      if (err) err.textContent = 'Nothing chosen yet — pick who at least one of them is, or Cancel.';
+      return;
+    }
+    try {
+      const r = await post('/api/tracking/household/shares/remap', { pairs: pairs });
+      showToast('Moved ' + r.movedShares + ' share' + (r.movedShares === 1 ? '' : 's')
+                + ' — your shared plan is back.');
+      $('hb_orphan_panel').hidden = true;
+      // The whole call is one transaction server-side, so `orphans` in the response is the truth
+      // afterwards; no second round trip to find out what is left.
+      hbOrphans = r.orphans || [];
+      hbRenderOrphanBanner();
+      await hbFetch();
+    } catch (e) {
+      // The server's own reason, not a guess. A refusal here is always specific — the target is
+      // not a member, the source already is, or two shares would collide on one line — and each
+      // of those is something the owner can act on.
+      if (err) err.textContent = errDetail(e) || 'The server refused that. Nothing was changed.';
+    }
+  }
+
   async function hbFetch() {
     try {
       const data = await getJSON(HB_ENDPOINT + '?includeArchived=false');
       hb.lines = (data && data.lines) || [];
     } catch (e) { hb.lines = []; }   // participation-gated (DEC-042): a fetch failure degrades to "no shared lines", same as a real empty list
     hb.loaded = true;
+    // The roster is what the remap picker offers. `hbLineRowHtml` already fetches it lazily, but
+    // only `if (hbRoster === null && lines.length)` and WITHOUT awaiting — so it does not cover
+    // the two cases that matter here: a lines fetch that failed (the catch above degrades to an
+    // empty list, and an empty list skips that trigger entirely) and an owner who opens the panel
+    // before the un-awaited fetch has landed. Awaiting it once, here, removes both. Cached after
+    // the first call, so this costs one request per session and nothing thereafter.
+    if (hbRoster === null) { try { await hbFetchRoster(); } catch (e) {} }
+    hbCheckOrphans();
     if (typeof bgbRender === 'function') bgbRender();
   }
   function hbEnterEdit(id) {
@@ -12255,14 +12550,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     // would wipe out whatever the user had already typed into a SIBLING field); the type radio
     // is the only control that re-renders, because switching split<->pooled genuinely changes
     // which inputs exist.
+    // BUG-0016. A line that ALREADY has a split opened this form with the owner at their own
+    // percentage and every other member unchecked at 0 — so a 65/35 line offered a total of 6500
+    // bps, `hbSubmitPromote` refused it, and the refusal was a client-side `return`: ZERO HTTP
+    // requests. Converting an existing split was a dead end reachable only by the user working
+    // out for themselves that they had to tick their partner and type 35.
+    //
+    // The line stores only YOUR percentage, never whose the rest is. So the prefill is offered
+    // exactly when the arithmetic is unambiguous — one other member on the roster, who must
+    // therefore hold the remainder — and never guessed when there are several. `hbPromoteFill`
+    // is null in every other case and the form opens as it always did.
+    const remainderPct = 100 - defaultOwnerPct;
+    const hbPromoteFill = (hbPromoteType === 'split' && it.split != null
+                           && members.length === 1 && remainderPct > 0)
+      ? { mi: 0, pct: remainderPct } : null;
     const rowHtml = (label, mi, isOwner) => {
+      const filled = hbPromoteFill && !isOwner && hbPromoteFill.mi === mi;
       return '<div class="ac-row" style="flex-wrap:wrap;align-items:center" data-hbprow="' + (isOwner ? 'owner' : mi) + '">'
         + '<label class="ac-field" style="flex:0 0 140px"><span class="ac-lbl">&nbsp;</span>'
         + '<span style="display:flex;align-items:center;gap:6px;min-height:31px">'
-        + '<input type="checkbox"' + (isOwner ? ' checked disabled title="you are always on your own promoted line"' : ' data-hbp-inc="' + mi + '"') + '> ' + esc(label)
+        + '<input type="checkbox"' + (isOwner ? ' checked disabled title="you are always on your own promoted line"'
+                                              : ' data-hbp-inc="' + mi + '"' + (filled ? ' checked' : '')) + '> ' + esc(label)
         + '</span></label>'
         + (hbPromoteType === 'split'
-          ? '<label class="ac-field" style="max-width:90px"><span class="ac-lbl">Split %</span><input type="text" inputmode="decimal" data-hbp-pct="' + (isOwner ? 'owner' : mi) + '" value="' + (isOwner ? defaultOwnerPct : 0) + '"></label>'
+          ? '<label class="ac-field" style="max-width:90px"><span class="ac-lbl">Split %</span><input type="text" inputmode="decimal" data-hbp-pct="' + (isOwner ? 'owner' : mi) + '" value="' + (isOwner ? defaultOwnerPct : (filled ? hbPromoteFill.pct : 0)) + '"></label>'
           : '<label class="ac-field" style="max-width:120px"><span class="ac-lbl">Contribution</span><span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-fmt="usd" data-hbp-contrib="' + (isOwner ? 'owner' : mi) + '" value="' + (isOwner ? defaultOwnerContrib : 0) + '"></span></label>')
         + '</div>';
     };
@@ -12287,9 +12598,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       // with the SAME total the panel opens at (owner's default %, every member row unchecked)
       // so the very first paint is already truthful: opening a 65% line states "65% -- 35%
       // short" immediately, instead of looking fine until the button rejects it.
+      // Seeded from what the form ACTUALLY opens holding, prefill included. Seeded from the
+      // owner's percentage alone it announced "must sum to 100%" over a form that already did.
       + (hbPromoteType === 'split'
-        ? '<p class="mini hb-ratio-total ' + (hbRatioMsg(hbPctToBps(defaultOwnerPct)).ok ? 'is-ok' : 'is-bad') + '" data-hbp-total>'
-          + esc(hbRatioMsg(hbPctToBps(defaultOwnerPct)).text) + '</p>'
+        ? (function () {
+            const seed = hbPctToBps(defaultOwnerPct) + (hbPromoteFill ? hbPctToBps(hbPromoteFill.pct) : 0);
+            return '<p class="mini hb-ratio-total ' + (hbRatioMsg(seed).ok ? 'is-ok' : 'is-bad') + '" data-hbp-total>'
+                 + esc(hbRatioMsg(seed).text) + '</p>';
+          })()
         : '')
       + '<div class="ac-row" style="flex-wrap:wrap;margin-top:8px">'
       + '<button type="button" class="seed-btn" data-hbpromote-save="' + bi + '_' + g + '_' + ii + '">Create shared line</button>'
@@ -15064,6 +15380,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bgStratEl = $('bgb_strategy');
   if (bgStratEl) bgStratEl.addEventListener('change', () => { bgb.strategy = bgStratEl.value; saveBgb(); bgbTotals(); });
   wire('bgb_addbucket', () => { bgb.buckets.push({ name: 'New bucket', items: [], groups: [] }); saveBgb(); bgbRender(); });
+  // BUG-0060's remap panel. Cancel closes without writing; the banner stays, because the problem
+  // has not gone away just because the panel did.
+  wire('hb_orphan_open_btn', () => { try { hbOpenOrphanPanel(); } catch (e) {} });
+  wire('hb_orphan_cancel', () => { const p = $('hb_orphan_panel'); if (p) p.hidden = true; });
+  wire('hb_orphan_apply', () => { try { hbApplyOrphanRemap(); } catch (e) {} });
   // #bgb_seed ("Use Tax take-home") is gone: the lock button performs that action, and two
   // controls for one intent is how the old flag stayed invisible. One behaviour is deliberately
   // NOT carried over -- the button also silently switched catch-up mode OFF, which re-pointed the
@@ -15508,6 +15829,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pw = $('ac_tx_partner_wrap'); if (pw) pw.style.display = 'none';
     const pi = $('ac_tx_partner'); if (pi) pi.value = '';
     const pb = $('ac_tx_partner_btn'); if (pb) pb.style.display = isIn ? 'none' : '';
+    acPartnerTouched = false;
     acPartnerPct();
   }
   function acPartnerExpand() {   // user clicked "Split w/ partner" → reveal the field
@@ -15516,6 +15838,79 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pi = $('ac_tx_partner'); if (pi) pi.focus();
     acPartnerPct();
   }
+  // ---- TODO-256: the budget's OWN split, applied when you log in a shared category ----------
+  //
+  // The owner: "for the example of Rent, if it's 2140, and we have a preset to auto split it, the
+  // sum of mine + my partner = 2140, so it should be green."
+  //
+  // The preset already exists — a shared line carries its ratio, and that ratio is editable in the
+  // Budget tab. What was missing is that logging an expense never consulted it, so the split was
+  // retyped by hand every month against three fixed buttons (50/50, 1/3, 2/3) that do not include
+  // 65/35. Measured on the owner's August: the Rent preset says 65/35 and the transaction was
+  // logged 60/40, moving their share $107 and turning a 0.6% variance into an 8% one.
+  //
+  // `hb.lines` is the Budget tab's shared overlay, already fetched and already on the client. The
+  // match is by NAME, case-insensitively — a shared line called "Rent" and a category typed as
+  // "rent" are the same bill, and name is what the two surfaces have in common (`bucket` is
+  // 'need' for nearly all of them and cannot distinguish one line from another).
+  function acSharedLineFor(category) {
+    const cat = String(category || '').trim().toLowerCase();
+    if (!cat || !hb || !hb.loaded) return null;
+    return (hb.lines || []).find(l =>
+      l && l.type === 'split' && String(l.name || '').trim().toLowerCase() === cat) || null;
+  }
+
+  // The partner's slice of THIS line, as a fraction. The owner's own share is whatever is left,
+  // so a line with three participants still nets out correctly: everyone who is not you is "the
+  // partner" as far as one Venmo figure is concerned.
+  function acSharedPartnerFraction(line) {
+    if (!line || line.type !== 'split') return 0;
+    const total = (line.shares || []).reduce((a, sh) => a + (+sh.ratioBps || 0), 0);
+    // Belt and braces, and knowingly unreachable today: the live write path enforces the sum and
+    // (since BUG-0018) so does restore, so no supported route produces a split line that does not
+    // total 100%. It stays because the consequence of applying one is a partner figure computed
+    // against a denominator that is not the bill, and because a legacy row is the kind of thing
+    // that turns up later. No test covers this line — there is no way to create the state.
+    if (total !== 10000) return 0;
+    const mine = (line.shares || []).find(sh => sh.userId === '__owner__');
+    return mine ? (10000 - (+mine.ratioBps || 0)) / 10000 : 0;
+  }
+
+  // Fills the partner field from the preset. NEVER overwrites a figure the user typed: `acPartnerTouched`
+  // is set the moment they edit it by hand or press one of the fixed buttons, and from then on
+  // this only ever updates the note. A preset that silently corrects a deliberate one-off is
+  // exactly the "wrong answer that looks right" the shared-budget design keeps rejecting.
+  let acPartnerTouched = false;
+  function acApplySharedPreset(opts) {
+    const note = $('ac_tx_partner_preset');
+    const line = acSharedLineFor($('ac_tx_cat') ? $('ac_tx_cat').value : '');
+    const frac = acSharedPartnerFraction(line);
+    if (!line || frac <= 0 || ACT.dir === 'in') {
+      if (note) { note.textContent = ''; note.hidden = true; }
+      return;
+    }
+    // BOTH halves off the same basis points. Rounding one to bps and the other to whole percent
+    // rendered a 53.33/46.67 line as "53.33/47" — two numbers that do not add to 100, in the one
+    // sentence whose job is to say the split adds up.
+    const partnerBps = Math.round(frac * 10000);
+    const mineBps = 10000 - partnerBps;
+    if (note) {
+      note.hidden = false;
+      note.textContent = esc(line.name) + ' is split ' + (mineBps / 100) + '/'
+        + (partnerBps / 100) + ' on your shared budget'
+        + (acPartnerTouched ? ' — you have changed this one by hand, so it is left alone.'
+                            : ' — filled in from there.');
+    }
+    if (acPartnerTouched && !(opts && opts.force)) return;
+    const amt = rn($('ac_tx_amt') ? $('ac_tx_amt').value : 0);
+    if (!(amt > 0)) return;
+    const pw = $('ac_tx_partner_wrap');
+    if (pw && pw.style.display === 'none') acPartnerExpand();
+    const pi = $('ac_tx_partner');
+    if (pi) pi.value = acMoneyEdit(Math.round(amt * frac * 100) / 100);
+    acPartnerPct();
+  }
+
   // Live readout so you can see if the partner's share is 50% or custom; and quick %-of-total presets.
   function acPartnerPct() {
     const el = $('ac_tx_partner_pct'); if (!el) return;
@@ -15526,7 +15921,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const amt = rn($('ac_tx_amt') ? $('ac_tx_amt').value : 0);
     if (!(amt > 0)) { showToast('Enter the amount first'); const a = $('ac_tx_amt'); if (a) a.focus(); return; }
     const pi = $('ac_tx_partner'); if (pi) pi.value = acMoneyEdit(Math.round(amt * pct) / 100);
+    // Pressing a fixed button IS taking over from the preset — the note says so afterwards
+    // rather than the figure silently reverting on the next keystroke in the amount field.
+    acPartnerTouched = true;
     acPartnerPct();
+    acApplySharedPreset();
   }
 
   // Payee memory + category autocomplete (GET /suggest). Overridable: we only PRE-FILL.
@@ -16841,15 +17240,51 @@ document.addEventListener('DOMContentLoaded', async () => {
     return (asset || all[0]).id;
   }
 
+  // What the ledger has for this schedule this month — as a FULL payment and as the user's OWN
+  // SHARE of it. The two are different the moment a bill is split with a partner, and the plan
+  // this gets compared against is a per-person figure, so the share is the comparable one.
+  //
+  // THIS FUNCTION WAS THE OUTLIER, not the innovation. `acActualByCat` 200 lines above already
+  // computes `signedAmount − signedPartnerOwed` and already apportions a split transaction's
+  // partner share `pOwed * leg.amount / t.amount`; the whole Plan-vs-actual bucket rollup has
+  // always been share-aware. This matcher summed the full payment and nothing reconciled the two.
+  //
+  // Measured on the owner's own August, and this is why it matters: Rent is a $2,140 household
+  // bill split with a partner against a $1,400 personal plan. Comparing the full payment reported
+  // "+$740.00 over plan" in alarming colour. The owner's actual share is $1,284 — $116 UNDER. The
+  // most frightening number on the screen was an artifact of comparing a household total against
+  // one person's budget.
   function acMatchRecurring(r) {
-    const cat = (r.category || '').toLowerCase(); let actual = 0, count = 0, lastDate = null;
-    const hit = (amt, on) => { actual += amt; count++; if (!lastDate || on > lastDate) lastDate = on; };
+    const cat = (r.category || '').toLowerCase();
+    let actual = 0, mine = 0, count = 0, lastDate = null;
+    const hit = (amt, share, on) => {
+      actual += amt; mine += share; count++;
+      if (!lastDate || on > lastDate) lastDate = on;
+    };
     (ACT.txns || []).forEach(t => {
       if (t.direction !== r.direction) return;
-      if (t.splits && t.splits.length) t.splits.forEach(leg => { if (r.bucket && leg.bucket === r.bucket && (leg.category || t.category || '').toLowerCase() === cat) hit(acSignedLegAmount(t, leg), t.postedOn); });
-      else { const bucketOk = r.direction === 'in' ? true : (t.bucket === r.bucket); if (bucketOk && (t.category || '').toLowerCase() === cat) hit(acSignedAmount(t), t.postedOn); }
+      // partnerOwed lives on the PARENT transaction, never on a leg — same as acActualByCat.
+      const pOwed = acSignedPartnerOwed(t);
+      if (t.splits && t.splits.length) {
+        t.splits.forEach(leg => {
+          if (r.bucket && leg.bucket === r.bucket && (leg.category || t.category || '').toLowerCase() === cat) {
+            const legAmt = acSignedLegAmount(t, leg);
+            const legPartner = t.amount > 0 ? pOwed * leg.amount / t.amount : 0;
+            hit(legAmt, legAmt - legPartner, t.postedOn);
+          }
+        });
+      } else {
+        const bucketOk = r.direction === 'in' ? true : (t.bucket === r.bucket);
+        if (bucketOk && (t.category || '').toLowerCase() === cat) {
+          const amt = acSignedAmount(t);
+          hit(amt, amt - pOwed, t.postedOn);
+        }
+      }
     });
-    return { actual: actual, count: count, lastDate: lastDate };
+    // `actual` is kept as well as `mine`: the full payment is what the reader recognises from
+    // their bank, and a row that shows only a share with no sign of the whole is its own kind of
+    // confusing. The renderer shows the share and names the total beside it.
+    return { actual: actual, mine: mine, partner: actual - mine, count: count, lastDate: lastDate };
   }
 
   // ---- Scheduled money -------------------------------------------------------------------
@@ -16914,7 +17349,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // which is a positive factual claim about the user's data manufactured out of a transport
     // error. acLoadBalances next door already gets this right; this is the same discipline.
     // ACT.snapLoadOk (finding #5, "never fabricate over unknown state") is the model.
-    SCH_STATE.listOk = true; SCH_STATE.dueOk = true;
+    SCH_STATE.listOk = true; SCH_STATE.dueOk = true; ACT.monthSchedOk = true;
+    const mStart = ACT.month + '-01', mEnd = acMonthEndIso(ACT.month);
     await Promise.all([
       getJSON('/api/tracking/schedules')
         .then(r => { SCH_STATE.schedules = r.schedules || []; })
@@ -16922,9 +17358,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       getJSON('/api/tracking/schedules/due')
         .then(r => { SCH_STATE.due = r.due || []; })
         .catch(() => { SCH_STATE.due = []; SCH_STATE.dueOk = false; }),
+      // The month's occurrences ride the same load, each failure still caught on its own.
+      // `monthSchedOk` is what lets the merged list tell "nothing falls in this month" from "the
+      // month was never checked" — they render identically from an empty array, and only one of
+      // them is a claim about the user's data.
+      getJSON('/api/tracking/schedules/occurrences?start=' + mStart + '&end=' + mEnd)
+        .then(r => { ACT.monthSchedules = r.schedules || []; })
+        .catch(() => { ACT.monthSchedules = []; ACT.monthSchedOk = false; }),
     ]);
     schRenderDue();
-    schRenderList();
+    acRenderMergedList();
     schRenderProblems();
   }
 
@@ -16956,18 +17399,70 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       // Distinguishes "nothing due" from "nothing set up" -- they look the same and mean very
       // different things, and only one of them is a reason to go and do something.
+      //
+      // With nothing set up at all the tray says NOTHING: the merged list directly below carries
+      // that message, and it used to be printed twice in a row, near-verbatim, which reads as a
+      // rendering fault rather than as emphasis. The tray only speaks when there ARE schedules
+      // and none of them wants a decision — the one thing the list below cannot say.
       el.innerHTML = SCH_STATE.schedules.length
         ? '<div class="mini muted">Nothing waiting for a decision. A schedule you just added stays quiet until its next date arrives.</div>'
-        : '<div class="mini muted">Nothing scheduled yet — add a paycheck, a bill or a transfer below and it will appear here when it is due.</div>';
+        : '';
       return;
     }
-    let h = '<div class="mini" style="margin-bottom:6px"><b>' + due.length + '</b> waiting for you</div><table class="res-table">';
-    due.forEach((d, i) => {
+    // The count is what NEEDS A DECISION, not how many rows are drawn. An occurrence already in
+    // the ledger is shown so it can be dismissed, but calling it "waiting for you" is asking for
+    // an action that would double-log the money — the exact thing the badge below prevents.
+    // ALREADY IN THE LEDGER? THEN IT IS NOT WAITING FOR YOU (BUG-0063, and the owner's own
+    // instruction: "Already in Transactions").
+    //
+    // These rows used to render greyed, with a "Dismiss" button. That button was the same write
+    // as Skip — a persistent `schedule_exception` saying THIS OCCURRENCE DID NOT HAPPEN — about a
+    // bill the app had just confirmed DID happen by checking the ledger to draw the badge. It
+    // erased the occurrence, so the row below flipped from "came through 08-14 · $159.74" to
+    // "none this month" and the reconciliation tally dropped. The only action offered on a
+    // settled row damaged the month's record.
+    //
+    // Not fixed by relabelling the button: fixed by the row not being here. A tray is a contract
+    // that everything in it wants you, and three of the owner's five rows wanted nothing. The
+    // count line still names them so they have not silently vanished — and the list below still
+    // shows each one, matched, with its amount.
+    const shown = [], logged = [];
+    due.forEach(d => {
+      const sc = (SCH_STATE.schedules || []).find(x => String(x.id) === String(d.scheduleId));
+      // Only claimed for the month whose ledger is actually loaded: acMatchRecurring scans
+      // ACT.txns, so for any other month the honest answer is "unknown" and the row stays.
+      const sameMonth = typeof d.on === 'string' && d.on.slice(0, 7) === ACT.month;
+      (sc && sameMonth && acMatchRecurring(sc).count > 0 ? logged : shown).push(d);
+    });
+    if (!shown.length) {
+      el.innerHTML = logged.length
+        ? '<div class="mini muted">Nothing waiting for a decision — '
+          + logged.length + (logged.length === 1 ? ' scheduled bill has' : ' scheduled bills have')
+          + ' already been logged, and ' + (logged.length === 1 ? 'it is' : 'they are')
+          + ' in your transactions.</div>'
+        : '<div class="mini muted">Nothing waiting for a decision. A schedule you just added stays quiet until its next date arrives.</div>';
+      return;
+    }
+    let h = '<div class="mini" style="margin-bottom:6px"><b>' + shown.length + '</b> waiting for you'
+      + (logged.length ? ' · <span class="muted">' + logged.length + ' already logged</span>' : '')
+      + '</div><table class="res-table">';
+    shown.forEach((d, i) => {
       const est = d.amountIsEstimate;
       // A schedule with no account cannot post, so it gets no Confirm. Every bill migration 16
       // converted is in exactly this state, and offering a button that 422s is how the old
       // catch-all came to lie in the first place — the fix is to not draw it.
       const canPost = d.accountId != null;
+      // ALREADY IN THE LEDGER? Confirm POSTS A TRANSACTION. This tray was offering Confirm for
+      // occurrences the list directly below it reports as "came through" — measured on the
+      // owner's own data: Claude 08-15, Electricity 08-15 and Apple One 08-17 all sat here as
+      // "waiting for you" while txns 194, 192 and 199 already recorded them. Confirming would
+      // have written a second settled transaction for money already logged. Nothing had gone
+      // wrong yet only because every migrated schedule lacks an account, so Confirm was never
+      // drawn — an accident, not a guard.
+      //
+      // Only claimed when the occurrence falls in the month whose ledger is actually loaded:
+      // acMatchRecurring scans ACT.txns, so for any other month the honest answer is "unknown"
+      // and the button stays.
       h += '<tr><td>' + esc(d.name) + ' <span class="mini muted">' + esc(d.on) + (est ? ' · amount varies' : '') + '</span>'
         + (canPost ? '' : ' <span class="mng-flag">needs an account</span>') + '</td>'
         + '<td class="num"><span class="input-pair" style="width:120px"><span class="unit">$</span>'
@@ -16976,32 +17471,117 @@ document.addEventListener('DOMContentLoaded', async () => {
         + (canPost
             ? '<button type="button" class="ac-tool" data-schconfirm="' + i + '">Confirm</button> '
             : '<button type="button" class="ac-tool" data-schfix="' + (d.scheduleId) + '">Set an account</button> ')
-        + '<button type="button" class="ac-tool" data-schskip="' + i + '">Skip</button></td></tr>';
+        // Skip means "this occurrence did not happen", which is the truth for every row that can
+        // still be drawn here — a settled one was filtered out above. The "Dismiss" variant is
+        // gone with it; it claimed to tidy a list and wrote a fact about the money.
+        + '<button type="button" class="ac-tool" data-schskip="' + i + '"'
+        + ' title="This one did not happen. It changes no transaction.">Skip</button></td></tr>';
     });
     el.innerHTML = h + '</table>';
   }
 
-  function schRenderList() {
-    const el = $('sch_list'); if (!el) return;
+  // Exported for the CDP suite, which needs to trigger the same refresh a save/delete/confirm
+  // triggers WITHOUT going through the composer — the subject there is that the repaint reads
+  // fresh month data, not that the form works. Mirrors window.__jobChange's own test hook.
+  window.__schedules = { refresh: () => schRefresh() };
+
+  // ONE LIST (TODO-257). This replaces schRenderList AND the old "Recurring this month" table,
+  // which drew the same ten bills from the same store one under the other — the rule in one and
+  // its verdict in the other, so answering "is the electricity paid, and when is it due again"
+  // meant reading two lists and joining them by eye.
+  //
+  // Every schedule gets a row, not only the ones with an occurrence this month. That is the
+  // capability the old rule list carried and the report did not: a paused schedule, or one that
+  // simply does not fall in the month being viewed, still has to be editable and deletable.
+  // Dropping those rows would have removed a capability and called it de-duplication.
+  //
+  // The verdict comes from acMatchRecurring — the LEDGER, not the engine. `posted` means the
+  // engine wrote the row; a bill you paid and logged by hand is unposted and has certainly come
+  // through, so asking the engine would report your own entries as missing.
+  function acRenderMergedList() {
+    const el = $('ac_recurring'); if (!el) return;
     const cnt = $('sch_count');
-    // A count of 0 over a failed load is the same lie as the empty state, quieter. Say nothing
+    // A count of 0 over a failed load is the same lie as an empty state, quieter. Say nothing
     // rather than say zero.
-    if (cnt) cnt.textContent = !SCH_STATE.listOk ? '' : (SCH_STATE.schedules.length ? '(' + SCH_STATE.schedules.length + ')' : '');
-    if (!SCH_STATE.schedules.length) {
-      el.innerHTML = SCH_STATE.listOk ? ''
-        : '<div class="warn-box">Could not load your schedules — nothing has been deleted. Reopen this tab to try again.</div>';
+    if (cnt) cnt.textContent = !SCH_STATE.listOk ? '' : (SCH_STATE.schedules.length ? ' (' + SCH_STATE.schedules.length + ')' : '');
+    if (!SCH_STATE.listOk) {
+      el.innerHTML = '<div class="warn-box">Could not load your schedules — nothing has been deleted. Reopen this tab to try again.</div>';
       return;
     }
-    el.innerHTML = '<div class="mng-list">' + SCH_STATE.schedules.map(s =>
-      '<div class="mng-row"><div class="mng-main">'
-      + '<span class="mng-name">' + esc(s.name) + (s.active ? '' : ' <span class="mini muted">(paused)</span>') + '</span>'
-      + '<span class="mng-meta">' + (s.direction === 'in' ? '+' : s.direction === 'out' ? '−' : '↔') + acAmt(s.amount)
-      + (s.amountIsEstimate ? ' · varies' : '') + (s.autoPost && !s.amountIsEstimate ? ' · posts itself' : '')
-      + ' · ' + esc(schCadenceText(s)) + '</span></div>'
-      + '<div class="mng-actions">'
-      + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + s.id + '" title="edit">✎</a>'
-      + '<a href="#" class="gl-act gl-act-del" data-schdel="' + s.id + '" title="delete">✕</a>'
-      + '</div></div>').join('') + '</div>';
+    if (!SCH_STATE.schedules.length) {
+      el.innerHTML = '<div class="mini muted">Nothing scheduled yet — add a paycheck, a bill or a transfer below, or open <b>Set up recurring</b> to pick bills from your budget.</div>';
+      return;
+    }
+    // This month's occurrences, joined by id. ACT.monthSchedules is the engine's answer for the
+    // viewed month; SCH_STATE.schedules is the authoritative list of rules.
+    const occById = {};
+    (ACT.monthSchedules || []).forEach(r => { occById[String(r.id)] = r.occurrences || []; });
+    const monthOk = ACT.monthSchedOk !== false;
+    // BUG-0065: this compared a DAY OF MONTH against a sentinel 32 for any month that is not the
+    // current one, so `todayDay > lastDay` was true for every row and browsing to September
+    // painted all eleven bills red "missing" — about money that has not come due. A day number is
+    // not comparable across months; a full ISO date is, and it needs no sentinel.
+    const todayIso = isoLocalDate(new Date());
+    let recv = 0, pend = 0, miss = 0, rows = '';
+
+    SCH_STATE.schedules.forEach(sc => {
+      const occ = occById[String(sc.id)] || [];
+      const m = acMatchRecurring(sc);
+      const planned = occ.reduce((a, o) => a + (o.amount || 0), 0) || sc.amount || 0;
+      // The LAST occurrence in the month decides lateness: a twice-monthly paycheck is not
+      // "missing" on the 20th because the 31st has not arrived.
+      const lastOn = occ.length ? occ[occ.length - 1].on : null;
+      let label, cls, icon;
+      if (!monthOk) { label = 'not checked'; cls = 'muted'; icon = '·'; }
+      else if (!sc.active) { label = 'paused'; cls = 'muted'; icon = '·'; }
+      else if (!occ.length) { label = 'none this month'; cls = 'muted'; icon = '·'; }
+      else if (m.count > 0) { label = 'came through' + (m.lastDate ? ' ' + m.lastDate.slice(5) : ''); cls = 'good-text'; icon = '✓'; recv++; }
+      else if (lastOn && lastOn < todayIso) { label = 'missing'; cls = 'bad-text'; icon = '⚠'; miss++; }
+      else {
+        label = occ.length > 1 ? ('due ' + occ.map(o => +o.on.slice(8, 10)).join(', '))
+                               : (lastOn ? 'due day ' + (+lastOn.slice(8, 10)) : 'not yet');
+        cls = 'muted'; icon = '⏳'; pend++;
+      }
+      const where = esc(sc.direction === 'in' ? 'income' : (KINDS[sc.bucket] ? KINDS[sc.bucket].label : sc.bucket || '—'));
+      // THE USER'S SHARE, compared against a plan that is also the user's share. `m.actual` is the
+      // whole household payment and is named beside it rather than instead of it — see
+      // acMatchRecurring. Without this the Rent row read "+$740 over plan" on a bill the owner is
+      // $116 UNDER on.
+      const amt = m.count > 0 ? acAmt(m.mine) : (planned ? acAmt(planned) : '—');
+      const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
+      const shareNote = (m.count > 0 && Math.abs(m.partner) >= 0.005)
+        ? ' <span class="mini muted">your share of ' + acAmt(m.actual) + '</span>' : '';
+      // A bill that has not arrived yet is the only row with anything to DO, so it is the only
+      // row that gets the action. Putting "Log it" on one that already came through would invite
+      // double-entry, which is the failure this list exists to catch.
+      const canLog = monthOk && sc.active && occ.length > 0 && m.count === 0;
+      // `data-schrow` and `.ac-sched-name` are stable hooks: the row is the only place a
+      // schedule's name appears now that the rule list is gone, so tests and any future
+      // scroll-to-row need something better than nth-child on a five-column table.
+      rows += '<tr data-schrow="' + sc.id + '"><td><span class="' + cls + '">' + icon
+        + '</span> <span class="ac-sched-name">' + esc(sc.name) + '</span>'
+        + (sc.active ? '' : ' <span class="mini muted">(paused)</span>')
+        + ' <span class="mini muted">' + where + '</span></td>'
+        + '<td class="mini muted">' + esc(schCadenceText(sc))
+        + (sc.amountIsEstimate ? ' · varies' : '')
+        + (sc.autoPost && !sc.amountIsEstimate ? ' · posts itself' : '') + '</td>'
+        + '<td class="num">' + amt + sub + shareNote + '</td>'
+        + '<td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+        + (canLog ? '<button type="button" class="ac-tool" data-reclog="' + esc(sc.id) + '" title="Fill the form below from this bill">Log&nbsp;it</button> ' : '')
+        + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + sc.id + '" title="edit">✎</a>'
+        + '<a href="#" class="gl-act gl-act-del" data-schdel="' + sc.id + '" title="delete">✕</a>'
+        + '</td></tr>';
+    });
+
+    const head = monthOk
+      ? '<div class="mini" style="margin-bottom:6px"><span class="good-text">✓ ' + recv
+        + '</span> came through · <span class="muted">⏳ ' + pend + '</span> pending · <span class="bad-text">⚠ '
+        + miss + '</span> missing</div>'
+      // Never an empty-state claim over a transport failure — the ACT.snapLoadOk rule, and the
+      // same lie BUG-0056 was about. The rules loaded; only the month's check did not.
+      : '<div class="warn-box">Could not reach your schedules for this month — the list below is your rules, but nothing has been checked against what actually came through.</div>';
+    el.innerHTML = head + '<div class="ac-sched-scroll"><table class="res-table ac-sched-table">' + rows + '</table></div>';
   }
 
   // Populate the day/month pickers once; the "last day" option is what makes "the 30th or 31st"
@@ -17171,54 +17751,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function acRenderRecurring() {
     const el = $('ac_recurring'); if (!el) return;
     acEnsureBudgetPlan();
-    const mStart = ACT.month + '-01';
-    const mEnd = acMonthEndIso(ACT.month);
-    let sched = [], schedOk = true;
-    try { sched = (await getJSON('/api/tracking/schedules/occurrences?start=' + mStart + '&end=' + mEnd)).schedules || []; }
-    catch (e) { sched = []; schedOk = false; }
-    ACT.monthSchedules = sched;
     const ml = $('ac_rec_month'); if (ml) ml.textContent = acMonthLabel(ACT.month);
-    const active = sched.filter(r => (r.occurrences || []).length);
-    if (!schedOk) {
-      // Never an empty-state claim over a transport failure -- the ACT.snapLoadOk rule, and the
-      // same lie BUG-0056 was about.
-      el.innerHTML = '<div class="warn-box">Could not reach your schedules — this month&rsquo;s check is incomplete.</div>';
-    } else if (!active.length) {
-      el.innerHTML = '<div class="mini muted">Nothing scheduled falls in ' + esc(acMonthLabel(ACT.month)) + ' — open <b>Set up recurring</b> below to pick bills from your budget.</div>';
-    } else {
-      const isCur = ACT.month === acNowMonth(), todayDay = isCur ? (new Date()).getDate() : 32;
-      let recv = 0, pend = 0, miss = 0, rows = '';
-      active.forEach(r => {
-        const m = acMatchRecurring(r);
-        const occ = r.occurrences || [];
-        const planned = occ.reduce((a, o) => a + (o.amount || 0), 0) || r.amount || 0;
-        // The LAST occurrence in the month decides lateness: a twice-monthly paycheck is not
-        // "missing" on the 20th because the 31st has not arrived. The old checklist only had a
-        // single dueDay and could not express that at all.
-        const lastDay = occ.length ? +occ[occ.length - 1].on.slice(8, 10) : null;
-        const dueLabel = occ.length > 1
-          ? ('due ' + occ.map(o => +o.on.slice(8, 10)).join(', '))
-          : (lastDay ? 'due day ' + lastDay : 'not yet');
-        let label, cls, icon;
-        if (m.count > 0) { label = 'came through' + (m.lastDate ? ' ' + m.lastDate.slice(5) : ''); cls = 'good-text'; icon = '✓'; recv++; }
-        else if (lastDay && todayDay > lastDay) { label = 'missing'; cls = 'bad-text'; icon = '⚠'; miss++; }
-        else { label = dueLabel; cls = 'muted'; icon = '⏳'; pend++; }
-        const where = esc(r.direction === 'in' ? 'income' : (KINDS[r.bucket] ? KINDS[r.bucket].label : r.bucket || '—'));
-        const amt = m.count > 0 ? acAmt(m.actual) : (planned ? acAmt(planned) : '—');
-        const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
-        // A bill that has not arrived yet is the only row with anything to DO, so it is the only
-        // row that gets an action. Putting a "log it" button on one that already came through
-        // would invite double-entry, which is the failure this whole panel exists to catch.
-        const canLog = m.count === 0;
-        rows += '<tr><td><span class="' + cls + '">' + icon + '</span> ' + esc(r.category) + ' <span class="mini muted">' + where + '</span></td>'
-          + '<td class="num">' + amt + sub + '</td><td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td>'
-          + '<td style="text-align:right">' + (canLog
-              ? '<button type="button" class="ac-tool" data-reclog="' + esc(r.id) + '" title="Fill the form below from this bill">Log&nbsp;it</button>'
-              : '') + '</td></tr>';
-      });
-      el.innerHTML = '<div class="mini" style="margin-bottom:6px"><span class="good-text">✓ ' + recv + '</span> came through · <span class="muted">⏳ ' + pend + '</span> pending · <span class="bad-text">⚠ ' + miss + '</span> missing</div>'
-        + '<table class="res-table">' + rows + '</table>';
-    }
+    // NOTHING IS FETCHED OR PAINTED HERE. schRefresh owns all three loads — the rules, the due
+    // tray and this month's occurrences — because the merged row needs the rules AND the
+    // occurrences to say anything true, and the five places that call schRefresh after a user
+    // action (save, delete, confirm, skip) would otherwise repaint from whatever month data
+    // happened to be lying around. Measured: saving a schedule due this month drew it as "none
+    // this month" until the tab was reopened, because the occurrence fetch lived out here.
     acRenderRecurringSetup();
     schFillPickers();
     await schRefresh();
@@ -17238,7 +17777,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reads the month's SCHEDULES now. ACT.recurring was the legacy table, which the setup
     // panel no longer writes to -- a "Log it" that looked up the old store would have found
     // nothing for every bill created after this change.
-    const r = (ACT.monthSchedules || []).find(x => String(x.id) === String(id));
+    const r = (ACT.monthSchedules || []).find(x => String(x.id) === String(id))
+          || (SCH_STATE.schedules || []).find(x => String(x.id) === String(id));
     if (!r) return;
     acApplyTemplate({
       name: r.category,
@@ -18028,6 +18568,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('ac_tx_split').onclick = acOpenSplit;
     { const pb = $('ac_tx_partner_btn'); if (pb) pb.onclick = acPartnerExpand; }
     document.querySelectorAll('#ac_tx_partner_wrap [data-pshare]').forEach(b => b.onclick = () => acPartnerSetShare(+b.dataset.pshare));
+    // TODO-256. The preset is re-applied whenever either half of the arithmetic changes — the
+    // category decides WHICH line, the amount decides HOW MUCH — and typing in the partner field
+    // itself is the user taking over, after which it only ever updates the note.
+    { const ci = $('ac_tx_cat'); if (ci) { ci.addEventListener('input', () => acApplySharedPreset());
+                                           ci.addEventListener('change', () => acApplySharedPreset()); } }
+    { const ai = $('ac_tx_amt'); if (ai) ai.addEventListener('input', () => acApplySharedPreset()); }
+    { const pi = $('ac_tx_partner'); if (pi) pi.addEventListener('input', () => {
+        acPartnerTouched = true; acPartnerPct(); acApplySharedPreset(); }); }
     { const pi = $('ac_tx_partner'); if (pi) pi.addEventListener('input', acPartnerPct); }
     { const am = $('ac_tx_amt'); if (am) am.addEventListener('input', acPartnerPct); }   // keep the %-of-total readout live
     $('ac_split_addleg').onclick = acAddLeg;
@@ -18120,7 +18668,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           const d = SCH_STATE.due[+k.dataset.schskip]; if (!d) return;
           // An empty catch made a failed skip indistinguishable from a successful one. Same
       // read-the-server shape as schConfirmError rather than a second guess.
-      try { await post('/api/tracking/schedules/' + d.scheduleId + '/skip', { on: d.on }); }
+      // RAW, not `on` (BUG-0064). The store keys exceptions on the date the RULE produced, so a
+      // weekend-shifted occurrence skipped by its landing date wrote an exception nothing ever
+      // matched — a silent no-op that reported success. Falls back to `on` so an older server
+      // that does not send `raw` still behaves exactly as it did before.
+      try { await post('/api/tracking/schedules/' + d.scheduleId + '/skip', { on: d.raw || d.on }); }
       catch (e) { showToast('Could not skip that one — ' + (errDetail(e) || 'the server refused it')); }
           await schRefresh(); return;
         } }
@@ -19382,7 +19934,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const p401k = periods(i.elig401k);
     const pHsa = periods(i.eligHsa);
     const hsaMonths = jcHsaMonths(i);
-    const hsaCap = jcHsaLimit(currentHsaLimit(), hsaMonths);
+    // Prorate the EMPLOYEE's room, not the gross legal limit. The employer's contribution is
+    // subtracted first: `jc_a_hsa` is explicitly "your payroll $ so far (not employer)", so the
+    // whole rail is employee-side and a gross cap here sized every target too high by exactly
+    // what the employer puts in.
+    const hsaCap = jcHsaLimit(currentHsaEmployeeRoom(), hsaMonths);
 
     // "Just the full match" — the deferral that captures every matched dollar for the periods
     // you are actually eligible, not for a whole year you do not have.
@@ -19818,12 +20374,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('jc_elig_hsa_out').textContent = r.i.eligHsa ? '→ ' + jcHumanDate(r.i.eligHsa)
       + ' · ' + r.pHsa + ' paycheck' + (r.pHsa === 1 ? '' : 's') + ' left' : '';
 
-    $('jc_hsa_note').textContent = r.i.hsaCover === 'lapses'
-      ? 'Covered for ' + r.hsaMonths + ' month' + (r.hsaMonths === 1 ? '' : 's') + ' of the year, so the HSA limit '
+    // The figure quoted is now the EMPLOYEE's room, so the copy may no longer call it "the full
+    // limit" — that would be the one sentence on the card asserting the thing the fix removed.
+    // When the employer contributes, the note says so and shows the arithmetic, because a number
+    // that is smaller than the limit the reader knows is otherwise indistinguishable from a bug.
+    const erHsa = resolveAnnual('employerHsa');
+    const erNote = erHsa > 0
+      ? ' Your employer puts in ' + fmt$(erHsa) + ', and employer money shares the same legal cap, '
+        + 'so that is already taken off what you can defer yourself.'
+      : '';
+    $('jc_hsa_note').textContent = (r.i.hsaCover === 'lapses'
+      ? 'Covered for ' + r.hsaMonths + ' month' + (r.hsaMonths === 1 ? '' : 's') + ' of the year, so your HSA room '
         + 'prorates to ' + fmt$(r.hsaCap) + '. Eligibility is judged on the FIRST of each month. '
         + 'The last-month rule could restore the full limit, but it commits you to staying eligible '
         + 'through next December — a decision, so it is not applied here.'
-      : 'Covered all year, so the full ' + fmt$(r.hsaCap) + ' limit applies.';
+      : (erHsa > 0
+          ? 'Covered all year. You can still put in ' + fmt$(r.hsaCap) + '.'
+          : 'Covered all year, so the full ' + fmt$(r.hsaCap) + ' limit applies.')) + erNote;
 
     // 401(k) leads on its own row: it is the largest limit, the only one carrying the §402(g)
     // rule this screen exists to explain, and the only one an eligibility wait can zero. The
