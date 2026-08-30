@@ -343,7 +343,11 @@
   a.ac-act-edit:focus-visible, a.ac-act-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   /* Savings-goals row actions (→ Budget line / ✓ / ✕) — same fix as the ledger icons above:
      UA link-blue is near-invisible on the dark theme. */
-  .gl-act { text-decoration: none; display: inline-block; padding: 2px 6px; border-radius: 6px; line-height: 1.3; color: var(--muted); }
+  /* 24px minimum on both axes (WCAG 2.5.8). Measured before this change: 20.89px with a
+     0.14px gap between neighbours, which fails on desktop as well as on a phone. */
+  .gl-act { text-decoration: none; display: inline-flex; align-items: center; justify-content: center;
+            min-height: 24px; min-width: 24px; padding: 3px 6px; border-radius: 6px;
+            line-height: 1.3; color: var(--muted); }
   .gl-act:hover { color: var(--text); background: var(--chip); }
   /* The family shipped as anchors, so the base rule assumes link chrome. A destructive row
      action is more honestly a <button> -- it is not a destination, and an <a href="#"> asks
@@ -357,6 +361,63 @@
   .gl-act-del { color: var(--muted); }
   .gl-act-del:hover { color: var(--bad); background: var(--chip); }
   .gl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- Scheduled money, one dated list (TODO-260) --------------------------------------
+     DESIGN.md §4.4: FIXED tracks, because each row is its own grid container and an `auto`
+     track re-sizes per row — the same rule .cat-list above states and for the same reason.
+     Deliberately NOT a table: five columns of which one is controls is a list wearing a
+     table's clothes, and folding a table on a phone needs display:block, which strips the
+     row and cell roles from the accessibility tree at exactly the width where they matter. */
+  .sch-list { --sch-c-date: 52px; --sch-c-amt: 132px; --sch-c-status: 132px;
+              --sch-c-occ: 196px; --sch-c-rule: 62px;
+              border-top: 1px solid var(--line-faint); }
+  .sch-row { display: grid; align-items: center; column-gap: var(--space-3);
+             padding: 9px 2px; border-bottom: 1px solid var(--line-faint);
+             grid-template-columns: var(--sch-c-date) minmax(0, 1fr) var(--sch-c-amt)
+                                    var(--sch-c-status) var(--sch-c-occ) var(--sch-c-rule);
+             grid-template-areas: "date name amt status occ rule"
+                                  "date meta amt status occ rule"; }
+  .sch-date { grid-area: date; font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sch-date b { font-size: var(--fs-base); color: var(--text); font-weight: 600; }
+  .sch-name { grid-area: name; font-size: var(--fs-base); font-weight: 600;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sch-meta { grid-area: meta; font-size: var(--fs-xs); color: var(--muted);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sch-amt { grid-area: amt; text-align: right; font-variant-numeric: tabular-nums; font-size: var(--fs-base); }
+  .sch-amt-plan { color: var(--muted); }
+  .sch-plan { display: block; font-size: var(--fs-xs); color: var(--muted); }
+  .sch-status { grid-area: status; font-size: var(--fs-sm); }
+  .sch-muted { color: var(--muted); } .sch-warn { color: var(--warn); } .sch-bad { color: var(--bad); }
+  /* Two action groups split by SCOPE. Confirm/Log it/Skip act on an OCCURRENCE; edit and
+     delete act on the RULE. They are different objects, so on a phone they go on different
+     lines — which is what keeps the name readable. All four on the title line truncated
+     "Electricity" to "E..." at 390px, measured. */
+  .sch-acts-occ  { grid-area: occ;  display: flex; gap: var(--space-2); justify-content: flex-end; align-items: center; }
+  .sch-acts-rule { grid-area: rule; display: flex; gap: var(--space-2); justify-content: flex-end; align-items: center; }
+  .sch-row-done .sch-name { font-weight: 400; }
+  /* The divider carries a real date, not just the word "today": the list spans a month and a
+     reader arriving at it mid-scroll has nothing else to anchor on. */
+  .sch-today { display: flex; align-items: center; gap: var(--space-3); padding: 10px 2px 6px; }
+  .sch-today span { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
+                    color: var(--muted); white-space: nowrap; }
+  .sch-today::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .sch-fold { padding: 10px 2px; border-bottom: 1px solid var(--line-faint); }
+  details.sch-roster { margin-top: 10px; }
+  details.sch-roster summary { font-size: var(--fs-sm); color: var(--muted); cursor: pointer; padding: 8px 2px; }
+  .sch-sum { font-size: var(--fs-md); margin-bottom: 10px; }
+  .sch-sum b { font-variant-numeric: tabular-nums; }
+  .sch-need { color: var(--bad); font-weight: 600; }
+
+  @media (max-width: 600px) {
+    .sch-row { grid-template-columns: var(--sch-c-date) minmax(0, 1fr) auto;
+               grid-template-areas: "date name rule" "date meta meta" "date amt status" "occ occ occ";
+               row-gap: 3px; padding: 11px 2px; }
+    .sch-acts-occ { justify-content: flex-start; margin-top: 4px; flex-wrap: nowrap; }
+    .sch-amt { text-align: left; }
+    .sch-plan { display: inline; margin-left: 6px; }
+    .sch-status { text-align: right; }
+    .sch-row .gl-act { min-height: 44px; min-width: 44px; }
+  }
   /* Manage panel (docs/manage-panel-redesign.md §2) — one shared row grid for categories AND
      accounts. identity+controls flow in the 1fr cell (wrap within it at narrow widths); actions
      anchor right so every ✎/✕ aligns — kills the ragged-right-edge mess in one rule. */
@@ -935,7 +996,7 @@
      tall menus at desktop widths where none of this is needed. */
   @media (max-width: 1024px) {
     #bg_out, #iv_out, #au_out, #ov_out, #nw_chart, #bgb_catsummary,
-    #ac_ledger, #ac_pva, #ac_recurring, #bgBuilder,
+    #ac_ledger, #ac_pva, #sch_dated, #bgBuilder,
     /* The two containers this batch moved into Decisions. Every sibling results table has this
        safety net; these two did not, which is the allow-list trap the comment above warns about
        reappearing the moment something new arrives. */
@@ -1655,7 +1716,10 @@
      content's min-content size up the ancestor chain, and the tab panel's grid item carries
      min-width:auto, so without the grid host and the explicit min-width:0 the whole PAGE
      scrolls sideways on a phone instead of the table. */
-  #ac_recurring { display:grid; grid-template-columns:minmax(0,1fr); }
+  /* The dated list folds rather than scrolling sideways (TODO-260), but it still needs the
+     grid host + min-width:0: a grid item carries min-width:auto, so without it the PAGE
+     scrolls on a phone instead of the content adapting. */
+  #sch_dated { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; }
   .ac-sched-scroll { min-width:0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .ac-sched-table { min-width:520px; }
   .ac-sched-table td:first-child { white-space:nowrap; }
@@ -3614,22 +3678,29 @@
            ignored. The older Recurring panel below still reads the legacy `recurring` table —
            migration 16 already copied those rows into schedules, so the two describe the same
            bills, and retiring the old panel is the follow-up, not this change. -->
-      <div class="subhead" style="margin-top:14px">Scheduled money</div>
-      <!-- What automatic posting could not do. ABOVE the due tray because a schedule the user
+      <!-- ONE DATED LIST (TODO-260). One row per OCCURRENCE, not per rule: a schedule has no
+           date, only a cadence, so "by date" is only expressible on occurrences — and it is also
+           what lets a single row carry all four actions, because Confirm/Log it/Skip act on an
+           occurrence while Edit/Delete act on the rule.
+
+           This retires the due tray as a row-drawing surface. The tray was the SOURCE of the
+           duplication the owner reported ("no duplicates, currently claude is double"): it
+           answered "what has the engine not posted?" while the list below answered "what has the
+           ledger seen?", and both were drawn as authoritative, so a bill logged by hand appeared
+           in both at once under two different definitions of done. -->
+      <div class="subhead" style="margin-top:14px">Scheduled money <span class="mini muted" id="ac_rec_month"></span></div>
+      <!-- What automatic posting could not do. ABOVE the list because a schedule the user
            switched auto-post on for is one they stopped watching, so its failure has to come
            looking for them rather than wait to be found. -->
       <div id="sch_problems" hidden></div>
-      <div id="sch_due"></div>
-      <!-- ONE LIST, not two (TODO-257). This card used to draw the same bills three times: the
-           due tray above, a rule list here, and a "Recurring this month" report below — 10 rows,
-           10 rows and 5 rows describing 10 bills, all from the SAME store since the report was
-           rebuilt onto schedules. Reported by the owner as "de dupe the recurring transactions".
-           The two lists are now one row per schedule carrying BOTH halves — the rule (cadence,
-           amount, edit, delete) and this month's verdict (came through / missing / due) — so a
-           bill appears at most twice on the card, and the second time only because it is waiting
-           on a decision. -->
-      <div class="subhead" style="margin-top:18px">Your schedules <span class="mini muted" id="ac_rec_month"></span><span class="mini muted" id="sch_count"></span></div>
-      <div id="ac_recurring"></div>
+      <div class="sch-sum" id="sch_sum" role="status"></div>
+      <div class="sch-list" id="sch_dated"></div>
+      <!-- A rule with no occurrence in the viewed month still has to be editable and deletable —
+           dropping those rows would remove a capability and call it de-duplication. -->
+      <details class="sch-roster" id="sch_roster" hidden>
+        <summary id="sch_roster_sum"></summary>
+        <div id="sch_roster_body"></div>
+      </details>
       <details id="sch_add_wrap" style="margin-top:8px"><summary>Add a scheduled payment or deposit</summary>
         <div class="body" id="sch_form">
           <div class="ac-row">
@@ -6001,15 +6072,31 @@ async function recompute() {
 // Sum a set of inputs; null when every one of them is empty or absent, so an untouched section
 // reads "none" rather than "$0.00" -- a zero someone entered deliberately is different from a
 // field nobody has ever filled, and only the first deserves a number.
+// BUG-0070: `rn(el.value)` reads what is TYPED, and two of these fields are not typed in dollars.
+// `trad401k` and `roth401k` are the whole of INTEGER_PCT_FIELDS, so in % mode they hold `12` and
+// `6` — meaning 12% and 6% of salary — and the raw sum added those straight to a pile of dollars.
+// Measured on the owner's screen: Pre-tax showed $117 for 8,400 + 80 + 15 + 10 (= 12+80+15+10),
+// and Post-tax $7,506 for 4,200 + 7,500 (= 6+7,500), with the card printing "= $8,400/yr" two
+// lines under the field it was mis-reading.
+//
+// `resolveAnnual` is the app's own answer to this question everywhere else, and it also closes a
+// half nobody had hit yet: medical/dental/vision carry a /yr -> /mo -> /pay toggle, so a premium
+// entered per MONTH was counted once instead of twelve times. Identity for the other four call
+// sites (share counts, investment income, YTD figures) — none carries either toggle.
 function lidSum(ids) {
   let total = 0, any = false;
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (!el || String(el.value).trim() === '') return;
-    any = true; total += rn(el.value);
+    any = true; total += resolveAnnual(id);
   });
   return any ? total : null;
 }
+// Exported for the CDP suite (BUG-0070). The subject is the ARITHMETIC — that a field in %
+// mode is counted as the dollars it means — and reading it off a rendered lid would test the
+// lid's formatting at the same time, which is how a wrong total hid behind a right-looking
+// string. Mirrors window.__schedules / window.__jobChange.
+window.__lidSum = ids => lidSum(ids);
 function lidMoney(v) { return '$' + (typeof fmtUSD2val === 'function' ? fmtUSD2val(v) : v); }
 
 const LID_SCENT = [
@@ -17257,8 +17344,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acMatchRecurring(r) {
     const cat = (r.category || '').toLowerCase();
     let actual = 0, mine = 0, count = 0, lastDate = null;
+    // TODO-260 needs the hits INDIVIDUALLY, not just the totals: rows are per OCCURRENCE now, and
+    // a schedule with two occurrences in one month (a semimonthly paycheck — the first example the
+    // add form offers) has to say which cheque arrived. Every existing caller reads only the
+    // totals, so this is purely additive.
+    const hits = [];
     const hit = (amt, share, on) => {
       actual += amt; mine += share; count++;
+      hits.push({ on: on, amount: amt, mine: share });
       if (!lastDate || on > lastDate) lastDate = on;
     };
     (ACT.txns || []).forEach(t => {
@@ -17284,7 +17377,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // `actual` is kept as well as `mine`: the full payment is what the reader recognises from
     // their bank, and a row that shows only a share with no sign of the whole is its own kind of
     // confusing. The renderer shows the share and names the total beside it.
-    return { actual: actual, mine: mine, partner: actual - mine, count: count, lastDate: lastDate };
+    return { actual: actual, mine: mine, partner: actual - mine, count: count, lastDate: lastDate, hits: hits };
   }
 
   // ---- Scheduled money -------------------------------------------------------------------
@@ -17366,8 +17459,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         .then(r => { ACT.monthSchedules = r.schedules || []; })
         .catch(() => { ACT.monthSchedules = []; ACT.monthSchedOk = false; }),
     ]);
-    schRenderDue();
-    acRenderMergedList();
+    schRenderDated();
     schRenderProblems();
   }
 
@@ -17385,99 +17477,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           + (pr.scheduleId != null ? ' <button type="button" class="ac-tool" data-schfix="' + esc(String(pr.scheduleId)) + '">Fix it</button>' : '')
           + '</li>').join('')
       + '</ul></div>';
-  }
-
-  function schRenderDue() {
-    const el = $('sch_due'); if (!el) return;
-    const due = SCH_STATE.due;
-    if (!due.length) {
-      // Three states, not two. An unreachable endpoint is not an empty one, and saying so is
-      // the difference between a report and an invention.
-      if (!SCH_STATE.dueOk || !SCH_STATE.listOk) {
-        el.innerHTML = '<div class="warn-box">Could not reach your schedules just now — this list may be incomplete. Nothing has been lost; try again in a moment.</div>';
-        return;
-      }
-      // Distinguishes "nothing due" from "nothing set up" -- they look the same and mean very
-      // different things, and only one of them is a reason to go and do something.
-      //
-      // With nothing set up at all the tray says NOTHING: the merged list directly below carries
-      // that message, and it used to be printed twice in a row, near-verbatim, which reads as a
-      // rendering fault rather than as emphasis. The tray only speaks when there ARE schedules
-      // and none of them wants a decision — the one thing the list below cannot say.
-      el.innerHTML = SCH_STATE.schedules.length
-        ? '<div class="mini muted">Nothing waiting for a decision. A schedule you just added stays quiet until its next date arrives.</div>'
-        : '';
-      return;
-    }
-    // The count is what NEEDS A DECISION, not how many rows are drawn. An occurrence already in
-    // the ledger is shown so it can be dismissed, but calling it "waiting for you" is asking for
-    // an action that would double-log the money — the exact thing the badge below prevents.
-    // ALREADY IN THE LEDGER? THEN IT IS NOT WAITING FOR YOU (BUG-0063, and the owner's own
-    // instruction: "Already in Transactions").
-    //
-    // These rows used to render greyed, with a "Dismiss" button. That button was the same write
-    // as Skip — a persistent `schedule_exception` saying THIS OCCURRENCE DID NOT HAPPEN — about a
-    // bill the app had just confirmed DID happen by checking the ledger to draw the badge. It
-    // erased the occurrence, so the row below flipped from "came through 08-14 · $159.74" to
-    // "none this month" and the reconciliation tally dropped. The only action offered on a
-    // settled row damaged the month's record.
-    //
-    // Not fixed by relabelling the button: fixed by the row not being here. A tray is a contract
-    // that everything in it wants you, and three of the owner's five rows wanted nothing. The
-    // count line still names them so they have not silently vanished — and the list below still
-    // shows each one, matched, with its amount.
-    const shown = [], logged = [];
-    due.forEach(d => {
-      const sc = (SCH_STATE.schedules || []).find(x => String(x.id) === String(d.scheduleId));
-      // Only claimed for the month whose ledger is actually loaded: acMatchRecurring scans
-      // ACT.txns, so for any other month the honest answer is "unknown" and the row stays.
-      const sameMonth = typeof d.on === 'string' && d.on.slice(0, 7) === ACT.month;
-      (sc && sameMonth && acMatchRecurring(sc).count > 0 ? logged : shown).push(d);
-    });
-    if (!shown.length) {
-      el.innerHTML = logged.length
-        ? '<div class="mini muted">Nothing waiting for a decision — '
-          + logged.length + (logged.length === 1 ? ' scheduled bill has' : ' scheduled bills have')
-          + ' already been logged, and ' + (logged.length === 1 ? 'it is' : 'they are')
-          + ' in your transactions.</div>'
-        : '<div class="mini muted">Nothing waiting for a decision. A schedule you just added stays quiet until its next date arrives.</div>';
-      return;
-    }
-    let h = '<div class="mini" style="margin-bottom:6px"><b>' + shown.length + '</b> waiting for you'
-      + (logged.length ? ' · <span class="muted">' + logged.length + ' already logged</span>' : '')
-      + '</div><table class="res-table">';
-    shown.forEach((d, i) => {
-      const est = d.amountIsEstimate;
-      // A schedule with no account cannot post, so it gets no Confirm. Every bill migration 16
-      // converted is in exactly this state, and offering a button that 422s is how the old
-      // catch-all came to lie in the first place — the fix is to not draw it.
-      const canPost = d.accountId != null;
-      // ALREADY IN THE LEDGER? Confirm POSTS A TRANSACTION. This tray was offering Confirm for
-      // occurrences the list directly below it reports as "came through" — measured on the
-      // owner's own data: Claude 08-15, Electricity 08-15 and Apple One 08-17 all sat here as
-      // "waiting for you" while txns 194, 192 and 199 already recorded them. Confirming would
-      // have written a second settled transaction for money already logged. Nothing had gone
-      // wrong yet only because every migrated schedule lacks an account, so Confirm was never
-      // drawn — an accident, not a guard.
-      //
-      // Only claimed when the occurrence falls in the month whose ledger is actually loaded:
-      // acMatchRecurring scans ACT.txns, so for any other month the honest answer is "unknown"
-      // and the button stays.
-      h += '<tr><td>' + esc(d.name) + ' <span class="mini muted">' + esc(d.on) + (est ? ' · amount varies' : '') + '</span>'
-        + (canPost ? '' : ' <span class="mng-flag">needs an account</span>') + '</td>'
-        + '<td class="num"><span class="input-pair" style="width:120px"><span class="unit">$</span>'
-        + '<input type="text" inputmode="decimal" data-schamt="' + i + '" value="' + fmtUSD2val(d.amount) + '"' + (canPost ? '' : ' disabled') + '></span></td>'
-        + '<td style="text-align:right;white-space:nowrap">'
-        + (canPost
-            ? '<button type="button" class="ac-tool" data-schconfirm="' + i + '">Confirm</button> '
-            : '<button type="button" class="ac-tool" data-schfix="' + (d.scheduleId) + '">Set an account</button> ')
-        // Skip means "this occurrence did not happen", which is the truth for every row that can
-        // still be drawn here — a settled one was filtered out above. The "Dismiss" variant is
-        // gone with it; it claimed to tidy a list and wrote a fact about the money.
-        + '<button type="button" class="ac-tool" data-schskip="' + i + '"'
-        + ' title="This one did not happen. It changes no transaction.">Skip</button></td></tr>';
-    });
-    el.innerHTML = h + '</table>';
   }
 
   // Exported for the CDP suite, which needs to trigger the same refresh a save/delete/confirm
@@ -17498,90 +17497,259 @@ document.addEventListener('DOMContentLoaded', async () => {
   // The verdict comes from acMatchRecurring — the LEDGER, not the engine. `posted` means the
   // engine wrote the row; a bill you paid and logged by hand is unposted and has certainly come
   // through, so asking the engine would report your own entries as missing.
-  function acRenderMergedList() {
-    const el = $('ac_recurring'); if (!el) return;
-    const cnt = $('sch_count');
-    // A count of 0 over a failed load is the same lie as an empty state, quieter. Say nothing
-    // rather than say zero.
-    if (cnt) cnt.textContent = !SCH_STATE.listOk ? '' : (SCH_STATE.schedules.length ? ' (' + SCH_STATE.schedules.length + ')' : '');
+  // ---- ONE DATED LIST (TODO-260) ---------------------------------------------------------
+  // One row per OCCURRENCE, in date order. A schedule has no date, only a cadence, so "by date"
+  // is only expressible on occurrences — and it is also what lets a single row carry all four
+  // actions, because Confirm/Log it/Skip act on an occurrence while Edit/Delete act on the rule.
+  //
+  // This replaces BOTH schRenderDue and the per-schedule merged list. The due tray was the source
+  // of the duplication the owner reported ("no duplicates, currently claude is double"): it
+  // answered "what has the engine not posted?" while the list answered "what has the ledger
+  // seen?", both drawn as authoritative, so a hand-logged bill appeared twice under two different
+  // definitions of done.
+  //
+  // VARIANCE IS COMPUTED ON THE OWNER'S SHARE, and that is the correction that pinned this build
+  // for two days. `acMatchRecurring` returns the full household payment AND the share; comparing
+  // the full payment against a per-person plan rendered Rent as "+$740.00 over" on a bill the
+  // owner is $116 UNDER on. See BUG-0066.
+  const SCH_ON_PLAN_PCT = 0.05;    // within 5% of plan...
+  const SCH_ON_PLAN_MIN = 1.00;    // ...or a dollar, whichever is larger — so a $17.50 bill is not
+                                   // flagged over four cents, and a $2,140 one is not excused $100.
+  const SCH_WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function schDayDiff(a, b) {
+    return Math.round(Math.abs(new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000);
+  }
+  function schStamp(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return SCH_WD[d.getDay()] + ' ' + (+iso.slice(8, 10)) + ' ' + SCH_MONTHS[(+iso.slice(5, 7)) - 1].slice(0, 3);
+  }
+
+  // Rules with nothing due in the viewed month — paused ones, and yearly bills falling elsewhere.
+  // They keep edit and delete: dropping them would remove a capability and call it de-duplication.
+  function schRenderRoster(off) {
+    const wrap = $('sch_roster'), sum = $('sch_roster_sum'), body = $('sch_roster_body');
+    if (!wrap || !sum || !body) return;
+    if (!off.length) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    sum.textContent = 'Not scheduled in ' + acMonthLabel(ACT.month) + ' (' + off.length + ')';
+    body.innerHTML = off.map(sc =>
+      '<div class="sch-row" data-schrow="' + esc(String(sc.id)) + '">'
+      + '<span class="sch-date"></span>'
+      + '<span class="sch-name ac-sched-name">' + esc(sc.name) + '</span>'
+      + '<span class="sch-meta">' + esc(schCadenceText(sc)) + (sc.active ? '' : ' · paused') + '</span>'
+      + '<span class="sch-amt sch-amt-plan">' + (sc.amount ? acAmt(sc.amount) : '—') + '</span>'
+      + '<span class="sch-status sch-muted"></span>'
+      + '<span class="sch-acts-occ"></span>'
+      + '<span class="sch-acts-rule">'
+      + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + sc.id + '" aria-label="Edit schedule: ' + esc(sc.name) + '"><span aria-hidden="true">✎</span></a>'
+      + '<a href="#" class="gl-act gl-act-del" data-schdel="' + sc.id + '" aria-label="Delete schedule: ' + esc(sc.name) + '"><span aria-hidden="true">✕</span></a>'
+      + '</span></div>').join('');
+  }
+
+  function schRenderDated() {
+    const list = $('sch_dated'), sumEl = $('sch_sum');
+    if (!list) return;
+    const ml = $('ac_rec_month'); if (ml) ml.textContent = acMonthLabel(ACT.month);
+    const only = h => { list.innerHTML = h; if (sumEl) sumEl.innerHTML = ''; };
+
+    // Three transport states, not two. An unreachable endpoint is not an empty one, and saying so
+    // is the difference between a report and an invention (the BUG-0056 rule).
     if (!SCH_STATE.listOk) {
-      el.innerHTML = '<div class="warn-box">Could not load your schedules — nothing has been deleted. Reopen this tab to try again.</div>';
+      schRenderRoster([]);
+      only('<div class="warn-box">Could not load your schedules — nothing has been deleted. Reopen this tab to try again.</div>');
       return;
     }
     if (!SCH_STATE.schedules.length) {
-      el.innerHTML = '<div class="mini muted">Nothing scheduled yet — add a paycheck, a bill or a transfer below, or open <b>Set up recurring</b> to pick bills from your budget.</div>';
+      schRenderRoster([]);
+      only('<div class="mini muted">Nothing scheduled yet — add a paycheck, a bill or a transfer below, or open <b>Set up recurring</b> to pick bills from your budget.</div>');
       return;
     }
-    // This month's occurrences, joined by id. ACT.monthSchedules is the engine's answer for the
-    // viewed month; SCH_STATE.schedules is the authoritative list of rules.
+    if (ACT.monthSchedOk === false) {
+      // The rules loaded; only this month's check did not. Every rule still has to be editable,
+      // so the roster carries all of them rather than the card going blank.
+      schRenderRoster(SCH_STATE.schedules.slice());
+      only('<div class="warn-box">Could not reach your schedules for this month — your rules are safe below, but nothing has been checked against what actually came through.</div>');
+      return;
+    }
+
     const occById = {};
     (ACT.monthSchedules || []).forEach(r => { occById[String(r.id)] = r.occurrences || []; });
-    const monthOk = ACT.monthSchedOk !== false;
-    // BUG-0065: this compared a DAY OF MONTH against a sentinel 32 for any month that is not the
-    // current one, so `todayDay > lastDay` was true for every row and browsing to September
-    // painted all eleven bills red "missing" — about money that has not come due. A day number is
-    // not comparable across months; a full ISO date is, and it needs no sentinel.
     const todayIso = isoLocalDate(new Date());
-    let recv = 0, pend = 0, miss = 0, rows = '';
+    const rows = [], off = [];
 
     SCH_STATE.schedules.forEach(sc => {
       const occ = occById[String(sc.id)] || [];
+      if (!sc.active || !occ.length) { off.push(sc); return; }
       const m = acMatchRecurring(sc);
-      const planned = occ.reduce((a, o) => a + (o.amount || 0), 0) || sc.amount || 0;
-      // The LAST occurrence in the month decides lateness: a twice-monthly paycheck is not
-      // "missing" on the 20th because the 31st has not arrived.
-      const lastOn = occ.length ? occ[occ.length - 1].on : null;
-      let label, cls, icon;
-      if (!monthOk) { label = 'not checked'; cls = 'muted'; icon = '·'; }
-      else if (!sc.active) { label = 'paused'; cls = 'muted'; icon = '·'; }
-      else if (!occ.length) { label = 'none this month'; cls = 'muted'; icon = '·'; }
-      else if (m.count > 0) { label = 'came through' + (m.lastDate ? ' ' + m.lastDate.slice(5) : ''); cls = 'good-text'; icon = '✓'; recv++; }
-      else if (lastOn && lastOn < todayIso) { label = 'missing'; cls = 'bad-text'; icon = '⚠'; miss++; }
-      else {
-        label = occ.length > 1 ? ('due ' + occ.map(o => +o.on.slice(8, 10)).join(', '))
-                               : (lastOn ? 'due day ' + (+lastOn.slice(8, 10)) : 'not yet');
-        cls = 'muted'; icon = '⏳'; pend++;
-      }
-      const where = esc(sc.direction === 'in' ? 'income' : (KINDS[sc.bucket] ? KINDS[sc.bucket].label : sc.bucket || '—'));
-      // THE USER'S SHARE, compared against a plan that is also the user's share. `m.actual` is the
-      // whole household payment and is named beside it rather than instead of it — see
-      // acMatchRecurring. Without this the Rent row read "+$740 over plan" on a bill the owner is
-      // $116 UNDER on.
-      const amt = m.count > 0 ? acAmt(m.mine) : (planned ? acAmt(planned) : '—');
-      const sub = (m.count > 0 && planned > 0) ? ' <span class="mini muted">/ ' + acAmt(planned) + '</span>' : '';
-      const shareNote = (m.count > 0 && Math.abs(m.partner) >= 0.005)
-        ? ' <span class="mini muted">your share of ' + acAmt(m.actual) + '</span>' : '';
-      // A bill that has not arrived yet is the only row with anything to DO, so it is the only
-      // row that gets the action. Putting "Log it" on one that already came through would invite
-      // double-entry, which is the failure this list exists to catch.
-      const canLog = monthOk && sc.active && occ.length > 0 && m.count === 0;
-      // `data-schrow` and `.ac-sched-name` are stable hooks: the row is the only place a
-      // schedule's name appears now that the rule list is gone, so tests and any future
-      // scroll-to-row need something better than nth-child on a five-column table.
-      rows += '<tr data-schrow="' + sc.id + '"><td><span class="' + cls + '">' + icon
-        + '</span> <span class="ac-sched-name">' + esc(sc.name) + '</span>'
-        + (sc.active ? '' : ' <span class="mini muted">(paused)</span>')
-        + ' <span class="mini muted">' + where + '</span></td>'
-        + '<td class="mini muted">' + esc(schCadenceText(sc))
-        + (sc.amountIsEstimate ? ' · varies' : '')
-        + (sc.autoPost && !sc.amountIsEstimate ? ' · posts itself' : '') + '</td>'
-        + '<td class="num">' + amt + sub + shareNote + '</td>'
-        + '<td class="' + cls + '" style="font-size:var(--fs-xs)">' + label + '</td>'
-        + '<td style="text-align:right;white-space:nowrap">'
-        + (canLog ? '<button type="button" class="ac-tool" data-reclog="' + esc(sc.id) + '" title="Fill the form below from this bill">Log&nbsp;it</button> ' : '')
-        + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + sc.id + '" title="edit">✎</a>'
-        + '<a href="#" class="gl-act gl-act-del" data-schdel="' + sc.id + '" title="delete">✕</a>'
-        + '</td></tr>';
+      // NEAREST-DATE ATTRIBUTION. The matcher answers per SCHEDULE per month; rows are per
+      // occurrence. With one occurrence (every schedule this app has today) the two are the same
+      // question. With two — a semimonthly paycheck, the first example the add form offers — the
+      // month's transactions have to be assigned to the cheque they belong to, and proximity is
+      // the only signal the ledger carries. Ties go to the earlier occurrence.
+      const bucket = occ.map(() => []);
+      (m.hits || []).forEach(h => {
+        let bi = 0, bd = Infinity;
+        occ.forEach((o, i) => { const d = schDayDiff(h.on, o.on); if (d < bd) { bd = d; bi = i; } });
+        bucket[bi].push(h);
+      });
+      occ.forEach((o, i) => {
+        const got = bucket[i];
+        rows.push({
+          sc: sc, on: o.on, raw: o.raw || o.on,
+          planned: (o.amount || sc.amount || 0),
+          n: got.length,
+          mine: got.reduce((a, h) => a + h.mine, 0),
+          full: got.reduce((a, h) => a + h.amount, 0),
+          lastOn: got.length ? got.map(h => h.on).sort().slice(-1)[0] : null,
+        });
+      });
     });
 
-    const head = monthOk
-      ? '<div class="mini" style="margin-bottom:6px"><span class="good-text">✓ ' + recv
-        + '</span> came through · <span class="muted">⏳ ' + pend + '</span> pending · <span class="bad-text">⚠ '
-        + miss + '</span> missing</div>'
-      // Never an empty-state claim over a transport failure — the ACT.snapLoadOk rule, and the
-      // same lie BUG-0056 was about. The rules loaded; only the month's check did not.
-      : '<div class="warn-box">Could not reach your schedules for this month — the list below is your rules, but nothing has been checked against what actually came through.</div>';
-    el.innerHTML = head + '<div class="ac-sched-scroll"><table class="res-table ac-sched-table">' + rows + '</table></div>';
+    rows.forEach(r => {
+      if (r.n > 0) {
+        r.variance = r.mine - r.planned;
+        const tol = Math.max(Math.abs(r.planned) * SCH_ON_PLAN_PCT, SCH_ON_PLAN_MIN);
+        r.state = Math.abs(r.variance) <= tol ? 'done' : 'off';
+      } else r.state = r.on < todayIso ? 'need' : 'due';
+    });
+    rows.sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1
+                      : (a.sc.name < b.sc.name ? -1 : a.sc.name > b.sc.name ? 1 : 0));
+
+    const nCame = rows.filter(r => r.n > 0).length;
+    const nDue = rows.filter(r => r.state === 'due').length;
+    const nNeed = rows.filter(r => r.state === 'need').length;
+    if (sumEl) {
+      sumEl.innerHTML = rows.length
+        ? '<b>' + rows.length + '</b> in ' + esc(acMonthLabel(ACT.month))
+          + ' · <span class="sch-muted">✓ ' + nCame + ' came through</span>'
+          + ' · <span class="sch-muted">⌛ ' + nDue + ' still to come</span>'
+          + (nNeed ? ' · <span class="sch-need">⚠ ' + nNeed + ' need you</span>' : '')
+        : '';
+    }
+
+    function rowHtml(r) {
+      const sc = r.sc, done = r.n > 0;
+      const where = sc.direction === 'in' ? 'income'
+                  : (KINDS[sc.bucket] ? KINDS[sc.bucket].label : (sc.bucket || '—'));
+      const meta = [esc(where)];
+      if (r.n > 1) meta.push(r.n + ' transactions');
+      else if (r.n === 1 && r.lastOn && r.lastOn !== r.on) meta.push('logged ' + schStamp(r.lastOn));
+      // The household total goes in the META, not stacked under the amount: the amount column is
+      // 132px and already carries the plan line, and three stacked figures in one cell is how a
+      // reader loses track of which one is theirs. The share is the headline; the whole payment is
+      // the thing they recognise from their bank, so it is named — beside, not instead.
+      if (r.n > 0 && Math.abs(r.full - r.mine) >= 0.005) meta.push('your share of ' + acAmt(r.full));
+      if (r.state === 'need') {
+        const late = schDayDiff(r.on, todayIso);
+        meta.push(late + (late === 1 ? ' day past due' : ' days past due'));
+      }
+      if (sc.amountIsEstimate) meta.push('amount varies');
+
+      let status = '', scls = 'sch-muted';
+      if (r.state === 'done') status = 'came through';
+      else if (r.state === 'off') {
+        const over = r.variance > 0;
+        status = acAmt(Math.abs(r.variance)) + (over ? ' over plan' : ' under plan');
+        scls = over ? 'sch-warn' : 'sch-muted';
+      } else if (r.state === 'need') { status = 'not logged'; scls = 'sch-bad'; }
+      else {
+        const away = schDayDiff(r.on, todayIso);
+        status = away === 0 ? 'due today' : away === 1 ? 'due tomorrow' : 'due in ' + away + ' days';
+      }
+
+      // The engine's own due entry is what Confirm and Skip act on, so a row can only offer them
+      // when the engine agrees this occurrence is outstanding. Matched on RAW as well as `on`
+      // because a weekend-shifted occurrence lands on a different date than the rule produced
+      // (BUG-0064).
+      const di = (SCH_STATE.due || []).findIndex(x => String(x.scheduleId) === String(sc.id)
+                    && (x.on === r.on || x.on === r.raw || x.raw === r.raw));
+      // An estimate never AUTO-posts — but confirming one by hand, at the figure you type, is the
+      // whole point of the editable amount below. The estimate is $94.50 and the real bill is
+      // $159.74; recording what happened rather than what was guessed is a capability the tray
+      // carried and this list must not quietly drop. Only a missing ACCOUNT can stop a confirm,
+      // because without one there is nothing to post to.
+      const canPost = di >= 0 && sc.accountId != null;
+
+      let amt;
+      if (done) {
+        amt = acAmt(r.mine)
+            + (r.planned ? '<span class="sch-plan">plan ' + acAmt(r.planned) + '</span>' : '');
+      } else if (canPost) {
+        // The amount stays EDITABLE on a row that can post — confirming at the figure you typed is
+        // a capability the tray carried and this list must not quietly drop.
+        amt = '<span class="input-pair" style="width:110px"><span class="unit">$</span>'
+            + '<input type="text" inputmode="decimal" data-schamt="' + di + '"'
+            + ' aria-label="Amount for ' + esc(sc.name) + '" value="' + fmtUSD2val(r.planned) + '"></span>';
+      } else {
+        amt = acAmt(r.planned);
+      }
+
+      let occActs = '';
+      if (done) {
+        occActs = '<button type="button" class="gl-act" data-schfind="' + esc(String(sc.id)) + '"'
+                + ' aria-label="Show ' + esc(sc.name) + ' in transactions">In transactions</button>';
+      } else {
+        if (di >= 0 && sc.accountId == null) {
+          occActs += '<button type="button" class="gl-act gl-act-primary" data-schfix="' + sc.id + '"'
+                   + ' aria-label="Set an account for ' + esc(sc.name) + '">Set an account</button>';
+        } else if (canPost) {
+          occActs += '<button type="button" class="gl-act gl-act-primary" data-schconfirm="' + di + '"'
+                   + ' aria-label="Confirm ' + esc(sc.name) + ' for ' + esc(r.on) + '">Confirm</button>';
+        }
+        occActs += '<button type="button" class="gl-act" data-reclog="' + esc(String(sc.id)) + '"'
+                 + ' aria-label="Log it: ' + esc(sc.name) + '">Log&nbsp;it</button>';
+        if (di >= 0) {
+          occActs += '<button type="button" class="gl-act" data-schskip="' + di + '"'
+                   + ' title="This one did not happen. It changes no transaction."'
+                   + ' aria-label="Skip: ' + esc(sc.name) + ', ' + esc(r.on) + '">Skip</button>';
+        }
+      }
+
+      return '<div class="sch-row' + (r.state === 'done' ? ' sch-row-done' : '') + '"'
+        + ' data-schocc="' + esc(String(sc.id)) + ':' + esc(r.on) + '" data-schrow="' + esc(String(sc.id)) + '">'
+        + '<span class="sch-date"><b>' + (+r.on.slice(8, 10)) + '</b> ' + SCH_WD[new Date(r.on + 'T00:00:00').getDay()] + '</span>'
+        + '<span class="sch-name ac-sched-name">' + esc(sc.name) + '</span>'
+        + '<span class="sch-meta">' + meta.join(' · ') + '</span>'
+        + '<span class="sch-amt' + (done ? '' : ' sch-amt-plan') + '">' + amt + '</span>'
+        + '<span class="sch-status ' + scls + '">' + status + '</span>'
+        + '<span class="sch-acts-occ">' + occActs + '</span>'
+        + '<span class="sch-acts-rule">'
+        + '<a href="#" class="gl-act gl-act-primary" data-schedit="' + sc.id + '" aria-label="Edit schedule: ' + esc(sc.name) + '"><span aria-hidden="true">✎</span></a>'
+        + '<a href="#" class="gl-act gl-act-del" data-schdel="' + sc.id + '" aria-label="Delete schedule: ' + esc(sc.name) + '"><span aria-hidden="true">✕</span></a>'
+        + '</span></div>';
+    }
+
+    // Settled AND on plan folds away; settled but off plan does not. The fold is for rows with
+    // nothing to say, and "$116 under plan" is something to say.
+    const open = rows.filter(r => r.state !== 'done');
+    const settled = rows.filter(r => r.state === 'done');
+    // /due failing on its own is not fatal — the list still knows what is scheduled and what the
+    // ledger has seen. But Confirm and Skip come from that endpoint, so they silently disappear,
+    // and a control that vanishes without a word is the BUG-0056 shape: say what is missing
+    // rather than quietly offering less.
+    let h = SCH_STATE.dueOk === false
+      ? '<div class="warn-box">Could not reach the due list — the month below is accurate, but '
+        + 'Confirm and Skip are unavailable until this loads.</div>'
+      : '';
+    let dividerDone = false;
+    open.forEach(r => {
+      if (!dividerDone && r.on >= todayIso) {
+        h += '<div class="sch-today"><span>Today · ' + esc(schStamp(todayIso)) + '</span></div>';
+        dividerDone = true;
+      }
+      h += rowHtml(r);
+    });
+    if (!open.length) {
+      h += '<div class="mini muted" style="padding:10px 2px">Nothing waiting for a decision this month.</div>';
+    }
+    if (settled.length) {
+      h += '<div class="sch-fold"><button type="button" class="gl-act gl-act-primary" id="sch_fold_btn"'
+         + ' aria-expanded="false" aria-controls="sch_done">' + settled.length
+         + ' came through as planned — show them</button></div>'
+         + '<div id="sch_done" hidden>' + settled.map(rowHtml).join('') + '</div>';
+    }
+    list.innerHTML = h;
+    schRenderRoster(off);
   }
 
   // Populate the day/month pickers once; the "last day" option is what makes "the 30th or 31st"
@@ -17749,7 +17917,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // logged by hand is unposted but has certainly come through. Asking the ledger is the honest
   // question; asking the engine would report your own manual entries as missing.
   async function acRenderRecurring() {
-    const el = $('ac_recurring'); if (!el) return;
+    const el = $('sch_dated'); if (!el) return;
     acEnsureBudgetPlan();
     const ml = $('ac_rec_month'); if (ml) ml.textContent = acMonthLabel(ACT.month);
     // NOTHING IS FETCHED OR PAINTED HERE. schRefresh owns all three loads — the rules, the due
@@ -18633,6 +18801,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
 
       // ---- Scheduled money ----
+      // The settled-and-on-plan fold. Nothing is deleted by folding and the arithmetic in the
+      // summary line above still counts these rows, so the button says how many it is hiding.
+      { const fb = ev.target.closest('#sch_fold_btn');
+        if (fb) {
+          ev.preventDefault();
+          const d = document.getElementById('sch_done'); if (!d) return;
+          const opening = d.hidden;
+          d.hidden = !opening;
+          fb.setAttribute('aria-expanded', String(opening));
+          const n = d.children.length;
+          fb.textContent = n + ' came through as planned — ' + (opening ? 'hide them' : 'show them');
+          return;
+        } }
+      // A settled row's only action is "show me where it is". It scrolls the ledger into view
+      // rather than filtering it: this list does not own the ledger's filter contract, and
+      // inventing one here would be a second definition of "which transactions are these".
+      { const fd = ev.target.closest('[data-schfind]');
+        if (fd) {
+          ev.preventDefault();
+          const led = document.getElementById('ac_ledger');
+          if (led) { try { led.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { led.scrollIntoView(); } }
+          return;
+        } }
       { const c = ev.target.closest('[data-schconfirm]');
         if (c) {
           ev.preventDefault();

@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7.11
+
+Scheduled money is one list, in date order — and two totals on the Tax tab were wrong.
+
+**One dated list, and no bill drawn twice**
+
+- The card used to hold two lists that answered different questions and both looked
+  authoritative: a decision tray asking "what has the app not posted?" and a list below asking
+  "what has your ledger seen?". A bill you paid and logged by hand appeared in both at once. That
+  is why the same bill could show up twice.
+- There is now one list, **in date order, one row per payment date** rather than per rule. Each row
+  carries the date, what was paid against what you planned, and everything you can do about it —
+  confirm it, log it, skip it, edit the rule or delete it.
+- A **Today** line separates what has already come round from what is still ahead, and bills that
+  came through close to plan fold away behind a single line so the ones that need you are not
+  buried. Nothing is hidden that disagrees with your plan.
+- Rules with nothing due this month — a paused one, or a yearly bill falling elsewhere — move to
+  **"Not scheduled in <month>"**, where they keep their edit and delete. Nothing lost its controls.
+- **Your share, not the whole payment.** A bill you split with a partner is now measured against
+  your plan on the half you actually pay. Rent at $2,140 with $856 owed by your partner reads
+  *$116 under* a $1,400 plan — not *$740 over*, which is what comparing the whole payment said.
+- Every button on these rows is now big enough to hit. They were 21 pixels; the accessible minimum
+  is 24, and on a phone they are 44.
+
+**Fixed: the Pre-tax and Post-tax totals added a percentage to a pile of dollars**
+
+- The figure in the top-right corner of each card was summing what is *typed* in every field. A
+  401(k) entered as a percentage holds "12", meaning 12% of salary — and 12 was being added as
+  twelve dollars. Pre-tax read **$117** where it should read **$8,505**; post-tax read **$7,506**
+  where it should read **$11,700**. The card was printing the right figure two lines below the
+  field it was mis-reading.
+- The same fix corrects something you would have hit later: a medical, dental or vision premium
+  entered *per month* was being counted once instead of twelve times.
+
 ## 0.7.10
 
 Your plan comes back on its own if a device loses part of it.
