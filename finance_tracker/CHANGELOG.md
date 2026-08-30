@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.7.12
+
+Correct what the app learned about a payee, see what your investments are made of, and a
+Roth IRA cap that answers for the right year.
+
+**You can now fix what the app remembers about a payee**
+
+- When you type a payee it fills in the bucket, category and tags you used last time. Until now
+  there was no way to correct one — and the reason is worth knowing: those presets were never
+  stored anywhere. The app worked them out from your own history each time, taking the most common
+  combination. So a single unusual entry — groceries bought on a trip, tagged both *groceries* and
+  *travel* — quietly became that shop's permanent default.
+- Under **What the app remembers about your payees** (in the transaction card) you can now see
+  every one of them, corrected or not, and change the bucket, category and tags on any.
+- **Correcting one changes what happens next. Nothing already logged moves.** Those entries were
+  reconciled against your bank statement, so rewriting them silently is not something the app will
+  do. If there are past entries using the old preset it says how many and offers to re-file them —
+  your choice, on a separate button. Split transactions are always left alone.
+- Undoing a correction puts the learned answer back. Nothing is deleted; it is worked out from your
+  history again, exactly as before.
+
+**Investments on the Budget tab break down into what they actually are**
+
+- The single **Investments (Tax tab)** line is now a total with each part listed under it — 401(k)
+  Traditional, 401(k) Roth, Roth IRA, HSA, ESPP, after-tax 401(k) — each labelled *from Tax tab*. A
+  vehicle you are not funding does not get a line.
+- Investment money from your own budget joins the same list rather than sitting apart from it, and
+  leaves the list above so nothing is counted twice. The parts add up to the total; you can check
+  it by adding them.
+- The Roth IRA line comes from the Tax tab and cannot be deleted here, because that is where it
+  lives — one place owns each figure.
+
+**The job-change paycheck table gains a "from January" column**
+
+- Every column on that table is a *catch-up* rate: a year of contribution room packed into whatever
+  paydays are left. That makes the last column the one you would naturally read as your new normal,
+  and the one figure guaranteed not to be — in January the targets reset and the cheque goes back
+  up.
+- There is now a final column showing the level rate from January. It carries no dates and adds
+  nothing to the year's total, because it is next year.
+
+**Fixed: the Roth IRA cap on the Job change card was answered for the year you are leaving**
+
+- Whether you can pay into a Roth IRA depends on your income, and the card was asking that question
+  about your *current* tax figures rather than the blended year it is showing you. It could be
+  wrong in both directions — refusing you a contribution you are entitled to, or offering one you
+  are not — until you pressed Apply. It now asks for the blended year directly.
+- If the tax service cannot be reached, the figure stays as it was and still says which year it
+  came from, rather than guessing.
+
 ## 0.7.11
 
 Scheduled money is one list, in date order — and two totals on the Tax tab were wrong.

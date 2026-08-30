@@ -404,6 +404,37 @@
   .sch-fold { padding: 10px 2px; border-bottom: 1px solid var(--line-faint); }
   details.sch-roster { margin-top: 10px; }
   details.sch-roster summary { font-size: var(--fs-sm); color: var(--muted); cursor: pointer; padding: 8px 2px; }
+  /* The investments roll-up and its derived children (TODO-261). The children are indented and
+     tinted rather than boxed: they are the same money as the row above, shown in parts, and a
+     border would read as a separate group. */
+  .bgb-inv-roll td { border-top: 1px solid var(--line); }
+  .bgb-inv-sub td { color: var(--muted); }
+  .bgb-inv-kid { padding-left: 14px; display: inline-block; }
+  .bgb-inv-src { font-size: var(--fs-xs); color: var(--muted); }
+
+  /* Learned payee presets (TODO-258). Fixed tracks, same rule as .cat-list: each row is its own
+     grid container, so an `auto` track re-sizes per row and the columns stop lining up. */
+  .pp-list { --pp-c-bucket: 96px; --pp-c-count: 74px; --pp-c-act: 56px; border-top: 1px solid var(--line-faint); }
+  .pp-row { display: grid; align-items: center; column-gap: var(--space-2); padding: 7px 2px;
+            border-bottom: 1px solid var(--line-faint);
+            grid-template-columns: minmax(0, 1fr) var(--pp-c-bucket) var(--pp-c-count) var(--pp-c-act); }
+  .pp-name { font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-sub { display: block; font-size: var(--fs-xs); color: var(--muted);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-bucket, .pp-count { font-size: var(--fs-sm); color: var(--muted); }
+  .pp-count { text-align: right; font-variant-numeric: tabular-nums; }
+  .pp-acts { display: flex; gap: var(--space-1); justify-content: flex-end; }
+  /* A corrected row is marked, not decorated: it is the one fact this panel exists to show. */
+  .pp-fixed { font-size: var(--fs-xs); color: var(--accent); }
+  .pp-edit { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2);
+             align-items: flex-end; padding: 6px 0 2px; }
+  .pp-edit .ac-field { flex: 1 1 140px; min-width: 0; }
+  .pp-offer { grid-column: 1 / -1; font-size: var(--fs-sm); padding: 6px 0 2px; color: var(--muted); }
+  @media (max-width: 600px) {
+    .pp-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .pp-bucket, .pp-count { grid-column: 1; font-size: var(--fs-xs); }
+    .pp-row .gl-act { min-height: 44px; min-width: 44px; }
+  }
   .sch-sum { font-size: var(--fs-md); margin-bottom: 10px; }
   .sch-sum b { font-variant-numeric: tabular-nums; }
   .sch-need { color: var(--bad); font-weight: 600; }
@@ -1319,6 +1350,10 @@
      an out-of-reach verdict. */
   .jc-ph-table tr.jc-ph-net td.jc-ph-short { color:var(--bad); }
   .jc-ph-table tr.jc-ph-sum td { color:var(--muted); font-size:var(--fs-sm); border-bottom:none; }
+  /* The level-rate column is next year, not a fourth stretch of this one. A single rule marks
+     it as a different kind of column — structural separation inside a table, not a stripe. */
+  .jc-ph-table th.jc-ph-steady, .jc-ph-table td.jc-ph-steady { border-left:1px solid var(--line); }
+  .jc-ph-table th.jc-ph-steady .jc-ph-name { color:var(--muted); }
 
   @media (max-width: 480px) {
     .jc-wait .input-pair { width:100%; }
@@ -3663,6 +3698,21 @@
       </div>
 
       <!-- Tier 3: Manage (collapsed) — rare admin, out of the daily path -->
+      <!-- TODO-258. The presets are DERIVED (tracking_store.suggestions groups the ledger), which
+           is why there was never anything to edit: a single unusual entry became the permanent
+           default for that payee. This panel lists what the composer will actually DO — corrected
+           and uncorrected alike, because the one quietly mis-filing things is the one nobody has
+           touched — and writes an override row that wins over the history. -->
+      <details id="ac_presets_wrap" style="margin-top:12px">
+        <summary>What the app remembers about your payees <span class="mini muted" id="ac_presets_count"></span></summary>
+        <div class="body">
+          <p class="mini muted" style="margin:6px 0 10px">
+            When you type a payee it fills in the bucket, category and tags you used last time.
+            Correcting one here changes what happens <b>next</b> — nothing already logged moves
+            unless you ask for it.</p>
+          <div id="ac_presets"></div>
+        </div>
+      </details>
     </section>
 
     <!-- RIGHT: plan vs actual -->
@@ -8644,6 +8694,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function patch(path, body) {
     return _fetchJSON(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
+  async function put(path, body) {
+    return _fetchJSON(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
   async function del(path) {
     return _fetchJSON(path, { method: 'DELETE' });
   }
@@ -13427,8 +13480,54 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // 3) By bucket — monthly + yearly (+ the Tax-tab investments row)
       cs += '<div class="subhead">By bucket (per paycheck · monthly · yearly)</div><table class="res-table"><tr><th>Bucket</th><th>Type</th><th>/ pp</th><th>/ mo</th><th>/ yr</th><th>%</th></tr>';
-      cats.forEach(c => { cs += '<tr><td>' + esc(c.name) + '</td><td><span style="color:' + categoryColor(c.kind) + '">●</span> ' + esc(KINDS[c.kind].label) + '</td><td class="num">' + pp(c.total) + '</td><td class="num">' + f2(c.total) + '</td><td class="num">' + f2(c.total * 12) + '</td><td class="num">' + pctOf(c.total) + '</td></tr>'; });
-      if (taxInvest > 0) cs += '<tr><td><i>Investments (Tax tab)</i></td><td><span style="color:' + categoryColor('investment') + '">●</span> ' + esc(KINDS.investment.label) + '</td><td class="num">' + pp(taxInvest) + '</td><td class="num">' + f2(taxInvest) + '</td><td class="num">' + f2(taxInvest * 12) + '</td><td class="num">' + pctOf(taxInvest) + '</td></tr>';
+      // TODO-261 (owner, 2026-08-29): "keep that line as the roll up, but have sub lines with the
+      // individual investments. If within our budget we have Investments, we should add them to
+      // the sub lines. The Roth IRA from the Tax tab should be counted on a budget category
+      // (fixed, and with a label that says it comes from the tax tab), locked so it cannot be
+      // deleted."
+      //
+      // THE CHILDREN ARE DERIVED, and that decision is the whole safety of this change. `taxInvest`
+      // is ALREADY the sum of six known Tax-tab fields, and this table is display-only — the
+      // Investment fold that feeds every percentage is computed above and is untouched here. Making
+      // the children real budget categories would give one number two sources of truth, and every
+      // rollup that counted both would double the entire investment plan. That is BUG-0066's shape
+      // exactly, so it is not being built that way.
+      //
+      // The Roth IRA "locked category" falls out of the same decision: it is a labelled child
+      // sourced from the Tax tab, and it cannot be deleted because there is no budget row to
+      // delete — not because a delete button was hidden.
+      const invCats = cats.filter(c => c.kind === 'investment');
+      const otherCats = cats.filter(c => c.kind !== 'investment');
+      const rowFor = (label, amt, kind, cls) =>
+        '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td>' + label + '</td>'
+        + '<td><span style="color:' + categoryColor(kind) + '">●</span> ' + esc(KINDS[kind].label) + '</td>'
+        + '<td class="num">' + pp(amt) + '</td><td class="num">' + f2(amt) + '</td>'
+        + '<td class="num">' + f2(amt * 12) + '</td><td class="num">' + pctOf(amt) + '</td></tr>';
+      otherCats.forEach(c => { cs += rowFor(esc(c.name), c.total, c.kind); });
+
+      // The six Tax-tab vehicles, named. A vehicle nobody funds is not a fact about this plan.
+      const taxKids = [
+        ['401(k) Traditional', tc.trad401k], ['401(k) Roth', tc.roth401k],
+        ['Roth IRA', tc.rothIra], ['HSA', tc.hsa],
+        ['ESPP', tc.eeStock], ['After-tax 401(k)', tc.afterTax401k],
+      ].filter(k => (k[1] || 0) > 0).map(k => [k[0], (k[1] || 0) / 12]);
+      const invTotal = taxInvest + invCats.reduce((a, c) => a + c.total, 0);
+      if (invTotal > 0) {
+        cs += rowFor('<b>Investments</b>', invTotal, 'investment', 'bgb-inv-roll');
+        taxKids.forEach(([label, amt]) => {
+          cs += rowFor('<span class="bgb-inv-kid">' + esc(label)
+                     + ' <span class="bgb-inv-src">from Tax tab</span></span>', amt, 'investment',
+                       'bgb-inv-sub');
+        });
+        // Budget-side investment lines join the SAME child list rather than sitting in a second,
+        // parallel place — the owner's "if within our budget we have Investments, we should add
+        // them to the sub lines". They are removed from the main list above, so nothing is counted
+        // twice and the table's rows still sum to what they always did.
+        invCats.forEach(c => {
+          cs += rowFor('<span class="bgb-inv-kid">' + esc(c.name) + '</span>', c.total,
+                       'investment', 'bgb-inv-sub');
+        });
+      }
       cs += '</table>';
 
       cse.innerHTML = cs;
@@ -15887,6 +15986,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sd = $('ac_snap_date'); if (sd && !sd.value) sd.value = (ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month));
     acRenderMonth();
     acLoadSuggest();
+    acPresetsFetch();          // TODO-258: the panel that corrects what acLoadSuggest applies
     acLoadTags();
     acLoadTemplates();
     acRenderTagChips();
@@ -16013,6 +16113,110 @@ document.addEventListener('DOMContentLoaded', async () => {
     acPartnerTouched = true;
     acPartnerPct();
     acApplySharedPreset();
+  }
+
+  // ---- Learned payee presets, and correcting them (TODO-258) -----------------------------
+  //
+  // THE OWNER, 2026-08-25: "it auto remembers the combination of tags, and buckets, I want to be
+  // able to change those presets. Maybe we bought groceries on a trip and we mark them as both
+  // groceries and travel."
+  //
+  // There was nothing to edit because nothing was stored: the server DERIVES each preset from the
+  // ledger, so one unusual entry becomes the permanent default. This panel lists what the composer
+  // will actually do — corrected and uncorrected alike, since the one quietly mis-filing things is
+  // the one nobody has touched — and writes an override that wins over the history.
+  //
+  // Correcting is FUTURE-ONLY. Re-filing what is already logged is offered separately, with a
+  // count, because those rows were reconciled against a bank statement and rewriting them silently
+  // is how a ledger stops matching it.
+  ACT.presets = []; ACT.presetsOk = true; ACT.presetEdit = null; ACT.presetOffer = null;
+
+  async function acPresetsFetch() {
+    try {
+      const d = await getJSON('/api/tracking/payee-presets');
+      ACT.presets = (d && d.presets) || []; ACT.presetsOk = true;
+    } catch (e) { ACT.presetsOk = false; }
+    acPresetsRender();
+  }
+
+  function acPresetTagsText(p) { return (p.tags || []).join(', '); }
+
+  function acPresetsRender() {
+    const el = $('ac_presets'); if (!el) return;
+    const cnt = $('ac_presets_count');
+    if (cnt) cnt.textContent = ACT.presetsOk && ACT.presets.length ? ' (' + ACT.presets.length + ')' : '';
+    if (!ACT.presetsOk) {
+      // Never an empty-state claim over a transport failure (the BUG-0056 rule).
+      el.innerHTML = '<div class="warn-box">Could not load what the app remembers — nothing has '
+                   + 'been changed. Reopen this tab to try again.</div>';
+      return;
+    }
+    if (!ACT.presets.length) {
+      el.innerHTML = '<div class="mini muted">Nothing remembered yet. Log a payment with a payee '
+                   + 'and the app starts filling that payee in for you.</div>';
+      return;
+    }
+    let h = '<div class="pp-list">';
+    ACT.presets.forEach(p => {
+      const bucket = p.bucket ? (KINDS[p.bucket] ? KINDS[p.bucket].label : p.bucket) : '—';
+      const bits = [];
+      if (p.category) bits.push(esc(p.category));
+      if (p.tags && p.tags.length) bits.push(p.tags.map(esc).join(', '));
+      if (p.corrected) bits.push('<span class="pp-fixed">corrected</span>');
+      h += '<div class="pp-row" data-pprow="' + esc(p.key) + '">'
+         + '<span class="pp-name">' + esc(p.description || p.key)
+         + '<span class="pp-sub">' + (bits.join(' · ') || 'no category or tags') + '</span></span>'
+         + '<span class="pp-bucket">' + esc(bucket) + '</span>'
+         + '<span class="pp-count">' + (p.count ? p.count + '×' : '—') + '</span>'
+         + '<span class="pp-acts">'
+         + '<button type="button" class="gl-act gl-act-primary" data-ppedit="' + esc(p.key) + '"'
+         + ' aria-label="Change what is remembered for ' + esc(p.description || p.key) + '">✎</button>'
+         + (p.corrected
+             ? '<button type="button" class="gl-act gl-act-del" data-ppreset="' + esc(p.key) + '"'
+               + ' title="Go back to what your history says" aria-label="Undo the correction for '
+               + esc(p.description || p.key) + '">↺</button>'
+             : '')
+         + '</span>';
+      if (ACT.presetEdit === p.key) {
+        h += '<div class="pp-edit">'
+           + '<label class="ac-field"><span class="ac-lbl">Bucket</span>'
+           + '<select data-ppbucket><option value="">—</option>'
+           + Object.keys(KINDS).map(k => '<option value="' + k + '"' + (p.bucket === k ? ' selected' : '')
+               + '>' + esc(KINDS[k].label) + '</option>').join('')
+           + '</select></label>'
+           + '<label class="ac-field"><span class="ac-lbl">Category</span>'
+           + '<input type="text" data-ppcat value="' + esc(p.category || '') + '"></label>'
+           + '<label class="ac-field"><span class="ac-lbl">Tags <span style="text-transform:none">· comma separated</span></span>'
+           + '<input type="text" data-pptags value="' + esc(acPresetTagsText(p)) + '"></label>'
+           + '<span class="pp-acts">'
+           + '<button type="button" class="gl-act gl-act-done" data-ppsave="' + esc(p.key) + '">Save</button>'
+           + '<button type="button" class="gl-act" data-ppcancel="1">Cancel</button>'
+           + '</span></div>';
+      }
+      if (ACT.presetOffer && ACT.presetOffer.key === p.key) {
+        const n = ACT.presetOffer.count;
+        h += '<div class="pp-offer">Saved — future entries use this. '
+           + n + ' already logged ' + (n === 1 ? 'entry uses' : 'entries use') + ' the old one. '
+           + '<button type="button" class="gl-act gl-act-primary" data-pprefile="' + esc(p.key) + '">'
+           + 'Also re-file ' + (n === 1 ? 'it' : 'them') + '</button>'
+           + '<button type="button" class="gl-act" data-ppdismiss="1">Leave them</button></div>';
+      }
+      h += '</div>';
+    });
+    el.innerHTML = h + '</div>';
+  }
+
+  function acPresetFormValues(key) {
+    const row = document.querySelector('[data-pprow="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
+    if (!row) return null;
+    const g = sel => row.querySelector(sel);
+    const tags = ((g('[data-pptags]') || {}).value || '').split(',')
+      .map(t => t.trim()).filter(Boolean);
+    const found = ACT.presets.find(p => p.key === key);
+    return { description: (found && found.description) || key,
+             bucket: (g('[data-ppbucket]') || {}).value || null,
+             category: ((g('[data-ppcat]') || {}).value || '').trim() || null,
+             tags: tags };
   }
 
   // Payee memory + category autocomplete (GET /suggest). Overridable: we only PRE-FILL.
@@ -18800,6 +19004,64 @@ document.addEventListener('DOMContentLoaded', async () => {
       { const lg = ev.target.closest('[data-reclog]');
         if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
 
+      // ---- Learned payee presets (TODO-258) ----
+      { const e = ev.target.closest('[data-ppedit]');
+        if (e) { ev.preventDefault(); ACT.presetOffer = null;
+          ACT.presetEdit = ACT.presetEdit === e.dataset.ppedit ? null : e.dataset.ppedit;
+          acPresetsRender(); return; } }
+      { const c = ev.target.closest('[data-ppcancel]');
+        if (c) { ev.preventDefault(); ACT.presetEdit = null; acPresetsRender(); return; } }
+      { const d = ev.target.closest('[data-ppdismiss]');
+        if (d) { ev.preventDefault(); ACT.presetOffer = null; acPresetsRender(); return; } }
+      { const sv = ev.target.closest('[data-ppsave]');
+        if (sv) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          const key = sv.dataset.ppsave, body = acPresetFormValues(key);
+          if (!body) return;
+          let saved;
+          try { saved = await put('/api/tracking/payee-presets', body); }
+          catch (er) { showToast('Could not save that — ' + (errDetail(er) || 'the server refused it')); return; }
+          ACT.presetEdit = null;
+          // The offer is made ONLY when there is something to offer, and it names the number:
+          // asking somebody to authorise an unknown amount of rewriting is not asking.
+          ACT.presetOffer = (saved && saved.loggedCount > 0)
+            ? { key: key, count: saved.loggedCount } : null;
+          await acPresetsFetch();
+          acLoadSuggest();                       // the composer reads /suggest, so refresh it too
+          return;
+        } }
+      { const rf = ev.target.closest('[data-pprefile]');
+        if (rf) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          const key = rf.dataset.pprefile;
+          const p = ACT.presets.find(x => x.key === key); if (!p) return;
+          let out;
+          try {
+            out = await post('/api/tracking/payee-presets/refile', {
+              description: p.description || key, bucket: p.bucket,
+              category: p.category, tags: p.tags || [] });
+          } catch (er) { showToast('Could not re-file those — ' + (errDetail(er) || 'the server refused it')); return; }
+          ACT.presetOffer = null;
+          const n = (out && out.refiled) || 0;
+          const skipped = (out && out.skippedSplits) || 0;
+          showToast('Re-filed ' + n + ' ' + (n === 1 ? 'entry' : 'entries')
+                  + (skipped ? ' · ' + skipped + ' split left alone' : ''));
+          await acPresetsFetch(); acRefresh();
+          return;
+        } }
+      { const rs = ev.target.closest('[data-ppreset]');
+        if (rs) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          try { await del('/api/tracking/payee-presets/' + encodeURIComponent(rs.dataset.ppreset)); }
+          catch (er) { showToast('Could not undo that — ' + (errDetail(er) || 'the server refused it')); return; }
+          ACT.presetEdit = null; ACT.presetOffer = null;
+          await acPresetsFetch(); acLoadSuggest();
+          return;
+        } }
+
       // ---- Scheduled money ----
       // The settled-and-on-plan fold. Nothing is deleted by folding and the arithmetic in the
       // summary line above still counts these rows, so the button says how many it is hiding.
@@ -20167,7 +20429,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // null means no calculation has run yet: that is UNKNOWN, not zero, so fall back to the flat
     // limit exactly as the Tax tab's own hint does — and say so in the stats rather than implying
     // a cap we have not been told.
-    const iraCapKnown = currentRothIraMax();
+    // BUG-0039: prefer the cap computed for the BLENDED year when we have it. Falls back to the
+    // Tax tab's own figure — the year you are leaving — which is what jcIraBasisNote labels.
+    const iraCapBlended = jcBlendedIraCap(i);
+    const iraCapKnown = iraCapBlended != null ? iraCapBlended : currentRothIraMax();
     const iraCap = iraCapKnown == null ? LIMIT_ROTH_IRA : iraCapKnown;
     const fIraRaw = jcFeasibility({
       target: jcTarget(S('jc_t_ira_mode'), V('jc_t_ira'), iraCap, iraCap),
@@ -20265,6 +20530,85 @@ document.addEventListener('DOMContentLoaded', async () => {
   // screen is projecting — so the cap shown is an estimate, and it says so. After Apply the Tax
   // tab IS the blended year, the estimate becomes exact, and the note stops appearing.
   // (jcApply -> recompute() refreshes __taxResult, and jcRender re-runs off it.)
+  // ---- BUG-0039: the Roth IRA cap, answered for the BLENDED year ------------------------
+  //
+  // The phase-out is a function of MAGI and the SERVER owns that computation (D2) — but it only
+  // ever computed it for whatever payload the Tax tab currently holds, which BEFORE Apply is the
+  // year you are LEAVING. So the cap was wrong in both directions: old $60k + new $260k read as
+  // eligible when the blended year is phased out, and the reverse (Tax tab $260k, blended $107k)
+  // read "Backdoor only" when the blended year is fully eligible.
+  //
+  // The 0.7.1 hotfix stated the basis on screen instead, because `jcRender` runs on every
+  // keystroke and an async round trip in that path needs a debounce and a cache. That is what
+  // this is. NO CIRCULARITY: a Roth IRA contribution is not deductible, so it cannot move the
+  // MAGI that decides its own cap — the blended payload's `rothIra` is irrelevant to the answer,
+  // which is why the key below can be taken from the INPUTS rather than from the computed blend.
+  //
+  // Keyed on (inputs, Tax-tab payload) rather than on the request body: `blended` is a pure
+  // function of the inputs, so the two are equivalent — and the inputs are in scope inside
+  // jcCompute where the cap is READ, while the blend is not computed until 50 lines later.
+  let _jcIraCap = { key: null, cap: null, pending: null };
+  let _jcIraCapSeq = 0, _jcIraCapTimer = null;
+
+  function jcIraCapKey(i) {
+    try {
+      const bd = $('backdoorRoth');
+      return JSON.stringify([i, buildPayload(), !!(bd && bd.checked)]);
+    } catch (e) { return null; }
+  }
+
+  // Read side: synchronous, cache-only. Returns null when this exact shape has not been answered
+  // yet, so the caller falls back to the Tax tab's own figure exactly as before — a stale-but-
+  // labelled number, never a guessed one.
+  function jcBlendedIraCap(i) {
+    const k = jcIraCapKey(i);
+    return (k != null && k === _jcIraCap.key) ? _jcIraCap.cap : null;
+  }
+
+  // The round trip itself, with no debounce — so a CDP test can AWAIT the answer instead of
+  // sleeping past a timer and hoping. Mirrors refreshPhases' export for the same reason.
+  async function jcResolveIraCap(r) {
+    if (!r || !r.blended || !r.i) return null;
+    const key = jcIraCapKey(r.i);
+    if (key == null) return null;
+    const seq = ++_jcIraCapSeq;
+    let cap = null;
+    try {
+      const resp = await fetch('/api/calculate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({}, buildPayload(), r.blended)),
+      });
+      if (resp.ok) {
+        const d = await resp.json();
+        // `rothIraMax` ALREADY honours the backdoor toggle here, and re-applying it client-side
+        // would be re-deriving a limit the server owns (D2). `buildPayload()` carries
+        // `backdoorRoth` (:5797), and unlike `rothIraCapFromResult` — which reads a possibly
+        // one-cycle-stale `window.__taxResult` and therefore needs the toggle for INSTANT
+        // checkbox feedback — this response was computed from the flag as it stands right now.
+        //
+        // Established by mutation, not assumption: a mutant replacing the toggle-aware read with
+        // this one SURVIVED a test written specifically to distinguish them, because with the
+        // backdoor on the server returns rothIraMax === rothIraLimit. The branch was decorative.
+        cap = d && d.limits ? d.limits.rothIraMax : null;
+      }
+    } catch (e) { /* offline: UNKNOWN, never a guessed cap — plan §2 Attack 4 */ }
+    if (seq !== _jcIraCapSeq) return null;              // a newer edit already asked
+    _jcIraCap = { key: key, cap: cap, pending: null };
+    // Repaint with the real cap. Cannot loop: this render's key now MATCHES the cache, so
+    // jcRefreshIraCap returns before scheduling anything.
+    try { jcRender(); } catch (e) {}
+    return cap;
+  }
+
+  function jcRefreshIraCap(r) {
+    if (!r || !r.blended || !r.i) return;
+    const key = jcIraCapKey(r.i);
+    if (key == null || key === _jcIraCap.key || key === _jcIraCap.pending) return;
+    _jcIraCap.pending = key;
+    if (_jcIraCapTimer) clearTimeout(_jcIraCapTimer);
+    _jcIraCapTimer = setTimeout(() => { jcResolveIraCap(r); }, 400);
+  }
+
   // Detecting "the Tax tab already holds the blended year" is a plain synchronous comparison of
   // the eight fields Apply writes — deliberately NOT a second /api/calculate on the blended
   // payload, which would put an async round trip in a per-keystroke render path. See BUG-0039.
@@ -20278,6 +20622,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { return false; }
   }
   function jcIraBasisNote(r) {
+    // BUG-0039: once the cap has been resolved against the blended year the note is false, and a
+    // note that outlives its own condition is worse than none — it tells the reader the figure is
+    // provisional when it is the final one.
+    if (r && r.i && jcBlendedIraCap(r.i) != null) return '';
     return jcTaxTabHoldsBlended(r) ? ''
       : 'This is read from Your taxes as it stands now, not the blended year below — press Apply '
         + 'and it resolves against the year you will actually file.';
@@ -20559,6 +20907,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       jcSave();
       return;
     }
+
+    // BUG-0039: ask the server for the BLENDED year's Roth IRA cap. Debounced and cached inside,
+    // and a no-op once this exact shape has been answered — so calling it from the per-keystroke
+    // render path costs nothing after the first resolve.
+    jcRefreshIraCap(r);
 
     $('jc_elig_401k_out').textContent = r.i.elig401k ? '→ ' + jcHumanDate(r.i.elig401k)
       + ' · ' + r.p401k + ' paycheck' + (r.p401k === 1 ? '' : 's') + ' left' : '';
@@ -20921,19 +21274,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       esppSharesSold: 0, rsuSharesSold: 0,
     });
 
+    // THE STEADY-STATE COLUMN (TODO-259 follow-up, raised before 0.7.9 shipped and left open).
+    //
+    // Every column above is a CATCH-UP rate: a year of §402(g) room crammed into whatever paydays
+    // are left. In January the targets reset and the cheque jumps back up, so the last column —
+    // the one a reader naturally treats as "my new normal" — is the one figure on this table that
+    // is guaranteed NOT to be. That is the same mistake the table exists to prevent, moved to the
+    // other end of the year.
+    //
+    // The level rate is the full annual cap spread over a full year of paydays, keeping the same
+    // Trad/Roth split the plan already chose. `rothShare` is recovered from the computed targets
+    // rather than re-derived, so it cannot drift from what the columns above were priced on.
+    const newDef = r.newTrad + r.newRoth;
+    const rothShare = newDef > 0 ? r.newRoth / newDef : 0;
+    const levelDef = hasK ? LIMIT_401K : 0;
+    const levelRoth = levelDef * rothShare, levelTrad = levelDef - levelRoth;
+    const levelHsa = hasH ? currentHsaEmployeeRoom() : 0;
+    const last = phases[phases.length - 1];
+    // Only worth a column when it actually differs from the last stretch — somebody who started in
+    // January is already AT the level rate, and a duplicate column asserting a difference that is
+    // not there is worse than no column.
+    const lastPer = (last.k401 ? kTrad + kRoth : 0) + (last.hsa ? hsaPP : 0);
+    const levelPer = (levelDef + levelHsa) / perYear;
+    const wantSteady = (hasK || hasH) && Math.abs(lastPer - levelPer) >= 1;
+
     // Stretches with the same deductions price identically, so they are asked for once. With at
     // most three columns this saves at most one round trip — it is here because the alternative
     // is three requests that can disagree, not because it is fast.
     const keyOf = ph => (ph.k401 ? 'K' : '-') + (ph.hsa ? 'H' : '-');
     const wanted = [];
     phases.forEach(ph => { if (!wanted.some(w => w.key === keyOf(ph))) wanted.push({ key: keyOf(ph), ph }); });
+    // Keyed '=' so it can never collide with a real stretch's K/H key.
+    if (wantSteady) wanted.push({ key: '=', ph: null, steady: true });
 
     let priced;
     try {
       priced = await Promise.all(wanted.map(async w => {
+        const body = w.steady
+          ? Object.assign({}, base, {
+              salary: r.i.salary, spouseSalary: 0, bonus: 0, rothIra: 0, afterTax401k: 0,
+              trad401k: levelTrad, roth401k: levelRoth, hsa: levelHsa,
+              longTermGains: 0, shortTermGains: 0, qualifiedDividends: 0, ordinaryDividends: 0,
+              taxableInterest: 0, esppSharesSold: 0, rsuSharesSold: 0,
+            })
+          : bodyFor(w.ph);
         const resp = await fetch('/api/calculate', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyFor(w.ph)),
+          body: JSON.stringify(body),
         });
         if (!resp.ok) throw new Error('backend error: HTTP ' + resp.status);
         return { key: w.key, lines: jcPhaseLines(await resp.json()) };
@@ -20953,7 +21340,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     + 'with something this card did not recognise.');
       return;
     }
-    jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH);
+    jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH, wantSteady ? byKey['='] : null);
   }
 
   // Heal a cold start, the same way jcHealForwardFromStore does for the Budget banner. jcInit runs
@@ -20972,10 +21359,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     jcRefreshPhases();
   }
 
-  function jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH) {
+  function jcRenderPhases(r, phases, byKey, keyOf, hasK, hasH, steadyLines) {
     const host = $('jc_phases'); if (!host) return;
     const perYear = r.i.perYear;
     const cols = phases.map(ph => ({ ph, lines: byKey[keyOf(ph)] }));
+    // The level-rate column rides along in `cols` so every row reads positionally exactly as
+    // before, but it is NOT part of this year: it is excluded from the cash total and the payday
+    // count below, and its stretch cell says so rather than printing a figure that would make the
+    // caption's arithmetic stop adding up.
+    if (steadyLines) cols.push({ ph: null, lines: steadyLines, steady: true });
     // Every column is the same fixed row list in the same order — see jcPhaseLines — so the
     // labels come from the first column and the values are read positionally.
     const labels = cols[0].lines.map(l => l[0]);
@@ -20985,13 +21377,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Totalling the unrounded figures instead leaves a caption that is a dollar or two off the
     // row printed above it — small, invisible in testing, and precisely the kind of thing that
     // makes a reader stop trusting a table they were meant to be able to check by adding it up.
-    const stretchCash = cols.map((c, n) => Math.round(nets[n] * c.ph.paychecks));
-    const totalCash = stretchCash.reduce((s, v) => s + v, 0);
-    const totalPays = cols.reduce((s, c) => s + c.ph.paychecks, 0);
+    const stretchCash = cols.map((c, n) => (c.steady ? null : Math.round(nets[n] * c.ph.paychecks)));
+    const totalCash = stretchCash.reduce((s, v) => s + (v || 0), 0);
+    const totalPays = cols.reduce((s, c) => s + (c.steady ? 0 : c.ph.paychecks), 0);
 
     let h = '<div class="jc-ph-scroll"><table class="res-table jc-ph-table">'
           + '<thead><tr><th scope="col">Per paycheck</th>';
     cols.forEach(c => {
+      if (c.steady) {
+        h += '<th scope="col" class="num jc-ph-steady"><span class="jc-ph-name">At the level rate'
+           + '</span><span class="jc-ph-when">from January · every payday</span></th>';
+        return;
+      }
       h += '<th scope="col" class="num"><span class="jc-ph-name">'
          + jcEsc(jcPhaseLabel(c.ph, hasK, hasH)) + '</span><span class="jc-ph-when">'
          + jcEsc(jcShortDate(c.ph.from) + ' – ' + jcShortDate(c.ph.to)) + ' · '
@@ -21017,7 +21414,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                      + fmt$(Math.round(v)) + '</td>').join('')
        + '</tr>'
        + '<tr class="jc-ph-sum"><td>Cash from this stretch</td>'
-       + stretchCash.map(v => '<td class="num mono">' + fmt$(v) + '</td>').join('')
+       + stretchCash.map((v, n) => (v == null
+            // An em-dash, not a figure. The level-rate column is NEXT year; printing a number here
+            // would invite it into a total that describes this one.
+            ? '<td class="num mono jc-ph-steady" aria-label="not part of this year">—</td>'
+            : '<td class="num mono">' + fmt$(v) + '</td>')).join('')
        + '</tr></tbody></table></div>';
     host.innerHTML = h;
 
@@ -21036,7 +21437,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         + 'status, state, premiums — with the contributions this card is planning. A bonus is a '
         + 'separate cheque and a Roth IRA comes out of your bank, so neither is on it.'
         + (negative ? ' One stretch asks for more than the cheque holds: the plan does not fit '
-                    + 'payroll as it stands.' : '');
+                    + 'payroll as it stands.' : '')
+        // TODO-259 follow-up. Without this sentence the last column reads as the new normal, and it
+        // is the one column guaranteed not to be: it is a year of contribution room squeezed into
+        // the paydays that are left.
+        + (steadyLines
+            ? ' The last column is NOT part of that total. Every stretch above it is a catch-up '
+              + 'rate — a year of contribution room packed into the paydays left in ' + r.i.year
+              + ' — so in January it drops back to the level rate shown there, and the cheque goes '
+              + 'up. That is next year, which is why it has no dates and adds nothing to the '
+              + 'figures above.'
+            : '');
     }
   }
 
@@ -21181,7 +21592,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                          // Exported so a CDP test can await the priced table instead of sleeping
                          // and hoping the debounce has fired.
                          refreshPhases: jcRefreshPhases, phaseLabel: jcPhaseLabel,
-                         healPhases: jcHealPhases };
+                         healPhases: jcHealPhases,
+                         // BUG-0039: await the blended-year Roth IRA cap rather than sleeping
+                         // past its debounce. Returns the cap it resolved, or null.
+                         resolveIraCap: () => jcResolveIraCap(jcCompute()) };
 })();
 
 </script>

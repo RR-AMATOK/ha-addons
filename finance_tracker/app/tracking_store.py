@@ -61,6 +61,7 @@ _BACKUP_TABLES: tuple = (
     ("account",          ("id", "user_id", "name", "type", "is_liability", "currency", "archived", "created_at", "invest_group", "credit_limit_cents")),
     ("tag",              ("id", "user_id", "name", "created_at")),
     ("template",         ("id", "user_id", "name", "direction", "amount_cents", "bucket", "category", "account_id", "description", "created_at")),
+
     ("txn",              ("id", "user_id", "account_id", "posted_on", "direction", "amount_cents", "bucket", "category", "description", "is_transfer", "transfer_group", "source", "external_id", "partner_owed_cents", "status", "kind", "created_at")),
     ("txn_split",        ("id", "txn_id", "bucket", "category", "amount_cents")),
     ("txn_tag",          ("txn_id", "tag_id")),
@@ -107,6 +108,11 @@ _BACKUP_TABLES: tuple = (
     # target they carry was computed from assumptions that are gone. Lose the table and the
     # history is lost for good -- there is no recomputing it from the accounts.
     ("fire_progress",      ("id", "user_id", "on_date", "net_worth_cents", "fi_target_cents", "variant_key", "assumptions", "note", "created_at")),
+    # TODO-258. A learned preset is DERIVED and free to rebuild from history, but a CORRECTION
+    # is a user decision history cannot reproduce — restoring without it silently reinstates
+    # every mis-filing the user had already fixed. No children, so ordering is free; listed
+    # last because it was added last, and after the original nine so it restores OPTIONAL.
+    ("payee_preset",     ("id", "user_id", "dkey", "bucket", "category", "tags", "created_at", "updated_at")),
 )
 
 # Tables added AFTER the original 9 — absent in older backups, so restore treats them as empty
@@ -116,6 +122,9 @@ _BACKUP_OPTIONAL_TABLES = frozenset({
     "household_budget", "household_budget_share",
     "schedule", "schedule_exception", "schedule_txn",
     "fire_progress",
+    # TODO-258. Optional like every table added after the original nine: a backup taken before
+    # this existed simply has no key, and a restore must not reject it.
+    "payee_preset",
 })
 
 
@@ -602,6 +611,37 @@ CREATE TABLE IF NOT EXISTS schedule_txn (
   occurrence_on TEXT    NOT NULL,
   txn_id        INTEGER NOT NULL REFERENCES txn(id) ON DELETE CASCADE,
   PRIMARY KEY (schedule_id, occurrence_on)
+);
+
+
+-- NOTE ON PLACEMENT: this block sits at the END of SCHEMA deliberately. The S1.1 QA matrix
+-- simulates the historical v6/v7 device shapes by truncating this text at fixed markers and
+-- stripping `user_id`; a table declared earlier is therefore dealt into a schema that
+-- predates it, and its UNIQUE (user_id, ...) then references a column that was stripped.
+-- Every table added after the v8 migration belongs here for the same reason.
+-- TODO-258: a CORRECTION to what the app learned about a payee.
+--
+-- The presets themselves are not stored anywhere — `suggestions()` DERIVES them from txn history
+-- with a GROUP BY, taking the most-frequent (bucket, category) per description. That is why there
+-- was no way to fix one: there was nothing to edit. A single unusual entry (groceries bought on a
+-- trip, tagged both groceries AND travel) becomes the permanent default for that payee and quietly
+-- mis-files everything after it.
+--
+-- This table is an OVERRIDE layer, not a replacement: one row per payee key the user has corrected,
+-- winning over whatever the history says. Deleting the row restores the derived answer rather than
+-- erasing anything, so a correction is always reversible. Editing one changes FUTURE entries only —
+-- re-filing what is already logged is a separate, explicit action, because silently rewriting
+-- history is how a ledger stops matching the bank.
+CREATE TABLE IF NOT EXISTS payee_preset (
+  id         INTEGER PRIMARY KEY,
+  user_id    TEXT    NOT NULL DEFAULT '__owner__',
+  dkey       TEXT    NOT NULL,          -- LOWER(TRIM(description)) — the same key suggestions() uses
+  bucket     TEXT,
+  category   TEXT,
+  tags       TEXT    NOT NULL DEFAULT '[]',
+  created_at TEXT    NOT NULL,
+  updated_at TEXT    NOT NULL,
+  UNIQUE (user_id, dkey)
 );
 CREATE INDEX IF NOT EXISTS idx_schedtxn_txn ON schedule_txn(txn_id);
 """
@@ -3065,7 +3105,121 @@ def suggestions(conn, user_id) -> dict:
         payee_tags.setdefault(r["dkey"], []).append(r["tag"])
     for p in payees.values():
         p["tags"] = payee_tags.get(p["description"].strip().lower(), [])
+    # TODO-258: a user correction WINS over what the history says. Applied last and by key, so a
+    # corrected payee the user has not spent against since is still offered — the correction is the
+    # point, and waiting for another transaction before honouring it would be the original bug.
+    for r in conn.execute(
+        "SELECT dkey, bucket, category, tags FROM payee_preset WHERE user_id = ?", (user_id,)
+    ).fetchall():
+        key = r["dkey"]
+        try:
+            tags = json.loads(r["tags"] or "[]")
+        except Exception:
+            tags = []
+        cur = payees.get(key) or {"description": key, "count": 0, "last": None}
+        cur.update({"bucket": r["bucket"], "category": r["category"],
+                    "tags": tags if isinstance(tags, list) else [], "corrected": True})
+        payees[key] = cur
     return {"payees": list(payees.values()), "categoriesByBucket": cats}
+
+
+# ----- payee presets: CORRECTING what the app learned (TODO-258) -----
+#
+# The owner, 2026-08-25: "when entering the actuals, it auto remembers the combination of tags and
+# buckets, I want to be able to change those presets. Maybe we bought groceries on a trip and we
+# mark them as both groceries and travel."
+
+
+def _preset_key(description) -> str:
+    """The same key `suggestions()` groups on. One definition, so a correction cannot miss."""
+    return (description or "").strip().lower()
+
+
+def list_payee_presets(conn, user_id) -> list[dict]:
+    """Everything the composer will auto-fill — DERIVED and CORRECTED together.
+
+    Listing only the corrections would answer "what have I changed?", when the question the owner
+    actually asked is "what is it going to do?". A preset you have never touched is exactly the one
+    quietly mis-filing things, so it has to be visible to be fixable.
+    """
+    out = []
+    for p in suggestions(conn, user_id)["payees"]:
+        out.append({
+            "key": _preset_key(p.get("description")),
+            "description": p.get("description"),
+            "bucket": p.get("bucket"),
+            "category": p.get("category"),
+            "tags": p.get("tags") or [],
+            "count": p.get("count") or 0,
+            "last": p.get("last"),
+            "corrected": bool(p.get("corrected")),
+        })
+    # Most-used first: the preset that has mis-filed the most entries is the one worth finding.
+    out.sort(key=lambda r: (-(r["count"] or 0), r["key"]))
+    return out
+
+
+def put_payee_preset(conn, user_id, description, bucket=None, category=None, tags=None) -> dict:
+    """Correct a payee's preset. FUTURE ENTRIES ONLY — see refile_payee for the past."""
+    key = _preset_key(description)
+    if not key:
+        raise ValueError("a preset needs a payee to be about")
+    tag_list = [str(t).strip() for t in (tags or []) if str(t).strip()]
+    now = _now()
+    conn.execute(
+        "INSERT INTO payee_preset (user_id, dkey, bucket, category, tags, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(user_id, dkey) DO UPDATE SET "
+        "  bucket = excluded.bucket, category = excluded.category, "
+        "  tags = excluded.tags, updated_at = excluded.updated_at",
+        (user_id, key, bucket or None, category or None, json.dumps(tag_list), now, now))
+    conn.commit()
+    return {"key": key, "bucket": bucket or None, "category": category or None,
+            "tags": tag_list, "corrected": True}
+
+
+def delete_payee_preset(conn, user_id, key) -> bool:
+    """Drop a correction. This RESTORES the derived answer rather than erasing the preset — there
+    is nothing to erase, since the derived one is computed from history every time."""
+    cur = conn.execute("DELETE FROM payee_preset WHERE user_id = ? AND dkey = ?",
+                       (user_id, _preset_key(key)))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def count_payee_txns(conn, user_id, key) -> int:
+    """How many logged entries a correction WOULD re-file. Asked before doing it, so the offer can
+    name a number instead of asking the user to authorise an unknown amount of rewriting."""
+    r = conn.execute(
+        "SELECT COUNT(*) AS n FROM txn "
+        "WHERE user_id = ? AND LOWER(TRIM(description)) = ?", (user_id, _preset_key(key))
+    ).fetchone()
+    return int(r["n"] or 0)
+
+
+def refile_payee(conn, user_id, key, bucket=None, category=None, tags=None) -> dict:
+    """Apply a correction to what is ALREADY logged.
+
+    DELIBERATELY SEPARATE from put_payee_preset, and never implied by it. Editing a preset changes
+    what happens next; this rewrites entries the user has already reconciled against a bank
+    statement, and the two are not the same promise. Split legs are left alone: a split's bucket is
+    a per-leg decision the payee preset never made, so overwriting it here would destroy a
+    distinction the user drew by hand.
+    """
+    k = _preset_key(key)
+    tag_list = [str(t).strip() for t in (tags or []) if str(t).strip()]
+    rows = conn.execute(
+        "SELECT t.id FROM txn t WHERE t.user_id = ? AND LOWER(TRIM(t.description)) = ? "
+        "  AND NOT EXISTS (SELECT 1 FROM txn_split s WHERE s.txn_id = t.id)", (user_id, k)
+    ).fetchall()
+    ids = [r["id"] for r in rows]
+    skipped = count_payee_txns(conn, user_id, k) - len(ids)
+    for tid in ids:
+        conn.execute("UPDATE txn SET bucket = ?, category = ? WHERE id = ? AND user_id = ?",
+                     (bucket or None, category or None, tid, user_id))
+        _set_txn_tags(conn, user_id, tid, tag_list)
+    conn.commit()
+    return {"refiled": len(ids), "skippedSplits": skipped}
 
 
 # ----- recurring templates (pre-fill only; never auto-create) -----

@@ -1806,6 +1806,67 @@ def suggest_endpoint(request: Request = None) -> dict:
         return tracking_store.suggestions(c, scope)
 
 
+# ----- payee presets: correcting what the app learned (TODO-258) -----
+#
+# The presets are DERIVED, not stored — see tracking_store.suggestions(). These routes expose the
+# override layer that lets a user correct one, plus the separate, explicit re-file of what is
+# already logged.
+
+
+class PayeePresetModel(BaseModel):
+    description: str
+    bucket: str | None = None
+    category: str | None = None
+    tags: list[str] = []
+
+
+@app.get("/api/tracking/payee-presets")
+def list_payee_presets_endpoint(request: Request = None) -> dict:
+    """Everything the composer will auto-fill — derived AND corrected. Listing only corrections
+    would answer "what have I changed?"; the question asked is "what is it going to do?"."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return {"presets": tracking_store.list_payee_presets(c, scope)}
+
+
+@app.put("/api/tracking/payee-presets")
+def put_payee_preset_endpoint(m: PayeePresetModel, request: Request = None) -> dict:
+    """Correct a preset. FUTURE ENTRIES ONLY — the past is /refile, deliberately separate."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        try:
+            saved = tracking_store.put_payee_preset(
+                c, scope, m.description, bucket=m.bucket, category=m.category, tags=m.tags)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        # The count rides along so the client can OFFER the re-file with a number in it rather
+        # than asking the user to authorise an unknown amount of rewriting.
+        saved["loggedCount"] = tracking_store.count_payee_txns(c, scope, m.description)
+        return saved
+
+
+@app.delete("/api/tracking/payee-presets/{key:path}")
+def delete_payee_preset_endpoint(key: str, request: Request = None) -> dict:
+    """Drop a correction, restoring what the history says. Never 404s on a key with no override:
+    "there is no correction for this payee" is the state the caller asked for."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        removed = tracking_store.delete_payee_preset(c, scope, key)
+        reverted = next((p for p in tracking_store.list_payee_presets(c, scope)
+                         if p["key"] == tracking_store._preset_key(key)), None)
+    return {"removed": removed, "revertedTo": reverted}
+
+
+@app.post("/api/tracking/payee-presets/refile")
+def refile_payee_endpoint(m: PayeePresetModel, request: Request = None) -> dict:
+    """Apply a correction to what is ALREADY logged. Never implied by the PUT above: that changes
+    what happens next, this rewrites entries already reconciled against a bank statement."""
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return tracking_store.refile_payee(
+            c, scope, m.description, bucket=m.bucket, category=m.category, tags=m.tags)
+
+
 # ----- recurring templates (pre-fill only) -----
 
 class TemplateModel(BaseModel):
