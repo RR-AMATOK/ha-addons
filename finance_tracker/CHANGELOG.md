@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.13
+
+The What-If menu works on a phone, and an edit made at the wrong moment is no longer lost.
+
+**The What-If menu on a phone**
+
+- It was being drawn at the width of the button that opens it — about 98 pixels on a phone. Every
+  heading wrapped onto three lines, and the **delete** control on each saved what-if was pushed
+  out of the row entirely. It had always been there; there was no room to show it.
+- It is now a full-width sheet at the bottom of the screen, where your thumb is. Each saved
+  what-if shows **Open**, **Rename** and **✕** to delete it, all large enough to hit, and the list
+  scrolls inside the sheet however many you have.
+
+**Fixed: an edit made while the app was updating from your other device could be lost**
+
+- When your plan arrives from another device the app repaints the screen with it. Anything you
+  changed during that half-second was treated as part of the repaint rather than as your edit, so
+  it was never saved and never reached your other devices — silently, and it did not come back on
+  a reload.
+- Your edit is now kept and applied once the repaint finishes. It is newer than what arrived, so
+  it wins.
+
+**Also in this release, for anyone updating from 0.7.11**
+
+- The "Moving to server-backed storage" message no longer appears for household members at all —
+  it offered a safety copy they had no way to restore, and closing it quietly stopped that device
+  syncing. If you are the owner and you close it, the app now tells you the device is not syncing
+  and gives you a button to start.
+- The Roth IRA limit on the Job change card is worked out for the blended year you are moving to,
+  not the one you are leaving. It could previously refuse you a contribution you were entitled to
+  until you pressed Apply.
+- Correct what the app remembers about a payee; see your investments broken into their parts; and
+  a "from January" column on the job-change paycheck table so the catch-up rate is not mistaken
+  for your new normal.
+
 ## 0.7.12
 
 Correct what the app learned about a payee, see what your investments are made of, and a

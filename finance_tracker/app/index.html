@@ -1914,7 +1914,35 @@
     .filter-opt, .filter-search { min-height: 44px; box-sizing: border-box; }
     .ac-filterbar .ac-tag.is-active { min-height: 44px; display: inline-flex; align-items: center; padding-block: 12px; }
     .filter-popup { left: 0; right: 0; width: auto; }
-    .wi-popup { left: 0; right: 0; width: auto; }
+    /* The rule this replaces read `left: 0; right: 0; width: auto` — it promised full width and
+       delivered the TRIGGER's. `.backup-popup` is position:absolute, and its containing block is
+       `.wi-picker-split`, an inline-flex wrapper around the What-If button rather than the page.
+       MEASURED at a 390px viewport: the panel came out 98px wide. Everything inside then wrapped —
+       the heading onto three lines — and the saved-row's DELETE control was pushed out of sight,
+       which the owner reported as "I have no way of deleting the what Ifs" when the button had
+       been there and wired the whole time.
+
+       `position: fixed` takes the VIEWPORT as the containing block, which is what the original
+       rule meant. A SHEET rather than a dropdown because of the use scene: this is the tallest
+       menu in the header, on a phone, held one-handed inside the Home Assistant app — anchoring a
+       scrolling list to the trigger puts every control at the top of the screen, furthest from the
+       thumb. */
+    .wi-popup {
+      position: fixed; top: auto;
+      left: var(--space-2); right: var(--space-2); bottom: var(--space-2);
+      width: auto; max-height: 72vh; overflow-y: auto;
+      border-radius: 14px;
+    }
+    /* The row's three controls (Open / Rename / ✕) wrap rather than truncate, and every one of
+       them clears the 44px tap floor — the delete is the smallest and the most destructive. */
+    .wi-popup .sc-actions { flex-wrap: wrap; gap: var(--space-2); }
+    .wi-popup .seed-btn { min-height: 44px; }
+    /* 44 on BOTH axes for the destructive one. It measured 34 wide after the sheet fix —
+       over the WCAG 2.5.8 floor of 24, under the 44 this file uses everywhere else on a
+       phone, and it is the control that deletes somebody's saved scenario. */
+    .wi-popup .bgb-x { min-height: 44px; min-width: 44px; }
+    .wi-popup .sc-row { row-gap: var(--space-1); }
+    .wi-popup input[type="text"] { min-height: 44px; }
     /* Manage panel (docs/manage-panel-redesign.md §6) — additive, presentation-only. */
     .mng-row { column-gap: var(--space-2); }          /* actions stay right-anchored, name ellipsizes */
     .mng-main { row-gap: var(--space-1); }             /* countsAs / type meta wraps under the name    */
@@ -2157,6 +2185,18 @@
   <span class="wi-banner-label">Your saved data arrived from another device and replaced what you had just entered on this one. Nothing you typed here was sent to the server — re-enter it if you still need it.</span>
   <span class="wi-banner-actions">
     <button type="button" id="profile_hydrate_displaced_dismiss_btn">Dismiss</button>
+  </span>
+</div>
+
+<!-- BUG-0071: declining the pre-migration offer stops this device syncing. That was SILENT, and
+     silence is what let two of the owner's partner's devices sit on different budgets for days
+     while the app looked fine on both. A toast would not do: the state persists across reloads
+     until the offer is accepted, so the notice has to persist with it. -->
+<div id="profile_migration_declined_banner" class="wi-banner profile-displacement-banner" hidden role="status" aria-live="polite">
+  <span class="wi-banner-icon" aria-hidden="true">&#9888;</span>
+  <span class="wi-banner-label">This device is not syncing. Your plan is being saved here only, so it will not reach your other devices &mdash; and changes made there will not reach this one.</span>
+  <span class="wi-banner-actions">
+    <button type="button" id="profile_migration_resume_btn">Start syncing</button>
   </span>
 </div>
 
@@ -7040,8 +7080,29 @@ try {
     document.addEventListener(type, noteIntent, { capture: true, passive: true }));
 } catch (e) {}
 
+// BUG-0011: `WhatIf.suppress` carries two meanings and cannot tell them apart — "What-If Mode owns
+// storage right now" and "this particular write is my own repaint, ignore it". A user edit landing
+// inside `repaintAfterHydrate`'s window was indistinguishable from the repaint, so its mark was
+// swallowed and the edit never flushed. Silent, and it survives a reload.
+//
+// THE REPAINT CANNOT BE THE CALLER HERE, which is what makes this safe rather than a heuristic:
+// `persist()`'s first line is `if (WhatIf.suppress) return` (:4668) — it returns BEFORE reaching
+// its own `markProfileDirty()` (:4689). So every mark that arrives during the repaint window came
+// from somewhere else, i.e. from a real concurrent edit. Deferring and re-applying it is therefore
+// not a guess about intent; it is the only correct reading.
+//
+// Scoped deliberately to the repaint window. The other `WhatIf.suppress` users (wiExitDiscardCore /
+// wiExitKeep / wiResume) wrap their own repopulate+recompute pairs with different invariants, and
+// BUG-0011's repro is this window; widening the change would be reasoning past the evidence.
+let __repaintSuppress = false;
+let __repaintDeferredDirty = false;
 function markProfileDirty() {
-  if (WhatIf.active || WhatIf.suppress) return;
+  // A what-if must never dirty the real profile — unchanged, and NOT deferred.
+  if (WhatIf.active) return;
+  if (WhatIf.suppress) {
+    if (__repaintSuppress) __repaintDeferredDirty = true;
+    return;
+  }
   // Attribute THIS mark before anything else can move: a mark that follows a real interaction
   // inside the window is a user edit; a mark with no interaction behind it is the app saving its
   // own repaint. Latched, never cleared — one genuine edit makes the whole session's local state
@@ -7371,12 +7432,18 @@ async function repaintAfterHydrate() {
   // decision table. reloadStateFromStorage() above deliberately runs OUTSIDE this window — it
   // never calls persist()/save() (bgbNormalize() is pure), so it needs no suppression.
   WhatIf.suppress = true;
+  __repaintSuppress = true;                     // BUG-0011: which KIND of suppression this is
   try {
     if (typeof window.paintFromState === 'function') window.paintFromState();
     await recompute();
   } catch (e) {
   } finally {
     WhatIf.suppress = false;
+    __repaintSuppress = false;
+    // BUG-0011: an edit that landed while the repaint held the flag was swallowed. Re-apply it now
+    // that the window is closed — after doHydrate's `dirty:false`, which is the point: the edit is
+    // newer than the hydrate and has to survive it.
+    if (__repaintDeferredDirty) { __repaintDeferredDirty = false; markProfileDirty(); }
   }
 }
 
@@ -7466,6 +7533,20 @@ function showProfileHydrateDisplacedBanner() {
 }
 function dismissProfileHydrateDisplacedBanner() {
   const el = $('profile_hydrate_displaced_banner');
+  if (el) el.hidden = true;
+}
+// BUG-0071. Deliberately NOT dismissible: the two banners above report something that ALREADY
+// happened and is over, so dismissing them loses nothing. This one reports a state that is still
+// true — this device is not syncing, and will not until the offer is accepted. A Dismiss button
+// would let the user turn off the only indication that anything is wrong, which is the defect
+// this banner exists to close, not a feature of it. It clears when sync actually starts.
+function showProfileMigrationDeclinedBanner() {
+  const el = $('profile_migration_declined_banner');
+  if (el) el.hidden = false;
+  try { window.__profileSync.lastMigrationDeclined = { at: new Date().toISOString() }; } catch (e) {}
+}
+function hideProfileMigrationDeclinedBanner() {
+  const el = $('profile_migration_declined_banner');
   if (el) el.hidden = true;
 }
 
@@ -7574,16 +7655,27 @@ async function downloadPreMigrationSnapshotFile(scopeId) {
 // (§5.2) still gates the first flush unconditionally either way.
 async function runPreMigrationSnapshotImpl(scopeId) {
   if (WhatIf.active || WhatIf.suppress) return false;
+  // BUG-0071: a MEMBER is not offered this at all. The dialog's whole value is the safety copy,
+  // and a member has no Backup/Restore surface to put one back with (established while diagnosing
+  // BUG-0068 — the owner: "she does not have access to the backup / restore"). So it asked them to
+  // weigh a choice they cannot act on, and the least-committal answer silently stopped their
+  // device syncing. The server-side `.pre-profile-migration.bak` snapshot (§5.2) still gates the
+  // first flush unconditionally, so nothing protective is skipped by skipping the offer.
+  if (window.__role === 'member') { setProfileMeta({ snapshotDone: true }); return true; }
   const choice = await showPreMigrationDialog();
   if (WhatIf.active || WhatIf.suppress) return false;   // re-check across the (arbitrarily long) await
-  if (choice === 'cancel') return false;
+  if (choice === 'cancel') { showProfileMigrationDeclinedBanner(); return false; }
   if (choice === 'download') {
     const downloaded = await downloadPreMigrationSnapshotFile(scopeId);
     if (WhatIf.active || WhatIf.suppress) return false;
-    if (!downloaded) return false;   // download failed to trigger — do not silently proceed as if
-                                      // the user got their copy; abort, retry next boot (§5.1)
+    if (!downloaded) { showProfileMigrationDeclinedBanner(); return false; }
+                                     // download failed to trigger — do not silently proceed as if
+                                     // the user got their copy; abort, retry next boot (§5.1), and
+                                     // SAY SO: this path stops the device syncing exactly as a
+                                     // cancel does, and used to be just as quiet about it.
   }
   setProfileMeta({ snapshotDone: true });
+  hideProfileMigrationDeclinedBanner();   // the offer was accepted; sync is starting
   return true;
 }
 
@@ -8616,6 +8708,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (b) b.onclick = dismissProfileDisplacementBanner; }
   { const b = document.getElementById('profile_hydrate_displaced_dismiss_btn');
     if (b) b.onclick = dismissProfileHydrateDisplacedBanner; }
+
+  // BUG-0071: the way BACK. Declining left the device stranded until the next boot re-offered the
+  // dialog — and since nothing said the device had stopped syncing, there was no reason to reboot
+  // it. This re-runs the engine immediately: the offer comes round again, and accepting it hydrates
+  // on the spot. `__profileMigrationPending` is cleared first because runProfileSyncEngine's own
+  // reset happens on entry and profileFlushExecutor checks the flag independently.
+  { const b = document.getElementById('profile_migration_resume_btn');
+    if (b) b.onclick = async () => {
+      window.__profileMigrationPending = false;
+      hideProfileMigrationDeclinedBanner();
+      try { await foregroundResyncAction(true); } catch (e) {}
+    }; }
 
   // Boot suppression window (M2): every restore write above + this first settling recompute
   // are suppressed (persist() no-ops) so boot never redundantly rewrites storage before the
