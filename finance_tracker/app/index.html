@@ -2676,6 +2676,53 @@
       </div>
     </section>
 
+    <!-- Other voluntary elections (owner ask 2026-08-30: "let's do legal ... but have a bucket
+         for other as a whole"). Each row carries its own TREATMENT because the tax effect is not
+         derivable from the name — and getting that wrong is the BUG-0067 class, where a limit was
+         sized against the wrong base and the error was invisible on screen.
+
+         Legal defaults to POST-TAX, which corrects the ask rather than transcribing it: the §120
+         group-legal-services exclusion was repealed in 1992 and a legal plan is not a qualified
+         §125 benefit. The selector is there so a plan that genuinely runs through a cafeteria plan
+         can say so. -->
+    <section class="card" id="tax_other_elections_card">
+      <h2>Other voluntary elections</h2>
+      <p class="mini muted" style="margin:-4px 0 10px">Anything else coming out of your paycheck.
+        Pick how each one is taxed — that is the only thing the maths needs, and it is not something
+        the app can infer from the name.</p>
+      <div class="row">
+        <label>Legal plan <span class="hint">(usually post-tax)</span></label>
+        <span class="input-cluster">
+          <span class="input-pair"><input id="otherLegal" type="text" inputmode="decimal" data-fmt="usd" min="0" step="25" value="0" /><span class="unit" data-toggle="otherLegal">$</span><span class="unit cad" data-cad-toggle="otherLegal" title="Click to cycle /yr → /mo → /pay">/yr</span></span>
+          <span class="cad-hint" data-hint="otherLegal"></span>
+        </span>
+      </div>
+      <div class="row">
+        <label class="mini">How it is taxed</label>
+        <select id="otherLegalTreat" aria-label="Tax treatment of the legal plan">
+          <option value="post" selected>Post-tax — no tax saving</option>
+          <option value="s125">Pre-tax §125 — saves federal and FICA</option>
+          <option value="defer">Pre-tax deferral — saves federal only</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Other elections <span class="hint">(everything else, as one figure)</span></label>
+        <span class="input-cluster">
+          <span class="input-pair"><input id="otherMisc" type="text" inputmode="decimal" data-fmt="usd" min="0" step="25" value="0" /><span class="unit" data-toggle="otherMisc">$</span><span class="unit cad" data-cad-toggle="otherMisc" title="Click to cycle /yr → /mo → /pay">/yr</span></span>
+          <span class="cad-hint" data-hint="otherMisc"></span>
+        </span>
+      </div>
+      <div class="row">
+        <label class="mini">How they are taxed</label>
+        <select id="otherMiscTreat" aria-label="Tax treatment of the other elections">
+          <option value="post" selected>Post-tax — no tax saving</option>
+          <option value="s125">Pre-tax §125 — saves federal and FICA</option>
+          <option value="defer">Pre-tax deferral — saves federal only</option>
+        </select>
+      </div>
+      <p class="mini muted" id="other_elections_note" style="margin:6px 0 0"></p>
+    </section>
+
     <!-- Taxable additions (non-cash) -->
     <section class="card" id="tax_additions_card">
       <h2>Taxable additions (non-cash)</h2>
@@ -4902,6 +4949,8 @@ const fieldCadence = {              // per-field cadence: 'annual' | 'monthly' |
   hsa:         'annual',
   employerHsa: 'annual',
   eeStock:     'annual',
+  otherLegal:  'annual',
+  otherMisc:   'annual',
   erStock:     'annual',
   gtli:        'annual',
   medical:     'annual',
@@ -5365,7 +5414,7 @@ window.__clientMath = { isoLocalDate, rn, fmtUSDval, fmtUSD2val, resolveAnnual, 
   jcHsaEligibleMonths, jcHsaLimit, jcFeasibility, jcExcessSocialSecurity,
   jcMatchForgone, jcBlendedYear, jcMonthsBetween, jcIraMonthsLeft,
   jcPaydaysRemaining, jcPaydaySlots, jcRollToPayday, jcFederalHolidays, jcScheduleAnchor,
-  jcPayPhases };
+  jcPayPhases, otherElectionBucketsFrom };
 // acUtilBand/acLiabForceFor/acAcctMetaHtml/ACT are NOT listed above -- they live inside a LATER,
 // separate top-level IIFE (the Actuals-tab boot block), not this one, so referencing them here
 // would throw a ReferenceError at this statement and silently prevent window.__clientMath from
@@ -5800,6 +5849,33 @@ function readBrackets(containerId, prefix) {
 }
 
 // ---------- Backend ----------
+// Map the two "other voluntary elections" rows onto the three engine buckets. PURE and exported
+// for client-math: this mapping IS the feature — the amounts are trivial, the treatment is the
+// whole decision, and a browser is not needed to pin it.
+//
+// Keyed on TREATMENT rather than on the row's name so a third row (a health FSA, a commuter
+// benefit) is a markup change and nothing else. Two rows sharing a treatment simply add.
+function otherElectionBucketsFrom(rows) {
+  const out = { otherPreTaxFicaExempt: 0, otherPreTax: 0, otherPostTax: 0 };
+  (rows || []).forEach(r => {
+    const amt = +r.amount || 0;
+    if (amt <= 0) return;
+    // An unrecognised treatment falls to POST-TAX on purpose: it is the only option that claims no
+    // tax saving, so a typo or a future value can never invent a deduction.
+    if (r.treatment === 's125') out.otherPreTaxFicaExempt += amt;
+    else if (r.treatment === 'defer') out.otherPreTax += amt;
+    else out.otherPostTax += amt;
+  });
+  return out;
+}
+function otherElectionBuckets() {
+  const t = id => { const e = $(id); return e ? e.value : 'post'; };
+  return otherElectionBucketsFrom([
+    { amount: resolveAnnual('otherLegal'), treatment: t('otherLegalTreat') },
+    { amount: resolveAnnual('otherMisc'),  treatment: t('otherMiscTreat') },
+  ]);
+}
+
 function buildPayload() {
   const stateChip = document.querySelector('#stateChips .chip.active');
   const V = id => { const e = $(id); return e ? rn(e.value) : 0; };
@@ -5816,6 +5892,11 @@ function buildPayload() {
     employerHsa: resolveAnnual('employerHsa'),
     hsaCoverage: hsaCoverage,
     eeStock: resolveAnnual('eeStock'),
+    // The two rows are summed INTO their chosen treatment rather than sent as named lines: the
+    // engine is keyed on how money is taxed, not on what it is called, so a third row later needs
+    // no schema change. `otherElectionBuckets` is exported for client-math — the mapping is the
+    // whole feature and deserves to be pinned without a browser.
+    ...otherElectionBuckets(),
     erStock: resolveAnnual('erStock'),
     gtli: resolveAnnual('gtli'),
     medical: resolveAnnual('medical'),
@@ -15227,7 +15308,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<div class="sc-row">'
         + '<span class="sc-badge">Parked</span>'
         + '<span class="sc-meta">' + esc(wiRelTime(parked.updatedAt)) + '</span>'
-        + '<span class="sc-actions"><button type="button" class="seed-btn" data-wiparkresume="' + parked.id + '">Resume</button></span>'
+        // BUG-0073: Resume was the ONLY action here, so a parked what-if could not be got rid of
+        // — the only route was to Resume it and then exit-discard, i.e. to enter the very mode you
+        // were trying to abandon. Its own control rather than the saved rows' `data-widel`,
+        // because the confirm has to say something different: a parked session holds changes that
+        // exist nowhere else.
+        + '<span class="sc-actions">'
+          + '<button type="button" class="seed-btn" data-wiparkresume="' + parked.id + '">Resume</button>'
+          + '<button type="button" class="bgb-x" data-wiparkdel="' + parked.id + '"'
+            + ' title="Discard this parked what-if" aria-label="Discard the parked what-if">&#10005;</button>'
+        + '</span>'
       + '</div></div>'
     );
     const saved = rows.filter(r => r.name !== WI_PARKED_NAME)
@@ -15369,6 +15459,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }); }
   { const popup = $('wi_picker_popup'); if (popup) popup.addEventListener('click', async e => {
       const pr = e.target.closest('[data-wiparkresume]'); if (pr) { wiPickerClose(); await wiPickerResumeParked(+pr.dataset.wiparkresume); return; }
+      // BUG-0073. Its own confirm copy, not the saved-draft one: a saved what-if is a thing you
+      // deliberately kept and can rebuild from its name; a parked session is work in progress that
+      // exists in exactly one place, so the sentence has to say so before it goes.
+      { const pd = e.target.closest('[data-wiparkdel]');
+        if (pd) {
+          if (!confirm('Discard the parked what-if? The changes in it are not saved anywhere else.')) return;
+          try { await scSend('DELETE', '/api/tracking/scenarios/' + pd.dataset.wiparkdel); await wiRefreshDraftsList(); }
+          catch (err) { showToast('Could not discard it: ' + (err.message || '')); }
+          return;
+        } }
       const ld = e.target.closest('[data-wiload]'); if (ld) { wiPickerClose(); wiLoadDraftIntoMode(+ld.dataset.wiload); return; }
       const rv = e.target.closest('[data-wirev]'); if (rv) { wiPickerClose(); scRevert(+rv.dataset.wirev); return; }
       const rb = e.target.closest('[data-wirenamebtn]');

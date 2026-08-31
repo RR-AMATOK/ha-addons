@@ -336,6 +336,13 @@ class InputModel(BaseModel):
     medical: float = 0
     dental: float = 0
     vision: float = 0
+    # Other voluntary elections (owner ask 2026-08-30). Named by TREATMENT, not by benefit: the
+    # engine only needs to know which wage bases an election reduces, so a future FSA or commuter
+    # line is a client change rather than a schema one. See calculator.Inputs for the three
+    # treatments and why a legal plan defaults to post-tax.
+    other_pre_tax_fica_exempt: float = Field(0, alias="otherPreTaxFicaExempt")
+    other_pre_tax: float = Field(0, alias="otherPreTax")
+    other_post_tax: float = Field(0, alias="otherPostTax")
     # Post-tax
     roth_401k: float = Field(0, alias="roth401k")
     ee_stock: float = Field(0, alias="eeStock")
@@ -1304,6 +1311,9 @@ def calculate_endpoint(inp: InputModel) -> dict:
         dental=inp.dental,
         vision=inp.vision,
         ee_stock=inp.ee_stock,
+        other_pre_tax_fica_exempt=inp.other_pre_tax_fica_exempt,
+        other_pre_tax=inp.other_pre_tax,
+        other_post_tax=inp.other_post_tax,
         roth_ira=inp.roth_ira,
         er_stock=inp.er_stock,
         gtli=inp.gtli,

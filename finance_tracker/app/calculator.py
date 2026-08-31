@@ -87,6 +87,27 @@ class Inputs:
     dental: float = 0.0            # Dental insurance premium (§125, annual)
     vision: float = 0.0            # Vision insurance premium (§125, annual)
 
+    # OTHER VOLUNTARY ELECTIONS (owner ask, 2026-08-30: "let's do legal ... but have a bucket for
+    # other as a whole"). Three fields rather than one because the ONLY thing that matters to the
+    # maths is which wage bases an election reduces, and that is not derivable from its name:
+    #
+    #   other_pre_tax_fica_exempt  §125-style — reduces federal AND FICA wages, like medical/
+    #                              dental/vision. Health FSA and dependent-care FSA belong here.
+    #   other_pre_tax              deferral-style — reduces federal wages ONLY; FICA is still
+    #                              owed, exactly as it is on trad_401k. 457(b)/403(b) belong here.
+    #   other_post_tax             no tax effect at all; reduces take-home only. THIS IS THE
+    #                              DEFAULT FOR A LEGAL PLAN: the §120 group-legal-services
+    #                              exclusion was repealed in 1992 and legal is not a qualified
+    #                              §125 benefit, so treating it pre-tax would overstate the
+    #                              deduction and understate the tax.
+    #
+    # Naming an election in the engine was deliberately avoided: the client decides what to call
+    # each row, the engine only needs to know how it is taxed. That keeps a future FSA or commuter
+    # line a UI change rather than an engine change.
+    other_pre_tax_fica_exempt: float = 0.0
+    other_pre_tax: float = 0.0
+    other_post_tax: float = 0.0
+
     # Post-tax payroll deductions (reduce cash, no tax benefit)
     roth_401k: float = 0.0
     ee_stock: float = 0.0          # ESPP contribution
@@ -270,7 +291,11 @@ def calculate(i: Inputs) -> dict:
     taxable_additions = i.er_stock + i.gtli
 
     # §125 medical/dental/vision premiums: reduce all three wage bases.
-    mdv = i.medical + i.dental + i.vision
+    # `other_pre_tax_fica_exempt` joins mdv rather than being tracked separately: it is the SAME
+    # treatment (§125 — federal, FICA and state wages all reduced), and giving one treatment two
+    # code paths is how they drift apart. Every wage base below that already subtracts `mdv` now
+    # subtracts this too, for free and without a second place to get it wrong.
+    mdv = i.medical + i.dental + i.vision + i.other_pre_tax_fica_exempt
 
     # Second-earner (spouse) wage, clamped ONCE here and reused everywhere it flows
     # below (fed_wages, state_wages, fica_wages_spouse, take_home, total_comp,
@@ -380,8 +405,11 @@ def calculate(i: Inputs) -> dict:
     # because it's unreachable in the failure direction — it is the right model even
     # when reachable, because it doesn't assume the deduction belongs to whichever
     # earner is in the "primary" box.
-    fed_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k - i.hsa - mdv)
-    state_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k + i.employer_hsa - mdv)
+    # `other_pre_tax` sits beside trad_401k in every base, and that placement IS its definition:
+    # federal and state wages come down, FICA does not (see fica_wages_primary below, which
+    # subtracts hsa and mdv but deliberately not trad_401k — and now not this either).
+    fed_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k - i.other_pre_tax - i.hsa - mdv)
+    state_wages = max(0.0, i.salary + spouse + taxable_additions - i.trad_401k - i.other_pre_tax + i.employer_hsa - mdv)
 
     # FICA wage bases (TODO-247): Social Security is capped PER PERSON, so it (and the
     # other per-person payroll items below — CA SDI, WA PFML, WA Cares) must be computed
@@ -470,8 +498,10 @@ def calculate(i: Inputs) -> dict:
     # Cash flow: ER stock and GTLI are non-cash → they add to tax but not to take-home
     # MDV premiums are a cash pre-tax deduction (like trad_401k / hsa).
     # after_tax_401k is a post-tax payroll deduction (no tax benefit, but reduces take-home).
-    cash_pre_tax = i.trad_401k + i.hsa + mdv
-    cash_post_tax = i.roth_401k + i.ee_stock + i.roth_ira + i.after_tax_401k
+    # `mdv` already carries other_pre_tax_fica_exempt (see above), so only the Fed-only bucket
+    # needs adding here — the §125 one would be double-counted if it were listed again.
+    cash_pre_tax = i.trad_401k + i.other_pre_tax + i.hsa + mdv
+    cash_post_tax = i.roth_401k + i.ee_stock + i.roth_ira + i.after_tax_401k + i.other_post_tax
     # take_home is a HOUSEHOLD aggregate (TODO-247): the spouse's cash wage (clamped
     # `spouse`, above) flows straight through (no per-earner deduction to net against
     # it, by locked scope).

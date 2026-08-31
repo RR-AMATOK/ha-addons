@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.14
+
+Everything else that comes out of your paycheck, and a parked what-if you can throw away.
+
+**Other voluntary elections**
+
+- A new card on the Tax tab for the deductions that did not have a home: a **legal plan**, and an
+  **other** line for everything else as one figure.
+- Each one asks how it is taxed, because that is the only thing the sums need and it is not
+  something the app can work out from a name:
+  - **Post-tax** — no tax saving. This is the default, and it is the right one for a legal plan:
+    the exclusion that would have made it pre-tax was repealed in 1992, so treating it otherwise
+    would show you a saving you do not get.
+  - **Pre-tax §125** — comes off federal *and* Social Security/Medicare wages, like your medical
+    and dental premiums.
+  - **Pre-tax deferral** — comes off federal wages only; Social Security and Medicare are still
+    owed, exactly as they are on your 401(k).
+- On $1,200 a year those three answers differ by real money, which is why it asks rather than
+  guesses.
+
+**You can now discard a parked what-if**
+
+- A parked what-if offered only **Resume**. The only way to be rid of one was to resume it and
+  then leave without keeping it — entering the very thing you were trying to get rid of.
+- There is now a **✕** beside Resume. It asks first, and says plainly that the changes in a parked
+  what-if are not saved anywhere else, because they are not.
+
 ## 0.7.13
 
 The What-If menu works on a phone, and an edit made at the wrong moment is no longer lost.
