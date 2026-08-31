@@ -1977,7 +1977,15 @@
     footer { color:#555; }
     body { background: white; color: black; }
     header, .actions, .no-print, details { display: none !important; }
-    main, #tab-budget, #tab-invest, #tab-decisions, #tab-actuals, #tab-overview, #tab-fire, #tab-tax { grid-template-columns: 1fr; padding: 0; max-width: none; }
+    /* BUG-0021: EVERY tab panel, enumerated. The entry named three omissions (overview,
+       fire, tax) which have since been added, but it listed rather than enumerated — and
+       `#tab-setup` was still missing, with the same consequence: print while it is the
+       active tab and it lays out at its normal multi-column grid. A panel is only ever
+       printed when it is the ACTIVE one (`.tab-panel { display:none }` has no print
+       override), so a forgotten id is invisible until somebody prints from that exact tab.
+       `tests/test_print_stylesheet.py` derives this list from the DOM so the next new tab
+       cannot be forgotten the way this one was. */
+    main, #tab-budget, #tab-invest, #tab-decisions, #tab-actuals, #tab-overview, #tab-fire, #tab-tax, #tab-setup { grid-template-columns: 1fr; padding: 0; max-width: none; }
     section.card { border: 1px solid #ccc; background: white; color: black; page-break-inside: avoid; }
     .tile { background: white; border: 1px solid #ccc; color: black; }
     .tile .k, th, .muted { color: #555; }
@@ -16149,7 +16157,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // hb itself: a live reference (like ACT above), not a copy, so a test can seed hb.lines
     // before calling bgbTotals()/bgbRender() and then inspect `bgb` for the isolation proof
     // (Slice B ask: shared lines must never be assigned onto `bgb` / budgetBuilder_v1).
-    hb, get bgb() { return bgb; } });
+    hb });
+  // BUG-0020: `bgb` is DEFINED onto the target, not spread through Object.assign.
+  //
+  // Object.assign reads an accessor and copies its VALUE — the getter itself is dropped. So
+  // `get bgb() { return bgb; }` inside that literal produced a one-off snapshot of whatever `bgb`
+  // pointed at the instant the assign ran, not a live view. `bgb` is REBOUND (not mutated) by
+  // repopulateFromStorage/reloadStateFromStorage, so any test that triggers a rebind and then
+  // reads `cm.bgb` was inspecting the pre-rebind object — and could pass while asserting nothing.
+  // Three tests in test_client_math.js already read it, and its own comment there called it "a
+  // live reference"; they survived only because they mutate `bgb` rather than rebind it.
+  //
+  // The irony worth keeping: the block above explains this exact hazard — it is why
+  // hbSetRosterForTest is a FUNCTION — and then committed it three lines later.
+  if (window.__clientMath) {
+    Object.defineProperty(window.__clientMath, 'bgb', {
+      get() { return bgb; }, configurable: true, enumerable: true,
+    });
+  }
   async function getJSON(path) { const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
   function acNowMonth() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
   function acToday() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }

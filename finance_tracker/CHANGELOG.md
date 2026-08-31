@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.0
+
+Mostly work you cannot see: the app now proves it does what it already did.
+
+**Printing**
+
+- Printing from the **Setup** tab now lays out in a single column like every other tab. It was the
+  last one still printing at its on-screen multi-column width, which cut content off the page.
+
+**Everything else in this release is internal.**
+
+There are no other changes to how the app behaves. This round went back over older entries where
+the app was already correct but nothing in the test suite would have noticed if it stopped being
+correct — the second-earner (spouse salary) handling, and the Roth-eligibility figure that comes
+from the Tax tab. **15 new automated checks** now cover those two, and each one was verified by
+deliberately breaking the app and confirming the check fails. Three more cover the printing fix
+above. A separate defect in the test tooling itself, which could let a check quietly pass while
+inspecting stale data, was also fixed.
+
+That is worth a release on its own: those are the parts that decide what your paycheque and your
+Roth limit look like, and until now they were correct by luck of nobody touching them.
+
 ## 0.7.14
 
 Everything else that comes out of your paycheck, and a parked what-if you can throw away.
