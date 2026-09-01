@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.8.4
+
+Set a bill up on the budget line itself, and a fix for recurring bills that quietly went missing
+when you renamed something.
+
+**Recurring bills live on the line now**
+
+- Open the **⋮** menu on any budget line and tick **Recurring bill**. Pick the day it posts — and
+  the list now includes **last day of the month**, which the old screen could not offer at all,
+  even though Rent, Water/Sewer and Trash are all exactly that.
+- The line then shows a small **due 9th** tag beside its other tags, so you can see at a glance
+  which of your budget lines are bills.
+- **The separate "Set up recurring" list is gone.** It listed all 23 of your budget lines a second
+  time to do a job the line itself can now do.
+
+**Fixed: renaming a budget line lost its bill**
+
+If you renamed a line — "Electric" to "Electricity", say — the recurring bill you had set up on it
+was left behind, pointing at a name that no longer existed. The line then looked like it was not a
+bill, so ticking it again created a **second** bill, and both kept being checked against your
+ledger every month.
+
+Renaming now carries the bill with it. If you rename a line onto the name of another line that is
+already a bill, it says so rather than quietly merging the two.
+
+**Worth checking once:** if you have renamed any budget line since setting it up as recurring, look
+at **Scheduled money** for a duplicate or for a bill whose name no longer matches a budget line.
+This release stops it happening again but does not clean up anything already split in two.
+
+**Also**
+
+- The budget row is quieter: the split and the sales-tax tick moved into the ⋮ menu, and a line
+  only shows a tag when there is something to say.
+- The "Not scheduled this month" list lines up properly.
+
+## 0.8.3
+
+The budget rows are quieter, and the recurring list tells you the truth.
+
+**Budget lines**
+
+- Each line now carries a **⋮** menu holding the things you set once — the split, the sales-tax
+  tick, **Share…**, a link to the recurring setup, and Remove. The row keeps the two things you
+  actually change: the name and the amount.
+- **"All me (100%)" is gone from every row**, because it was saying the same thing on nearly all of
+  them. A line now shows a small tag *only when there is something to say* — `+tax`, or `Your 65%`
+  when it is shared. An ordinary line says nothing at all.
+- The columns line up across every bucket for the first time.
+
+**Recurring bills**
+
+- The list is aligned: the amount and the due-day box sit in the same place on every row, whether
+  or not the line is ticked.
+- **Fixed: the ticks could be wrong on the first visit.** The list was drawn *before* the app had
+  loaded which bills are already set up, so it could show boxes unticked simply because it had not
+  finished asking. It now waits for the answer.
+- **Fixed: if that load failed, it said "none of your bills are recurring"** — presenting a
+  connection problem as a fact about your money. It now says it could not load, and offers a
+  **Try again** that works. (The button was there before; it was wired to the wrong kind of event
+  and did nothing.)
+
 ## 0.8.2
 
 Sinking funds work the monthly out for you, what the app remembers about your payees has a proper

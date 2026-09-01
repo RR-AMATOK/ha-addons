@@ -522,6 +522,11 @@
   /* The age is a qualifier of the use count, so it sits under it rather than beside — the same
      step-down `.jc-stat .cad` makes. It never widens the track: the compact form ("14mo") fits
      56px, and the full sentence lives in the title. */
+  /* TODO-271: the `.rec-*` block is gone with the list it styled. BUG-0078 (its ragged rows) and
+     BUG-0077 (its load-order faults) are resolved BY DELETION rather than by repair — the surface
+     they were defects in no longer exists. Both entries say so; neither should read as "fixed" to
+     someone looking for the code. */
+
   /* The composer's pointer to Setup ▸ Payees. `.gl-act` is the app's row-action shape and this
      is exactly that: a small, non-committing action sitting inside a line of text. */
   .ac-hint-fix { font-size: var(--fs-xs); padding: 2px 6px; vertical-align: baseline; }
@@ -3336,6 +3341,21 @@
   <button class="seed-btn" id="bgb_addbucket" type="button" style="margin-top:10px">+ Add bucket</button>
 </section>
 
+<!-- TODO-271: the "Set up recurring" list is GONE. It existed only because the control had
+     nowhere else to live; the row's own ⋮ menu now sets it, on the line itself. The owner, on
+     seeing both: "still there ... but [the menu] is perfect."
+
+     What it cost to keep: a second rendering of all 23 budget lines, a due-day box that was
+     `min=1 max=31` and so could not express the "last day of the month" rule that Rent, Water and
+     Trash all use, and a whole class of load-order bug (BUG-0077) that only existed because a
+     panel had to reconstruct state the row already had.
+
+     KNOWN TRADE, recorded rather than discovered later: a chip on the row answers "which of these
+     ARE bills" at a glance, but "which are NOT yet" is now a serial scan of 23 menus rather than a
+     column of empty checkboxes. Treisman & Souther (1985): presence pops out, absence does not.
+     If that question turns out to matter, the cheap answer is a count beside the bucket heading,
+     not the list coming back. -->
+
 <!-- Target-savings goals (TODO-226, DEC-019) -->
 <section class="card" style="margin-top:16px" id="gl_card">
   <h2>Savings goals</h2>
@@ -3993,7 +4013,13 @@
            dropping those rows would remove a capability and call it de-duplication. -->
       <details class="sch-roster" id="sch_roster" hidden>
         <summary id="sch_roster_sum"></summary>
-        <div id="sch_roster_body"></div>
+        <!-- BUG-0076: `.sch-list` is not decoration here, it is where the column TRACK WIDTHS
+             live (`--sch-c-date`, `--sch-c-amt`, ...). Without it every var() in `.sch-row`'s
+             grid-template-columns resolves to nothing, the whole declaration is invalid, and the
+             grid falls back to auto columns that size to each row's own content — so the names
+             and the amounts had a different left and right edge on every line. The dated list
+             above has always carried the class; this one never did. -->
+        <div class="sch-list" id="sch_roster_body"></div>
       </details>
       <details id="sch_add_wrap" style="margin-top:8px"><summary>Add a scheduled payment or deposit</summary>
         <div class="body" id="sch_form">
@@ -4048,7 +4074,12 @@
         </div>
       </details>
 
-      <details id="ac_rec_setup_wrap" style="margin-top:8px"><summary>Set up recurring (from your budget)</summary><div class="body" id="ac_rec_setup"></div></details>
+      <!-- TODO-269: "Set up recurring" MOVED to the Budget tab, directly under the lines it is
+           about. The owner, seeing the row menu's link jump tabs: "the recurring is still sending
+           me to the actuals." They were right — their original ask was for recurring to be
+           reachable from the row, and a link that leaves the tab is barely better than the lid it
+           replaced. The panel now sits on Budget and the menu item scrolls to the line instead of
+           navigating away. -->
     </section>
   </div>
 
@@ -6490,12 +6521,6 @@ const LID_SCENT = [
     } },
 
   // --- Actuals / FIRE / Invest -----------------------------------------------------------
-  { id: 'ac_rec_setup_wrap', value: () => {
-      const el = document.getElementById('ac_rec_setup');
-      if (!el) return null;
-      const n = el.querySelectorAll('input[type="checkbox"]').length;
-      return n ? n + ' from your budget' : null;
-    } },
   { id: 'fire-assumptions-details', value: () => {
       const r = document.getElementById('fire-real-return'), w = document.getElementById('fire-swr');
       if (!r && !w) return null;
@@ -9102,7 +9127,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (t === 'overview') { renderOverview(); renderNetWorth(); }
       if (t === 'fire') fireOnOpen();   // assemble globals → POST /api/fire → render FIRE tab
       if (t === 'invest') { ivApplyCanonicalAges(); ivAutoRoth(); ivRoomsHeal(); pjAutoFill(); calcInvest(); ivAcctLoad(); ivNwRefresh(); pjTaxSeedRender(); pjResyncHintRender(); fpSeed(); fpLoad(); }   // mirror global ages (G) + derive Roth-MAGI flag + reflect Tax line items + show results + accounts registry + NW-vs-forecast + ventures + Budget-plan staleness hint + re-sync hint (both explicitly called: pjAutoFill() skips calcProject when pjTouched, so their downstream renders never fire on that path)
-      if (t === 'budget') { bgbBaseAutoFill(); try { window.__jobChange.healForward(); } catch (e) {} try { bgbRenderJobChangeBanner(); } catch (e) {} bgbTotals(); calcBudget(); glLoad(); sfLoad(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
+      // TODO-269: schRefresh() because "Set up recurring" moved here and reads SCH_STATE. Budget
+      // never loaded schedules before. This is the trap this handler already carries a scar for —
+      // hpOnOpen and vnLoad were both left being kicked off by the tab their section used to live
+      // on, and neither ever ran again. Both tab panels are in the DOM at once, so schRefresh's own
+      // renders (schRenderDated / schRenderProblems) still find their elements from here.
+      if (t === 'budget') { if (window.__recurringSetup) window.__recurringSetup.ensure(); bgbBaseAutoFill(); try { window.__jobChange.healForward(); } catch (e) {} try { bgbRenderJobChangeBanner(); } catch (e) {} bgbTotals(); calcBudget(); glLoad(); sfLoad(); if (typeof hbFetch === 'function') hbFetch(); }   // base = net take-home; refresh summary + framework results + savings goals + affordability + sinking funds; hbFetch() re-pulls the shared-budget overlay (§5.1) and re-renders when it resolves
       // Decisions owns House and Car, so it owns their bootstrap. Both were once still being kicked
       // off by the tab the section USED to live in: hpOnOpen from Budget behind an `.open` guard
       // that is always undefined now House is a <section> and not a <details>, and vnLoad from
@@ -13143,6 +13173,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (WhatIf.active) return '<td></td>';
     return '<td><a href="#" class="gl-act gl-act-primary" data-hbpromote="' + bi + '_' + g + '_' + ii + '" title="Promote to a shared line">Share&hellip;</a></td>';
   }
+  // TODO-267: the same control as a MENU ITEM. The two gates are unchanged and both still matter,
+  // but they are now expressed differently, on purpose:
+  //
+  //   member    -> ABSENT. A permanent role, and the POST is owner-only server-side too.
+  //   What-If   -> ABSENT, unchanged from the shipped gate.
+  //
+  // THE SECOND ONE IS DELIBERATELY LEFT ALONE. An earlier draft of this made it present-but-
+  // disabled with its reason ("not in What-If"), which is arguably better — What-If is a mode you
+  // can leave, so naming it is the recovery. But hiding it is a DECISION already taken, with
+  // BUG-0026 behind it and `tests/test_whatif_share_gate_cdp.py` documenting it in its own
+  // docstring ("must HIDE the Share… control, not leave it on screen to refuse"). That test still
+  // passed against the disabled version, because it counts `[data-hbpromote]` and a disabled item
+  // carries no such attribute — so the change would have slipped through green, altering a
+  // considered behaviour as a side effect of moving controls into a menu. Changing it is a
+  // separate decision for the owner, not a by-product of this one.
+  function hbPromoteMenuItemHtml(bi, g, ii) {
+    if (window.__role === 'member') return '';
+    if (WhatIf.active) return '';
+    return '<button type="button" class="filter-opt" data-hbpromote="' + bi + '_' + g + '_' + ii + '">'
+         + 'Share…</button>';
+  }
   function hbPromoteRowHtml(bi, g, ii, it) {
     const b = bgb.buckets[bi];
     if (hbRoster === null) {
@@ -13559,6 +13610,113 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   // ===== End household shared-budget overlay =====
 
+  // ── TODO-270: recurring, as a property of the line ──────────────────────────────────────
+  // The owner, after two versions that routed elsewhere: "I just want to configure the recurring
+  // on the same pop up, no need to replicate the list over and over again, modify is the same."
+  // That last clause is a direct-manipulation objection (Shneiderman; Hutchins/Hollan/Norman): the
+  // object being edited has to stay continuously represented, and a door that swaps it for a
+  // differently-shaped list of all 32 lines breaks exactly that.
+  //
+  // The join is `direction=out` + bucket + lowercased category — the SAME key the old panel used,
+  // so this adds no new failure mode. Its worst case (two lines with one name in one kind) is
+  // disclosed below rather than hidden, and its COMMON breakage — renaming a line — is now fixed
+  // at the source by BUG-0079, which migrates the schedule with the name.
+  // Fills the recurring chip and the menu's recurring section from SCH_STATE, in place.
+  //
+  // A TARGETED UPDATE, not a bgbRender(). The table holds live text inputs — the name and the
+  // amount — and rebuilding it when a background fetch resolves would take the caret out of
+  // whatever the user was typing. This touches only the cells that describe the schedule.
+  //
+  // Renders NOTHING until schedules are known to have loaded: `SCH_STATE.listOk === false` is a
+  // failed load and `!SCH_STATE.loaded` is a load that has not happened, and neither is "this line
+  // is not a bill". Silence for both (BUG-0077's rule).
+  function bgbSyncRecurringUI() {
+    const known = SCH_STATE.listOk !== false && Array.isArray(SCH_STATE.schedules);
+    document.querySelectorAll('[data-recchip]').forEach(chip => {
+      const row = chip.closest('tr[data-b]'); if (!row) return;
+      const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
+      const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
+      const sc = (known && it) ? bgbScheduleFor(kind, it.name) : null;
+      chip.innerHTML = sc
+        ? '<span class="mng-flag" title="' + esc(schCadenceText(sc)) + '">due '
+          + esc(schDayLabel(bgbScheduleIsSimple(sc) ? sc.day1 : sc.day1)) + '</span>'
+        : '';
+      // …and the menu section for the same row.
+      const key = chip.dataset.recchip;
+      const tick = document.querySelector('[data-rectick="' + CSS.escape(key) + '"]');
+      const val  = document.querySelector('[data-recval="'  + CSS.escape(key) + '"]');
+      const body = document.querySelector('[data-recbody="' + CSS.escape(key) + '"]');
+      if (!tick || !val || !body) return;
+      tick.checked = !!sc;
+      tick.disabled = !known;
+      val.textContent = !known ? '—' : (sc ? ('due ' + schDayLabel(sc.day1)) : 'no');
+      if (!sc) { body.hidden = true; body.innerHTML = ''; return; }
+      body.hidden = false;
+      if (!bgbScheduleIsSimple(sc)) {
+        // Described, never flattened: this menu cannot express a twice-monthly rule or a weekend
+        // shift, so it does not offer a control that would silently destroy one.
+        body.innerHTML = '<span class="bgb-rec-cadence">' + esc(schCadenceText(sc)) + '</span>'
+          + '<button type="button" class="gl-act gl-act-primary" data-recopen="' + esc(String(sc.id)) + '">'
+          + 'Edit in Scheduled money…</button>';
+      } else {
+        const shared = it ? bgbLinesSharingKey(kind, it.name) : 1;
+        body.innerHTML = '<select data-recday2="' + esc(key) + '" aria-label="Day of the month it posts">'
+          + bgbDayOptions(sc.day1) + '</select>'
+          + (+sc.day1 >= 29 && +sc.day1 <= 31
+              ? '<span class="bgb-rec-note">Short months fall back to their last day.</span>' : '')
+          + (shared > 1
+              ? '<span class="bgb-rec-warn">' + shared + ' budget lines are called “' + esc(it.name)
+                + '” here, and they share this one bill.</span>' : '');
+      }
+    });
+  }
+
+  function bgbScheduleFor(kind, name) {
+    const want = String(name || '').trim().toLowerCase();
+    if (!want) return null;
+    return (SCH_STATE.schedules || []).find(x =>
+      x.direction === 'out' && (x.bucket || '') === kind
+      && (x.category || '').trim().toLowerCase() === want) || null;
+  }
+
+  // How many budget lines share this key. Two lines in one kind with one name ARE one bill — true
+  // before this control existed and true after; the difference is that it is now said out loud.
+  function bgbLinesSharingKey(kind, name) {
+    const want = String(name || '').trim().toLowerCase();
+    let n = 0;
+    (bgb.buckets || []).forEach(b => {
+      if ((b.kind || 'other') !== kind) return;
+      const scan = it => { if ((it.name || '').trim().toLowerCase() === want) n++; };
+      (b.items || []).forEach(scan);
+      (b.groups || []).forEach(g => (g.items || []).forEach(scan));
+    });
+    return n;
+  }
+
+  // A day picker is only honest for a plain monthly rule. Anything the fuller Scheduled-money
+  // editor can express and this menu cannot — twice-monthly, every-other-Friday, a weekend shift,
+  // an end date, auto-post — must be DESCRIBED and left alone, never flattened into "monthly on
+  // the Nth" by a control that cannot represent it.
+  function bgbScheduleIsSimple(sc) {
+    if (!sc) return true;
+    // `weekendShift` is NOT NULL DEFAULT 'none' in the schema, so a truthiness test on it called
+    // every schedule complex — including the plain monthly ones this menu creates itself, which
+    // then rendered a read-only cadence sentence instead of the day picker. Measured, not guessed:
+    // the day select simply never appeared. Compare against the value, not against emptiness.
+    const shift = sc.weekendShift || 'none';
+    return sc.freq === 'monthly' && (+sc.interval || 1) === 1
+        && shift === 'none' && !sc.endsOn && !sc.endCount && !sc.autoPost;
+  }
+
+  function bgbDayOptions(sel) {
+    let o = '';
+    for (let d = 1; d <= 31; d++) o += '<option value="' + d + '"' + (+sel === d ? ' selected' : '') + '>' + d + '</option>';
+    // The engine's own "last day" sentinel. The number box this replaces was min=1 max=31 and
+    // could not express it at all, so a bill due on the last day of the month was unsettable here.
+    o += '<option value="' + SCH_LAST_DAY + '"' + (+sel === SCH_LAST_DAY ? ' selected' : '') + '>last day of the month</option>';
+    return o;
+  }
+
   function splitSelect(bi, g, ii, split) {
     const sp = (split == null ? 100 : +split);
     let opts = '', matched = false;
@@ -13577,7 +13735,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // than in a separate list after it, which is the only way their columns can line up with the
   // local rows and the only way the existing row-based drag system can see them at all.
   function itemsTable(bi, g, items, leadRows) {
-    let h = '<table class="res-table bgb-items"><tbody>' + (leadRows || '');
+    // TODO-267: declared tracks. Without them each bucket's table sized its own columns, so a
+    // chip on three rows in one bucket widened that bucket's flags column and no other — the
+    // ragged wall one level down, and the same root cause as BUG-0076. `table-layout:fixed`
+    // needs the widths stated, which is what the colgroup is for.
+    let h = '<table class="res-table bgb-items">'
+          + '<colgroup><col style="width:26px"><col><col style="width:104px">'
+          + '<col style="width:150px"><col style="width:104px"><col style="width:44px"></colgroup>'
+          + '<tbody>' + (leadRows || '');
     items.forEach((it, ii) => {
       // Promote-from-local (§12 Slice B row): this ONE local row swaps for the promotion panel
       // when it's the active hbPromoteTarget -- same view/edit-row swap idiom as the shared
@@ -13587,15 +13752,53 @@ document.addEventListener('DOMContentLoaded', async () => {
         h += hbPromoteRowHtml(bi, g, ii, it);
         return;
       }
+      const sp = (it.split == null ? 100 : +it.split);
+      const key = bi + '_' + g + '_' + ii;
+      const nameFor = esc(it.name || 'untitled');
+      // The exceptions, and only the exceptions. `.mng-flag` rather than a fourteenth badge shape.
+      let flags = '';
+      if (it.taxable) flags += '<span class="mng-flag" title="local sales tax is added">+tax</span>';
+      if (sp < 100) flags += '<span class="mng-flag" title="shared — you pay ' + sp + '%">Your ' + sp + '%</span>';
+      // TODO-270: the recurring chip is filled by bgbSyncRecurringUI once schedules are KNOWN to
+      // have loaded. Empty here on purpose — "not a bill" and "not asked yet" must both render as
+      // silence, because rendering one as the other is the lie BUG-0077 was about.
+      flags = '<span data-recchip="' + key + '"></span>' + flags;
+      // The menu is rendered INLINE and hidden, not built on open, so every control inside it keeps
+      // the data-b/data-g/data-i attributes its existing delegated handler already matches on.
+      // Moving them into a shared popover would have meant re-pointing four working handlers at a
+      // new element for no gain — the second implementation problem, avoided by not creating it.
       h += '<tr data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '">'
         + '<td class="bgb-grip" draggable="true" title="drag to reorder / move">⠿</td>'
         + '<td><input type="text" class="bgb-iname" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '" value="' + esc(it.name) + '"></td>'
         + '<td><input type="text" inputmode="decimal" data-fmt="usd" class="bgb-iamt" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '" value="' + (+it.amount || 0) + '" style="width:84px"></td>'
-        + '<td><label class="mini" title="add local sales tax"><input type="checkbox" class="bgb-itax" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '"' + (it.taxable ? ' checked' : '') + '> tax</label></td>'
-        + '<td title="your share — pick a split preset">' + splitSelect(bi, g, ii, it.split) + '</td>'
+        + '<td><span class="bgb-flags">' + flags + '</span></td>'
         + '<td class="num bgb-itotal" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '"></td>'
-        + hbPromoteTriggerHtml(bi, g, ii)
-        + '<td><button class="bgb-x" data-delitem="' + bi + '_' + g + '_' + ii + '" title="remove" aria-label="Remove budget line: ' + esc(it.name || 'untitled') + '">✕</button></td>'
+        + '<td class="bgb-rowmenu-cell">'
+        +   '<button type="button" class="bgb-dots" data-rowmenu="' + key + '" aria-haspopup="true"'
+        +   ' aria-expanded="false" aria-label="More options for ' + nameFor + '">⋮</button>'
+        +   '<div class="backup-popup bgb-rowmenu" data-rowmenupanel="' + key + '" hidden role="menu"'
+        +   ' aria-label="Options for ' + nameFor + '">'
+        +     '<div class="filter-opt bgb-mi" style="cursor:default"><span>Your share</span>'
+        +       '<span class="bgb-mi-val">' + sp + '%</span></div>'
+        +     '<div style="padding:0 8px 6px">' + splitSelect(bi, g, ii, it.split) + '</div>'
+        +     '<label class="filter-opt bgb-mi" title="add local sales tax">'
+        +       '<span style="display:flex;align-items:center;gap:7px">'
+        +       '<input type="checkbox" class="bgb-itax" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '"' + (it.taxable ? ' checked' : '') + '> Add sales tax</span>'
+        +       '<span class="bgb-mi-val">' + (it.taxable ? 'on' : 'off') + '</span></label>'
+        +     '<hr>'
+        +     hbPromoteMenuItemHtml(bi, g, ii)
+        +     '<div class="bgb-rec" data-recsec="' + key + '">'
+        +       '<label class="filter-opt bgb-mi" title="a bill that arrives every month">'
+        +         '<span style="display:flex;align-items:center;gap:7px">'
+        +         '<input type="checkbox" data-rectick="' + key + '"> Recurring bill</span>'
+        +         '<span class="bgb-mi-val" data-recval="' + key + '">no</span></label>'
+        +       '<div class="bgb-rec-body" data-recbody="' + key + '" hidden></div>'
+        +     '</div>'
+        +     '<hr>'
+        +     '<button type="button" class="filter-opt" data-delitem="' + key + '"'
+        +     ' style="color:var(--bad)">Remove this line</button>'
+        +   '</div>'
+        + '</td>'
         + '</tr>';
     });
     return h + '</tbody></table>';
@@ -13666,6 +13869,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     // them -- otherwise renaming or deleting a line leaves the picker offering a ghost. Only
     // while open: rendering into a closed <details> is wasted work on every keystroke.
     if (document.getElementById('hb_share_wrap')?.open) hbShareRender();
+    // TODO-271: and the recurring chips/menus, for the same reason and one more.
+    //
+    // The schedule fetch and this render are INDEPENDENT and race. Painting the chips only from
+    // schRefresh's tail meant that on a cold Budget open — a reload, then straight here — the sync
+    // could land first and this render would wipe what it had just written: the row showed no
+    // chip and the menu read "no" for a bill that exists on the server. Tick it again and there
+    // are two. That is the duplicate BUG-0079 attacks from the rename side, arriving from the
+    // stale-read side instead, and a test written for the OLD panel caught it on the new one.
+    //
+    // So it runs after BOTH: whichever of the two finishes last leaves the truth on screen.
+    //
+    // DEFERRED A FRAME, and not for tidiness. `const SCH_STATE` is declared ~5000 lines below this
+    // function, and bgbRender runs during init — so a synchronous call here touches a const in its
+    // TEMPORAL DEAD ZONE and throws, taking the whole render with it. `typeof` does not rescue
+    // that: unlike an undeclared name, a TDZ binding throws on typeof too. Measured, not reasoned:
+    // the first version turned every test in two files red because nothing rendered at all.
+    // One frame later the script has finished and the state exists.
+    bgbQueueRecurringSync();
+  }
+
+  // Coalesced: bgbRender can fire several times in a burst (a keystroke, a total, a re-layout) and
+  // one walk of the rows per frame is enough.
+  let bgbSyncQueued = false;
+  function bgbQueueRecurringSync() {
+    if (bgbSyncQueued) return;
+    bgbSyncQueued = true;
+    requestAnimationFrame(() => { bgbSyncQueued = false; bgbSyncRecurringUI(); });
   }
 
   function bgbTotals() {
@@ -14040,6 +14270,118 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const bgRoot = $('bgBuilder');
   if (bgRoot) {
+    // ── BUG-0079: renaming a budget line orphaned its schedule ──────────────────────────────
+    // A schedule is joined back to its budget line by `direction=out` + bucket + lowercased
+    // category, and the rename handler below writes the new name and nothing else. So:
+    //
+    //   tick "Electric" -> a schedule is created with category "Electric"
+    //   rename the line to "Electricity"
+    //   the schedule still says "Electric" and now matches no budget line
+    //   the row reads as not-a-bill, so you tick it again -> a SECOND schedule
+    //
+    // Two schedules, one answering to a line that no longer exists, both still checked against the
+    // ledger every month. Live today. Found by designing the per-row control against the DATA MODEL
+    // rather than against the screenshot.
+    //
+    // Migrated on CHANGE, never on input: the handler below fires on every keystroke, so patching
+    // there would hit the server once per character and race its own responses. `change` on a text
+    // input fires once, on blur, and only when the value actually differs.
+    let bgbRenameFrom = null;
+    bgRoot.addEventListener('focusin', e => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('bgb-iname')) bgbRenameFrom = t.value;
+    });
+    // ── TODO-270: recurring, set from the row's own menu ────────────────────────────────────
+    bgRoot.addEventListener('change', async e => {
+      const t = e.target;
+
+      // The day picker. PATCHes day1 rather than re-POSTing the schedule, so changing the day can
+      // never create a second bill — the mistake the old upsert-by-POST made and that BUG-0079 is
+      // the other half of.
+      if (t && t.dataset && t.dataset.recday2 != null) {
+        if (acWriteGuard()) return;
+        const row = t.closest('tr[data-b]'); if (!row) return;
+        const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
+        const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
+        const sc = it && bgbScheduleFor(kind, it.name);
+        if (!sc) return;
+        try {
+          await patch('/api/tracking/schedules/' + sc.id, { day1: +t.value });
+          if (window.__recurringSetup) await window.__recurringSetup.ensure();
+        } catch (er) {
+          showToast('Could not move that bill — ' + (errDetail(er) || 'the server refused it'));
+        }
+        return;
+      }
+
+      // The tick itself.
+      if (t && t.dataset && t.dataset.rectick != null) {
+        if (acWriteGuard()) { t.checked = !t.checked; return; }
+        const row = t.closest('tr[data-b]'); if (!row) return;
+        const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
+        const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
+        if (!it || !(it.name || '').trim()) { t.checked = false; showToast('Name the line first'); return; }
+        const sc = bgbScheduleFor(kind, it.name);
+        try {
+          if (t.checked && !sc) {
+            await post('/api/tracking/schedules', {
+              name: it.name, direction: 'out', amount: myShare(it), bucket: kind, category: it.name,
+              accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
+              anchorOn: (ACT.month || acNowMonth()) + '-01',
+              // A budget line is a PLANNED figure, not a bill you have seen — electricity is
+              // planned at $94.50 and arrives at $159.74. Estimates never auto-post.
+              amountIsEstimate: true, autoPost: false,
+            });
+          } else if (!t.checked && sc) {
+            // PROPORTIONATE. A plain monthly rule this menu created is deleted without ceremony —
+            // re-ticking rebuilds it. Anything the fuller editor shaped (twice-monthly, a weekend
+            // shift, an end date) is real work that would be destroyed silently, so it is named
+            // before it goes.
+            if (!bgbScheduleIsSimple(sc)) {
+              const ok = confirm('Stop tracking “' + it.name + '” as a bill?\n\n'
+                + schCadenceText(sc) + '\n\nThat rule is deleted. Transactions already logged stay '
+                + 'in your ledger — only the future occurrences stop.');
+              if (!ok) { t.checked = true; return; }
+            }
+            await del('/api/tracking/schedules/' + sc.id);
+          }
+          if (window.__recurringSetup) await window.__recurringSetup.ensure();
+        } catch (er) {
+          t.checked = !t.checked;
+          showToast('Could not update that bill — ' + (errDetail(er) || 'the server refused it'));
+        }
+        return;
+      }
+
+      if (!t || !t.classList || !t.classList.contains('bgb-iname')) return;
+      const from = bgbRenameFrom; bgbRenameFrom = null;
+      const to = (t.value || '').trim();
+      if (!from || !to || from.trim().toLowerCase() === to.toLowerCase()) return;
+      // Never migrate real schedules from inside a hypothetical — the same rule that stops What-If
+      // creating shared lines.
+      if (WhatIf.active) return;
+      const bucket = bgb.buckets[+t.dataset.b];
+      if (!bucket) return;
+      const kind = bucket.kind || 'other';
+      const all = (SCH_STATE.schedules || []).filter(x => x.direction === 'out' && (x.bucket || '') === kind);
+      const hit = all.find(x => (x.category || '').trim().toLowerCase() === from.trim().toLowerCase());
+      if (!hit) return;                       // the line was not a bill; nothing to carry across
+      // Renaming ONTO a name that is already a bill would leave two schedules answering to one key
+      // — the exact duplicate this fix exists to prevent. Say so rather than create it.
+      if (all.some(x => x.id !== hit.id && (x.category || '').trim().toLowerCase() === to.toLowerCase())) {
+        showToast('“' + to + '” is already a recurring bill, so “' + from.trim()
+                + '” kept its own. Open the ⋮ menu on either line to sort it out.');
+        return;
+      }
+      try {
+        await patch('/api/tracking/schedules/' + hit.id, { name: to, category: to });
+        if (window.__recurringSetup) await window.__recurringSetup.ensure();
+      } catch (er) {
+        showToast('Renamed the line, but could not move its recurring bill — '
+                + (errDetail(er) || 'the server refused it'));
+      }
+    });
+
     bgRoot.addEventListener('input', e => { const t = e.target, d = t.dataset;
       // Split-% typing: repaint the running total only. Deliberately FIRST and deliberately
       // not `else if`-chained onto the item handlers below -- these inputs carry none of their
@@ -14078,7 +14420,66 @@ document.addEventListener('DOMContentLoaded', async () => {
       // excluded row look identical in the boxes but are not the same total.
       else if (t.hasAttribute('data-hbp-inc')) { hbPromoteUpdateTotal(); }
     });
+    // ── TODO-267: the row menu's open/close contract ────────────────────────────────────────
+    // Bound BEFORE the action handler below and using closest(), because the trigger is the one
+    // control here whose click must not fall through to anything else.
+    function bgbCloseRowMenus(except) {
+      document.querySelectorAll('[data-rowmenupanel]').forEach(el => {
+        if (el === except) return;
+        el.hidden = true;
+        const btn = document.querySelector('[data-rowmenu="' + CSS.escape(el.dataset.rowmenupanel) + '"]');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+    bgRoot.addEventListener('click', e => {
+      const trig = e.target.closest('[data-rowmenu]');
+      if (!trig) return;
+      e.preventDefault(); e.stopPropagation();
+      const panel = bgRoot.querySelector('[data-rowmenupanel="' + CSS.escape(trig.dataset.rowmenu) + '"]');
+      if (!panel) return;
+      const opening = panel.hidden;
+      bgbCloseRowMenus(opening ? panel : null);
+      panel.hidden = !opening;
+      trig.setAttribute('aria-expanded', opening ? 'true' : 'false');
+      if (opening) { const f = panel.querySelector('select, input, button'); if (f) f.focus(); }
+    });
+    // A click INSIDE an open menu must not close it — the split select and the tax tick live there
+    // and both take more than one click to use.
+    bgRoot.addEventListener('click', e => {
+      if (e.target.closest('[data-rowmenupanel]')) return;
+      if (e.target.closest('[data-rowmenu]')) return;
+      bgbCloseRowMenus(null);
+    });
+    document.addEventListener('click', e => {
+      if (e.target.closest && (e.target.closest('[data-rowmenupanel]') || e.target.closest('[data-rowmenu]'))) return;
+      bgbCloseRowMenus(null);
+    });
+    // Escape closes and RETURNS FOCUS to the trigger. Without the return, dismissing the menu
+    // drops the keyboard user at the top of the document.
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      const open = document.querySelector('[data-rowmenupanel]:not([hidden])');
+      if (!open) return;
+      const btn = document.querySelector('[data-rowmenu="' + CSS.escape(open.dataset.rowmenupanel) + '"]');
+      bgbCloseRowMenus(null);
+      if (btn) btn.focus();
+    });
+
     bgRoot.addEventListener('click', e => { const d = e.target.dataset; let p;
+      // TODO-267: the recurring LINK. It asserts nothing about this line — it carries you to the
+      // panel that owns the question. A checkbox here would claim "this line is recurring", and
+      // the data cannot support that claim: `addLine` merges plan lines by kind + lowercased name,
+      // so a row has no identity a schedule can point at.
+      // TODO-270: the day picker inside the menu.
+      if (d.recday2 != null) { return; }          // handled on `change`, not click
+      // The door for a cadence this menu cannot express.
+      if (d.recopen != null) {
+        e.preventDefault();
+        bgbCloseRowMenus(null);
+        const tb = document.querySelector('#tabbar .tab-btn[data-tab="actuals"]');
+        if (tb) tb.click();
+        return;
+      }
       if (d.add != null) { p = d.add.split('_'); itemsArr(p[0], p[1]).push({ name: 'New item', amount: 0, taxable: false }); saveBgb(); bgbRender(); }
       else if (d.delitem != null) { p = d.delitem.split('_'); itemsArr(p[0], p[1]).splice(+p[2], 1); saveBgb(); bgbRender(); }
       else if (d.delg != null) { p = d.delg.split('_'); bgb.buckets[+p[0]].groups.splice(+p[1], 1); saveBgb(); bgbRender(); }
@@ -18328,6 +18729,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     await Promise.all([
       getJSON('/api/tracking/schedules')
         .then(r => { SCH_STATE.schedules = r.schedules || []; })
+        // IF YOU EVER PRESERVE THE LAST GOOD LIST HERE instead of clearing it, the `known` guard in
+        // bgbSyncRecurringUI stops being inert and becomes the only thing keeping stale chips off
+        // the budget rows — and it has no test, because today the state it guards cannot occur.
+        // Write one at the same time. (TODO-271, mutant G3, recorded equivalent.)
         .catch(() => { SCH_STATE.schedules = []; SCH_STATE.listOk = false; }),
       getJSON('/api/tracking/schedules/due')
         .then(r => { SCH_STATE.due = r.due || []; })
@@ -18342,6 +18747,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     ]);
     schRenderDated();
     schRenderProblems();
+    // Painted HERE, after the loads, so its ticks reflect schedules that have actually arrived and
+    // its failure box can see that a load failed (BUG-0077).
+    // TODO-271: the panel this used to repaint is gone; the row's own chips and menus answer the
+    // same question on the line itself.
+    // An EXPLICIT precondition, not a try/catch. schRefresh also runs from Actuals, where the
+    // budget builder may not have initialised `bgb` yet — that is a real state to guard, and it is
+    // the only one. A blanket swallow here would hide the next genuine fault the way one hid the
+    // whole schRefresh failure earlier today.
+    if (typeof bgb !== 'undefined' && bgb && bgb.buckets) bgbSyncRecurringUI();
   }
 
   // An auto-post schedule that cannot post is the quietest possible failure: the user switched
@@ -18363,7 +18777,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Exported for the CDP suite, which needs to trigger the same refresh a save/delete/confirm
   // triggers WITHOUT going through the composer — the subject there is that the repaint reads
   // fresh month data, not that the form works. Mirrors window.__jobChange's own test hook.
-  window.__schedules = { refresh: () => schRefresh() };
+  // TODO-269: the handle DEFAULTS THE MONTH before refreshing, because it is now called from the
+  // Budget tab and `ACT.month` is only set by the Actuals open paths. Called cold it threw
+  // `Cannot read properties of null (reading 'split')` inside acMonthEndIso — and the first
+  // version of the Budget call site wrapped it in `try { } catch (e) {}`, which swallowed that
+  // whole failure and left the panel silently empty. An exported handle that only works when
+  // called from one tab is not an entry point; the guard belongs here, once, not at every caller.
+  window.__schedules = {
+    refresh: () => { if (!ACT.month) ACT.month = acNowMonth(); return schRefresh(); },
+  };
+
+  // TODO-269: ONE entry point for the recurring panel, which now renders on the Budget tab and
+  // therefore cannot assume anything the Actuals open path used to do for it.
+  //
+  // Moving a panel between tabs means inheriting its whole BOOTSTRAP, not just its markup, and
+  // this one had three dependencies that were invisible until it moved:
+  //   acWire()      — where the panel's own delegates are BOUND. It runs from the Actuals and
+  //                   Setup open paths only, so on a Budget-only visit every control rendered and
+  //                   no listener existed. Safe to call repeatedly: it opens `if (ACT.wired) return`.
+  //   ACT.month     — schRefresh builds its window from it; unset on Budget, so it threw
+  //   ACT.accounts  — acDefaultAccountId reads it, so ticking a box POSTed a null account
+  //   SCH_STATE     — only schRefresh fills it, and Budget never called it
+  //
+  // EACH WAS SILENT IN ITS OWN WAY — a swallowed throw, a 422 behind a toast, an empty list, and a
+  // control with no listener. Four dependencies, four different silences, one move. Naming them
+  // together in the function that owns the panel is what stops the fifth being found by a user.
+  window.__recurringSetup = {
+    ensure: async () => {
+      acWire();
+      if (!ACT.month) ACT.month = acNowMonth();
+      if (!(ACT.accounts || []).length) { try { await acLoadAccounts(); } catch (e) {} }
+      return schRefresh();
+    },
+  };
 
   // ONE LIST (TODO-257). This replaces schRenderList AND the old "Recurring this month" table,
   // which drew the same ten bills from the same store one under the other — the rule in one and
@@ -18811,7 +19257,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // action (save, delete, confirm, skip) would otherwise repaint from whatever month data
     // happened to be lying around. Measured: saving a schedule due this month drew it as "none
     // this month" until the tab was reopened, because the occurrence fetch lived out here.
-    acRenderRecurringSetup();
+    // BUG-0077 (second half), kept for the lesson: a render USED TO BE CALLED HERE, one line above the
+    // load it depends on. So it painted from whatever SCH_STATE happened to hold — on a first
+    // visit, nothing — and was never repainted when the real schedules arrived. Every checkbox was
+    // therefore drawn before the app had asked the question it was answering, and the `listOk`
+    // guard added for the failure case could not fire either, because at that moment the load had
+    // not failed yet: it had not started.
+    //
+    // It now paints from schRefresh's tail, beside schRenderDated/schRenderProblems, which is what
+    // this function's own comment three lines up already said should happen: "NOTHING IS FETCHED
+    // OR PAINTED HERE. schRefresh owns all three loads."
     schFillPickers();
     await schRefresh();
   }
@@ -18865,32 +19320,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Setup: pick which budget lines are recurring + set a due day (seeded from the budget line items).
-  function acRenderRecurringSetup() {
-    const el = $('ac_rec_setup'); if (!el) return;
-    acEnsureBudgetPlan();
-    const bp = acPlan();
-    if (!bp || !bp.lines) { el.innerHTML = '<div class="mini muted">Build your budget on the <b>Budget</b> tab first — its line items seed this list.</div>'; return; }
-    // Keyed off SCHEDULES, so the checkboxes reflect what actually exists in the store the
-    // panel now writes to. SCH_STATE.schedules is the full list (including ones with no
-    // occurrence this month), which is the right set for "is this bill tracked at all?".
-    const recByKey = {}; (SCH_STATE.schedules || []).forEach(r => { if (r.direction === 'out') recByKey['out|' + (r.bucket || '') + '|' + (r.category || '').toLowerCase()] = r; });
-    let h = '<div class="mini muted" style="margin:6px 0">Tick the budget lines that are recurring bills and set the day they post. Each month we check whether a matching transaction came through (amount can vary — e.g. electricity).</div>';
-    let any = false;
-    getCategories().forEach(({ key: kind }) => {
-      const lines = acBudgetLines(kind); if (!lines.length) return;
-      any = true;
-      h += '<div class="subhead" style="margin-top:8px"><span style="color:' + (KINDS[kind] ? categoryColor(kind) : '') + '">●</span> ' + esc(KINDS[kind] ? KINDS[kind].label : kind) + '</div>';
-      lines.forEach(o => {
-        const r = recByKey['out|' + kind + '|' + o.name.toLowerCase()], tracked = !!r;
-        h += '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:var(--fs-sm);flex-wrap:wrap">'
-          + '<label style="display:flex;align-items:center;gap:5px;min-width:150px;cursor:pointer"><input type="checkbox" data-rectoggle="' + esc(kind) + '|' + esc(o.name) + '" data-planned="' + o.planned + '"' + (tracked ? ' checked' : '') + ' style="width:auto"> ' + esc(o.name) + '</label>'
-          + '<span class="mini muted">' + acAmt(o.planned) + '/mo</span>'
-          + (tracked ? ' · due day <input type="number" min="1" max="31" value="' + (r.dueDay || '') + '" data-recday="' + r.id + '" style="width:48px">' : '')
-          + '</div>';
-      });
-    });
-    el.innerHTML = any ? h : '<div class="mini muted">Your budget has no line items yet.</div>';
-  }
 
   // Sinking funds Phase 2 (TODO-238, DEC-034 §5, docs/sinking-funds-design.md "Phase 2"
   // section): a small legibility line under the "Am I on track?" verdict explaining WHY
@@ -19775,7 +20204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { const sp = document.getElementById('tab-setup');
       if (sp) sp.addEventListener('click', async ev => { await acPresetDelegate(ev); }); }
 
-    const panel = document.getElementById('tab-actuals');
+  const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
       // Prefill the composer from a recurring bill that has not arrived yet. First in the chain
       // because it neither writes nor navigates -- it just fills the form -- so it must not be
@@ -19784,6 +20213,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
 
       if (await acPresetDelegate(ev)) return;
+
+      // BUG-0077: the retry the failure box names. It lives in the CLICK listener, which sounds
+      // obvious and was not: the first version sat beside the `data-rectoggle` handler, which is
+      // correctly in the CHANGE listener because a checkbox fires change. A BUTTON fires click, so
+      // the handler was never reached and the retry silently did nothing — the button rendered,
+      // the click landed, and no code ran. Found by bisecting the handler with markers after
+      // reading it three times without seeing it.
 
       // ---- Scheduled money ----
       // The settled-and-on-plan fold. Nothing is deleted by folding and the arithmetic in the
@@ -20057,66 +20493,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         return;
       }
-      const cb = ev.target.closest('[data-rectoggle]');
-      if (cb) {
-        if (acWriteGuard()) { cb.checked = !cb.checked; return; }   // undo the checkbox flip the guard didn't get to block
-        const parts = cb.dataset.rectoggle.split('|'), kind = parts[0], name = parts.slice(1).join('|');
-        // WRITES A SCHEDULE, not a legacy `recurring` row. It posted to /api/tracking/recurring
-        // until now, which was a silent divergence rather than merely a duplicate surface:
-        // migration 16 converted the rows that EXISTED at migration time, so anything ticked here
-        // afterwards lived only in the old table and the Scheduled Money surface never saw it.
-        // Two creation paths, two stores, one of them invisible to the feature that replaced it.
-        //
-        // Monthly on `dueDay` is the only cadence the old checklist could express, so nothing is
-        // lost in the translation -- and everything the schedule engine can do that it could not
-        // (weekend shift, twice-monthly, every-other-Friday) is available by editing it afterwards.
-        try {
-          if (cb.checked) {
-            const amt = +cb.dataset.planned || 0;
-            await post('/api/tracking/schedules', {
-              name: name, direction: 'out', amount: amt, bucket: kind, category: name,
-              accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
-              // Anchored to the START of the month being viewed, not to today. Anchored to today,
-              // a bill ticked on the 22nd has its first occurrence NEXT month -- so the panel
-              // answered "nothing scheduled falls in August" immediately after the user had just
-              // told it about a bill, which reads as broken rather than as correct. Measured.
-              //
-              // Safe because autoPost is false and estimates never auto-post regardless: a
-              // back-dated anchor cannot write a transaction the user did not confirm. The worst
-              // case is a bill flagged "missing" for a month already underway, which is either
-              // true (it has not been logged) or resolved by logging it.
-              anchorOn: ACT.month + '-01',
-              // A budget line is a PLANNED figure, not a bill you have seen -- electricity is
-              // planned at $94.50 and arrives at $159.74. Estimates never auto-post, which is the
-              // engine's own guarantee and exactly the right default here.
-              amountIsEstimate: true, autoPost: false,
-            });
-          } else {
-            const hit = (SCH_STATE.schedules || []).find(x =>
-              x.direction === 'out' && (x.bucket || '') === kind
-              && (x.category || '').toLowerCase() === name.toLowerCase());
-            if (hit) await del('/api/tracking/schedules/' + hit.id);
-          }
-        } catch (e) {
-          showToast('Could not update that bill — ' + (errDetail(e) || 'the server refused it'));
-        }
-        acRefresh(); return;
-      }
-      const dd = ev.target.closest('[data-recday]');
-      if (dd) {
-        if (acWriteGuard()) return;
-        // Same store as the checkbox above. The day picker edits the schedule's day1 rather
-        // than re-POSTing a whole recurring row, so a day change cannot silently create a second
-        // entry -- which the old upsert-by-POST could and did.
-        const hit = (SCH_STATE.schedules || []).find(x => String(x.id) === String(dd.dataset.recday));
-        if (hit) {
-          const day = dd.value ? Math.max(1, Math.min(31, Math.round(+dd.value))) : 1;
-          try { await patch('/api/tracking/schedules/' + hit.id, { day1: day }); }
-          catch (e) { showToast('Could not set the day — ' + (errDetail(e) || 'the server refused it')); }
-          acRefresh();
-        }
-        return;
-      }
+
     });
     // Card payment form keyboard: Esc closes + restores focus; Enter in amount submits
     if (panel) panel.addEventListener('keydown', ev => {
