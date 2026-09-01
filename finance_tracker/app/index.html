@@ -522,6 +522,48 @@
   /* The age is a qualifier of the use count, so it sits under it rather than beside — the same
      step-down `.jc-stat .cad` makes. It never widens the track: the compact form ("14mo") fits
      56px, and the full sentence lives in the title. */
+  /* ── The budget row's overflow menu (TODO-267) ────────────────────────────────────────────
+     RESTORED after being deleted by accident: removing the `.rec-*` block for the retired
+     recurring list took this whole block with it, and **0.8.4 shipped without it**. The menu kept
+     working, because every guard here measures BEHAVIOUR — does it open, does it write, does the
+     control exist — and none measured that it was styled or where it was anchored. The one symptom
+     was `clippedBottom`, and I read that as a positioning bug rather than as missing CSS.
+     `.bgb-rowmenu-cell { position: relative }` is the load-bearing line: without it the absolutely
+     positioned panel anchors to whatever distant ancestor happens to be positioned. */
+  .bgb-items { table-layout: fixed; }
+  .bgb-flags { display: flex; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-start; }
+  .bgb-rowmenu-cell { position: relative; overflow: visible; }
+  .bgb-rowmenu { width: 232px; padding: 8px; text-align: left; }
+  .bgb-rowmenu[hidden] { display: none; }
+  /* Opened UPWARD when there is not room below. `.backup-popup` anchors to `top: calc(100% + 6px)`,
+     which puts the menu off the bottom of the viewport for a row near the fold. Until the scroll
+     jump was fixed this was hidden: focus()'s scroll-into-view dragged the menu into view as a side
+     effect — the page lurched 985px and the menu happened to end up readable. */
+  .bgb-rowmenu.is-above { top: auto; bottom: calc(100% + 6px); }
+  .bgb-rowmenu .bgb-mi { display: flex; align-items: center; justify-content: space-between;
+                         gap: var(--space-2); }
+  .bgb-rowmenu .bgb-mi-val { font-size: var(--fs-xs); color: var(--muted);
+                             font-variant-numeric: tabular-nums; }
+  .bgb-rowmenu hr { border: none; border-top: 1px solid var(--line); margin: 6px 0; }
+  .bgb-rowmenu .bgb-ipreset { width: 100%; margin-top: 4px; }
+  .bgb-rowmenu label.filter-opt { display: flex; align-items: center; gap: 7px; }
+  /* The recurring section inside the menu (TODO-270). */
+  .bgb-rec-body { padding: 6px 8px 8px; }
+  .bgb-rec-body[hidden] { display: none; }
+  .bgb-rec-body select { width: 100%; }
+  .bgb-rec-note { display: block; font-size: var(--fs-2xs); color: var(--muted); margin-top: 6px; }
+  .bgb-rec-cadence { display: block; font-size: var(--fs-xs); color: var(--text); margin-bottom: 6px; }
+  .bgb-rec-warn { display: block; font-size: var(--fs-2xs); color: var(--warn-text-strong, var(--warn));
+                  margin-top: 6px; }
+  /* The trigger. A <button>, not an anchor: there is no URL, and this file has shipped a bare
+     action-anchor with no :focus-visible twice. 24px is WCAG 2.5.8's floor at EVERY width. */
+  .bgb-dots { background: transparent; border: none; color: var(--muted); cursor: pointer;
+              min-width: 24px; min-height: 24px; border-radius: 6px; line-height: 1;
+              display: inline-flex; align-items: center; justify-content: center; }
+  .bgb-dots:hover { background: var(--chip); color: var(--text); }
+  .bgb-dots[aria-expanded="true"] { background: var(--chip); color: var(--text); }
+  @media (max-width: 480px) { .bgb-dots { min-width: 44px; min-height: 44px; } }
+
   /* TODO-271: the `.rec-*` block is gone with the list it styled. BUG-0078 (its ragged rows) and
      BUG-0077 (its load-order faults) are resolved BY DELETION rather than by repair — the surface
      they were defects in no longer exists. Both entries say so; neither should read as "fixed" to
@@ -1757,6 +1799,11 @@
   .bgb-x { background:transparent; border:none; color:var(--bad); cursor:pointer; font-size:var(--fs-md); }
   .bgb-x:hover { filter:brightness(1.3); }
   .bgb-items td { padding:4px 6px; border-bottom:1px solid var(--line-faint); }
+  /* `.res-table` right-aligns every cell, which is right for its numeric columns and wrong for
+     these: the grip, the name, the amount and the chips all read from the left. The total keeps
+     the inherited right alignment because it IS a number in a column of numbers. */
+  .bgb-items td:nth-child(-n+4) { text-align: left; }
+  .bgb-items .bgb-flags { justify-content: flex-start; }
   .bgb-items input[type=text], .bgb-items input[type=number] { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 6px; font-size:var(--fs-sm); }
   .bgb-iname { width:150px; }
   .good-text { color:var(--good); } .bad-text { color:var(--bad); }
@@ -13740,8 +13787,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ragged wall one level down, and the same root cause as BUG-0076. `table-layout:fixed`
     // needs the widths stated, which is what the colgroup is for.
     let h = '<table class="res-table bgb-items">'
-          + '<colgroup><col style="width:26px"><col><col style="width:104px">'
-          + '<col style="width:150px"><col style="width:104px"><col style="width:44px"></colgroup>'
+          // The FLEXIBLE column is the flags one, not the name. Getting that backwards is what put
+          // the owner's boxes a thousand pixels right of where they belong: `.res-table` aligns
+          // every cell RIGHT, so an unsized name column absorbed all the slack and its 150px input
+          // floated at the far edge of it. The name is a fixed-width input; the flags cell holds a
+          // variable number of chips and is the only thing here that genuinely wants the room.
+          + '<colgroup><col style="width:26px"><col style="width:170px"><col style="width:104px">'
+          + '<col><col style="width:104px"><col style="width:52px"></colgroup>'
           + '<tbody>' + (leadRows || '');
     items.forEach((it, ii) => {
       // Promote-from-local (§12 Slice B row): this ONE local row swaps for the promotion panel
@@ -14441,7 +14493,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       bgbCloseRowMenus(opening ? panel : null);
       panel.hidden = !opening;
       trig.setAttribute('aria-expanded', opening ? 'true' : 'false');
-      if (opening) { const f = panel.querySelector('select, input, button'); if (f) f.focus(); }
+      // Flip up when the menu would not fit below. Measured on the OPEN panel rather than guessed
+      // from a constant: the menu grows when a line is recurring (the day picker appears), so an
+      // estimate would be wrong for exactly the rows needing the most room. Flips only when there
+      // is genuinely more room the other way, so a menu taller than the viewport does not flip into
+      // being more clipped than it started.
+      if (opening) {
+        panel.classList.remove('is-above');
+        const tr = trig.getBoundingClientRect();
+        const h = panel.getBoundingClientRect().height;
+        const roomBelow = window.innerHeight - tr.bottom;
+        if (h + 12 > roomBelow && tr.top > roomBelow) panel.classList.add('is-above');
+      }
+      // `preventScroll` because focus() scrolls its target into view by default, and this target
+      // is inside a popover that has only just been revealed — so opening the menu yanked the page
+      // under the reader ("if I click on the 3 dots, the page jumps"). The menu is anchored to the
+      // row you clicked; there is nothing to scroll TO. The payee back-link already passes this and
+      // this one did not, which is the whole bug.
+      if (opening) { const f = panel.querySelector('select, input, button'); if (f) f.focus({ preventScroll: true }); }
     });
     // A click INSIDE an open menu must not close it — the split select and the tax tick live there
     // and both take more than one click to use.

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.8.5
+
+Three fixes to the budget line's **⋮** menu, all of them things 0.8.4 got wrong.
+
+**The name and amount sit at the left of the row again**
+
+In 0.8.4 the budget line's name and amount drifted far to the right, leaving a wide empty gap where
+the name should start. The row now reads left to right the way every other list in the app does.
+
+**Opening the ⋮ menu no longer throws the page**
+
+Clicking **⋮** jumped the page — nearly a thousand pixels on a long budget — so the line you were
+working on vanished off the screen at the moment you were trying to act on it. The page now stays
+exactly where it is.
+
+**The menu opens upward when it would fall off the bottom**
+
+On a line near the bottom of the screen the menu opened downward into empty space, so the controls
+were partly out of view. It now opens upward when there is not room below. This was hidden until
+now by the page jump above: the jump happened to drag the menu into view as a side effect.
+
+**Also fixed:** 0.8.4 shipped without the menu's own styling — it was deleted by accident along
+with the old recurring list it sat next to. The menu worked, but it was sized and positioned by
+fallback rules rather than its own, which is what put it off the bottom of the screen.
+
 ## 0.8.4
 
 Set a bill up on the budget line itself, and a fix for recurring bills that quietly went missing
