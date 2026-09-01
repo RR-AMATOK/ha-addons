@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.8.2
+
+Sinking funds work the monthly out for you, what the app remembers about your payees has a proper
+home, and the app now agrees with your calendar about what day it is.
+
+**Fixed: one evening a month, the app was a day ahead of you**
+
+On the last day of each month, from about 7pm onward, several parts of the app were reading the
+date in UTC rather than in your own time — so they believed the next month had already started.
+None of it was visible unless you happened to be using the app that evening:
+
+- The **account trend line** drew a point for a month that had not happened yet, using today's
+  balance.
+- **Ventures** showed next month's (empty) figures instead of the month you were in.
+- A **scheduled payment** saved that evening was dated into the next month, so the one due *today*
+  did not appear in the list at all.
+- The **quick-add** form filled in tomorrow's date.
+- The **FIRE** tab quietly used a less accurate net-worth figure.
+
+All of it is corrected, and there is now a check that stops it coming back — which matters here,
+because this only ever went wrong on one evening in thirty and looked perfectly fine the rest of
+the time.
+
+**Sinking funds do the arithmetic**
+
+- Put in a **Target** and a **By** date and the **Monthly** fills itself in, with a line saying how
+  it got there: *"$53.00 by Aug 31, 2027 is 12 months away — filled in from there."*
+- Tick **tax** and it adds your **Local sales tax** from the Budget tab — one rate, set in one
+  place, the same tick as a budget line item's.
+- A yearly fund counts to its **next** renewal. A membership anchored on 31 August, looked at in
+  August, is twelve months away — not due today.
+- **If you type your own monthly, nothing overwrites it.** The line then says so: *"you have
+  changed the monthly by hand, so it is left alone."*
+- If there is nothing to divide by — no date, or a one-off already due — it says nothing rather
+  than inventing a figure.
+
+**What the app remembers about your payees**
+
+- Moved from a collapsed panel on **Actuals** to its own section under **Setup ▸ Payees**, where it
+  is simply visible instead of hidden behind a lid.
+- On a wide screen it now has proper columns and a heading, so you can read down the list instead
+  of reading every row twice. On a phone it keeps the layout it had.
+- Each payee shows **when you last used it**. One you have not spent against in over eighteen
+  months is marked — that is a rule the app is still applying confidently to something you may have
+  stopped paying for. A yearly membership is *not* marked, because eleven months is normal for one.
+- Over eight payees you get a **find** box.
+- When you type a payee while logging, the hint now offers **"Change what it fills in"** — it takes
+  you straight to that payee's row rather than to the top of the list.
+- If the list cannot load, it says so and offers **Try again**, instead of claiming you have no
+  payees.
+
+## 0.8.1
+
+Shared bills now split themselves whichever order you fill the form in.
+
+**The partner's share**
+
+- When you type a payee the app already knew — "rent" — it now fills in your partner's share from
+  your shared budget's own split, the same as picking the category by hand does.
+- **This depended on the order you filled the form in, and the natural order was the broken one.**
+  The amount box sits above the payee box; filling them top to bottom meant the split was skipped
+  and the partner's share stayed empty. Filling the payee first happened to work. Both work now.
+- **It uses the split as it stands today, every time.** Change Rent from 65/35 to 70/30 in your
+  shared budget and the next rent you log uses 70/30 — nothing remembers the old figure, so there
+  is nothing to go back and update.
+- **A figure you type yourself is still never overwritten.** The note then says so: *"you have
+  changed this one by hand, so it is left alone."* The month where the usual split does not apply
+  is exactly the one that must not be quietly corrected.
+
+**Worth knowing it is there:** you can correct what the app remembers about any payee under
+**"What the app remembers about your payees"** on the Actuals tab — the bucket, the category and
+the tags. Changing one only affects what happens next, and it offers to re-file what is already
+logged if you want that too.
+
 ## 0.8.0
 
 Mostly work you cannot see: the app now proves it does what it already did.

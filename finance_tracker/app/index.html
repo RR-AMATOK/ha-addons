@@ -412,33 +412,161 @@
   .bgb-inv-kid { padding-left: 14px; display: inline-block; }
   .bgb-inv-src { font-size: var(--fs-xs); color: var(--muted); }
 
-  /* Learned payee presets (TODO-258). Fixed tracks, same rule as .cat-list: each row is its own
-     grid container, so an `auto` track re-sizes per row and the columns stop lining up. */
-  .pp-list { --pp-c-bucket: 96px; --pp-c-count: 74px; --pp-c-act: 56px; border-top: 1px solid var(--line-faint); }
-  .pp-row { display: grid; align-items: center; column-gap: var(--space-2); padding: 7px 2px;
-            border-bottom: 1px solid var(--line-faint);
-            grid-template-columns: minmax(0, 1fr) var(--pp-c-bucket) var(--pp-c-count) var(--pp-c-act); }
-  .pp-name { font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pp-sub { display: block; font-size: var(--fs-xs); color: var(--muted);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pp-bucket, .pp-count { font-size: var(--fs-sm); color: var(--muted); }
-  .pp-count { text-align: right; font-variant-numeric: tabular-nums; }
-  .pp-acts { display: flex; gap: var(--space-1); justify-content: flex-end; }
-  /* A corrected row is marked, not decorated: it is the one fact this panel exists to show. */
-  .pp-fixed { font-size: var(--fs-xs); color: var(--accent); }
-  .pp-edit { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2);
-             align-items: flex-end; padding: 6px 0 2px; }
-  .pp-edit .ac-field { flex: 1 1 140px; min-width: 0; }
-  .pp-offer { grid-column: 1 / -1; font-size: var(--fs-sm); padding: 6px 0 2px; color: var(--muted); }
-  @media (max-width: 600px) {
-    .pp-row { grid-template-columns: minmax(0, 1fr) auto; }
-    .pp-bucket, .pp-count { grid-column: 1; font-size: var(--fs-xs); }
-    .pp-row .gl-act { min-height: 44px; min-width: 44px; }
-  }
-  .sch-sum { font-size: var(--fs-md); margin-bottom: 10px; }
-  .sch-sum b { font-variant-numeric: tabular-nums; }
-  .sch-need { color: var(--bad); font-weight: 600; }
+  /* Learned payee presets (TODO-258), rebuilt for Setup (TODO-265, direction A "Faithful").
+     The same row and the same words, standing up straight. A lid apologises for its own height;
+     a Setup section does not, so the design gets what it could never afford: real columns and a
+     header over them.
 
+     THE FOLD IS A CONTAINER QUERY, NOT A VIEWPORT ONE, and that is a measured decision rather
+     than a modern-CSS reflex. `#ac_presets` sits inside `.setup-pane`, and above 720px the nav
+     becomes a fixed 190px rail — so the panel's width is NOT monotonic in the viewport. Measured
+     in the harness:
+
+         viewport   390   600   768   820   900  1024  1280  1600+
+         panel      316   550   528   580   660   784  1040  1180   (capped)
+
+     768px of viewport gives a NARROWER panel than 600px does. Any viewport breakpoint therefore
+     states something false: one at 700px would grant columns at 768 (528px, too narrow) and
+     withhold them at 600 (550px, wider). The container asks the only question that matters.
+
+     660px is the arithmetic read back off that table: the six tracks total 618px and their five
+     gaps 40px, so 658px is the floor and 660 is the first round number above it. That admits the
+     900px viewport, which a derived 1000px breakpoint would have refused for no reason.
+
+     DEFAULT IS THE SHIPPED ROW, and the columns are added on top. Written this way round so a
+     browser without container queries renders exactly what shipped rather than a broken grid. */
+  #ac_presets { container-type: inline-size; container-name: payees; }
+  .pp-list { --pp-c-name: 190px; --pp-c-flag: 72px; --pp-c-bucket: 84px;
+             --pp-c-count: 56px; --pp-c-act: 56px;
+             border-top: 1px solid var(--line-faint); }
+  .pp-head { display: none; }
+  .pp-row { display: grid; align-items: center; column-gap: var(--space-2); row-gap: 2px;
+            padding: 9px 2px; border-bottom: 1px solid var(--line-faint);
+            grid-template-columns: minmax(0, 1fr) auto var(--pp-c-act);
+            grid-template-areas: "name   flag   acts"
+                                 "sub    sub    acts"
+                                 "bucket count  acts"; }
+  .pp-row:last-child { border-bottom: none; }
+  .pp-name { grid-area: name; font-size: var(--fs-md); font-weight: var(--fw-semibold);
+             color: var(--text); min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* "corrected" adopts `.mng-flag` rather than becoming a fourteenth badge (DESIGN.md §4.5), and
+     its ink is --text, not --accent. --accent in this row means "clickable" — `.gl-act-primary`
+     is the pencil two columns over — so a non-interactive word wearing the action colour inside
+     a row full of actions is a lie. Measured 12.01:1 dark / 15.19:1 shiro-full on --chip. */
+  .pp-list .mng-flag { grid-area: flag; justify-self: end; color: var(--text); }
+  .pp-sub { grid-area: sub; font-size: var(--fs-xs); color: var(--muted); min-width: 0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-bucket { grid-area: bucket; font-size: var(--fs-xs); color: var(--muted); }
+  .pp-count { grid-area: count; font-size: var(--fs-xs); color: var(--muted);
+              text-align: right; font-variant-numeric: tabular-nums; }
+  /* Two FIXED action slots, as `.cat-list .mng-actions` does and for the same reason: the shipped
+     `justify-content:flex-end` put the pencil at a different x on every corrected row, and about
+     one row in six is corrected. One x down the whole list. */
+  .pp-acts { grid-area: acts; align-self: start; width: var(--pp-c-act); gap: 0;
+             display: grid; grid-template-columns: repeat(2, 1fr); justify-items: center; }
+  .pp-edit, .pp-offer { grid-column: 1 / -1; grid-row: 4; }
+
+  /* The row being edited is marked with a FILL, never a coloured left stripe. --panel-2 because
+     `.iv-edit` already settled this exact question in this file; --accent-tint is the more
+     visible wash but drops --muted ink to 4.36:1, under AA. On --panel-2 it is 4.79:1 shiro /
+     5.11:1 dark. The accent action on that ground is 4.34:1, so it steps to --text — the same
+     move `.iv-acct.is-stale .iv-act` already makes. */
+  .pp-row.is-editing { background: var(--panel-2); }
+  .pp-row.is-editing .gl-act-primary { color: var(--text); }
+
+  .pp-edit { display: flex; flex-wrap: wrap; gap: var(--space-3);
+             align-items: flex-end; padding: var(--space-2) 0 var(--space-1); }
+  /* Bucket is a <select> in a form row, so it sits on the app's 192px column unit (§4.3). The
+     text fields are bounded rather than flex:1 1 140px: at pane width three equal fields become
+     three ~330px inputs for values one and three words long. */
+  .pp-edit .ac-field.is-bucket { flex: 0 0 192px; }
+  .pp-edit .ac-field.is-cat    { flex: 1 1 192px; max-width: 260px; }
+  .pp-edit .ac-field.is-tags   { flex: 1 1 240px; max-width: 340px; }
+  .pp-edit .ac-lbl .is-plain   { text-transform: none; letter-spacing: 0; }
+  .pp-edit-acts { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+  /* The re-file offer shipped as 12px --muted prose with two inline text links — the most
+     consequential control on the page rendered as a footnote. It is `.news-box`'s own case
+     verbatim: not an error (`.warn-box`), not an ignorable qualifier (`.note-box`), but news you
+     should read. Neither control is `button.primary`: re-filing rewrites rows already reconciled
+     against a bank statement, and the app deliberately does not recommend it. */
+  .pp-offer { margin: var(--space-2) 0 var(--space-1); }
+  .pp-offer b { font-variant-numeric: tabular-nums; }
+  .pp-offer-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+                   margin-top: var(--space-2); }
+  .pp-offer .gl-act { color: var(--text); }
+  .pp-offer .gl-act:hover { background: var(--panel); }   /* --chip is invisible on the tint (dark) */
+
+  /* The count was a "(12)" glued to the lede — a lid advertising that something was inside it.
+     A visible section needs no advertising, so the number becomes an orientation line that also
+     states the sort, which was never stated anywhere. */
+  .pp-bar { display: flex; align-items: center; justify-content: space-between;
+            gap: var(--space-3); flex-wrap: wrap; margin: var(--space-4) 0 var(--space-2); }
+  .pp-find { width: 240px; max-width: 100%; }
+  .pp-none { padding: var(--space-4) 2px; color: var(--muted); font-size: var(--fs-sm); }
+  /* Prose caps go on the PROSE, never on `#ac_presets` itself — a container wearing a measure cap
+     passes it to whatever renders into it later. */
+  .pp-lede { max-width: 64ch; }
+  .pp-empty { max-width: 56ch; padding: var(--space-4) 0 var(--space-2); }
+  .pp-empty p { margin: 0; color: var(--muted); font-size: var(--fs-md); }
+  /* MEASURED at 1500px: this box ran 1180px, 156ch of 12px text on one line. The app's reading
+     measure is `.card .warn-box { max-width: 780px }` and it misses this box because a Setup
+     section is not a `.card`. */
+  .pp-fail { max-width: 780px; }
+  .pp-fail-acts { margin-top: var(--space-2); }
+
+  /* A skeleton, not a spinner, and deliberately STATIC: DESIGN.md §7 forbids motion that loops or
+     runs on load, and a shimmer does both. Its real job is that the empty state can never flash
+     before the fetch resolves — the transient half of the BUG-0056 rule. */
+  /* The age is a qualifier of the use count, so it sits under it rather than beside — the same
+     step-down `.jc-stat .cad` makes. It never widens the track: the compact form ("14mo") fits
+     56px, and the full sentence lives in the title. */
+  /* The composer's pointer to Setup ▸ Payees. `.gl-act` is the app's row-action shape and this
+     is exactly that: a small, non-committing action sitting inside a line of text. */
+  .ac-hint-fix { font-size: var(--fs-xs); padding: 2px 6px; vertical-align: baseline; }
+  .pp-age { font-size: var(--fs-2xs); font-variant-numeric: tabular-nums; }
+  .pp-skel .sk { display: block; height: 9px; border-radius: 3px; background: var(--chip); }
+  .pp-row.pp-skel { padding: 11px 2px; }
+
+  @container payees (min-width: 660px) {
+    .pp-head,
+    .pp-list .pp-row { grid-template-areas: none; row-gap: 0; padding: 7px 2px;
+      grid-template-columns: var(--pp-c-name) var(--pp-c-flag) var(--pp-c-bucket)
+                             minmax(160px, 1fr) var(--pp-c-count) var(--pp-c-act); }
+    /* The head is furniture a lid could not afford and a pane can. It is what turns "read every
+       row twice" into one downward sweep at twenty payees. */
+    .pp-head { display: grid; align-items: center; column-gap: var(--space-2);
+               padding-bottom: var(--space-2); border-bottom: 1px solid var(--line); }
+    .pp-head .ac-lbl.is-name   { grid-column: 1; }
+    .pp-head .ac-lbl.is-bucket { grid-column: 3; }
+    .pp-head .ac-lbl.is-fills  { grid-column: 4; }
+    .pp-head .ac-lbl.is-used   { grid-column: 5; text-align: right; }
+    .pp-count { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+    .pp-name           { grid-area: auto; grid-column: 1; }
+    .pp-list .mng-flag { grid-area: auto; grid-column: 2; justify-self: start; }
+    .pp-bucket         { grid-area: auto; grid-column: 3; font-size: var(--fs-sm); color: var(--text); }
+    .pp-sub            { grid-area: auto; grid-column: 4; font-size: var(--fs-sm); }
+    .pp-count          { grid-area: auto; grid-column: 5; font-size: var(--fs-sm); }
+    .pp-acts           { grid-area: auto; grid-column: 6; align-self: center; }
+    .pp-edit, .pp-offer { grid-row: auto; }
+  }
+
+  @media (max-width: 600px) {
+    /* Two 44px targets do not fit a 56px track. `.cat-list` hits the identical wall and answers
+       it identically (`--cat-c-act: 96px`). */
+    .pp-list { --pp-c-act: 96px; }
+    .pp-row .gl-act { min-height: 44px; min-width: 44px; }
+    .pp-edit .ac-field.is-bucket, .pp-edit .ac-field.is-cat, .pp-edit .ac-field.is-tags {
+      flex: 1 1 100%; max-width: none; }
+    .pp-find { width: 100%; min-height: 44px; }
+    .pp-offer-acts button { min-height: 44px; }
+  }
+  /* One authored moment, and it is the file's existing one: `iv-open` already exists for exactly
+     this gesture (an editor appearing where it was not). Reused rather than a second keyframe. */
+  @media (prefers-reduced-motion: no-preference) {
+    .pp-row.is-editing .pp-edit { animation: iv-open .16s ease-out; }
+  }
   @media (max-width: 600px) {
     .sch-row { grid-template-columns: var(--sch-c-date) minmax(0, 1fr) auto;
                grid-template-areas: "date name rule" "date meta meta" "date amt status" "occ occ occ";
@@ -3233,11 +3361,21 @@
     <div class="row" style="margin:0"><label class="mini">Bucket</label><select id="sf_bucket" style="min-width:130px"></select></div>
     <div class="row" style="margin:0"><label class="mini">Monthly</label><span class="input-pair"><input id="sf_monthly" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
     <div class="row" style="margin:0"><label class="mini">Target <span class="muted">(optional)</span></label><span class="input-pair"><input id="sf_target" type="text" inputmode="decimal" data-fmt="usd2" style="width:100px"/><span class="unit">$</span></span></div>
+    <!-- Same tick, same rate, same words as a budget line item's (`.bgb-itax`, help copy at the
+         top of the Budget builder): the rate lives once, on Budget, and #bgb_tax's own caption
+         already promises it is "applied to lines ticked tax". A second rate box on this form
+         would be a second source of truth for one number. -->
+    <div class="row" style="margin:0"><label class="mini">Tax</label><label class="mini" style="display:flex;align-items:center;gap:6px;min-height:24px" title="add local sales tax to the target"><input type="checkbox" id="sf_taxable"> tax</label></div>
     <div class="row" style="margin:0"><label class="mini">By <span class="muted">(optional)</span></label><input id="sf_date" type="date"/></div>
     <div class="row" style="margin:0"><label class="mini">Recurs</label><select id="sf_recur" style="min-width:110px"><option value="none">One-time</option><option value="yearly">Yearly</option></select></div>
     <button class="seed-btn" id="sf_add" type="button">+ Add fund</button>
     <button class="ac-tool" id="sf_cancel_edit" type="button" style="display:none">Cancel edit</button>
   </div>
+  <!-- Where the monthly figure came from. Stated rather than merely filled, because DESIGN.md §8
+       rule 8 is that a rate is only honest with its denominator: this sentence names the target,
+       the date it is counting to and the number of months, so the division can be checked by eye.
+       `aria-live="polite"` because the figure appears in a field the reader is not looking at. -->
+  <p class="mini muted" id="sf_derive_note" style="margin:8px 0 0" aria-live="polite" hidden></p>
   <details id="sf_archived_wrap" class="mini" style="margin-top:10px;display:none">
     <summary class="muted">Archived funds</summary>
     <div id="sf_archived" style="margin-top:8px"></div>
@@ -3543,6 +3681,7 @@
     <nav class="setup-nav" id="setup_nav" aria-label="Setup sections">
       <a href="#" data-setup="categories" class="on">Categories</a>
       <a href="#" data-setup="aliases">Spelling aliases</a>
+      <a href="#" data-setup="payees">Payees</a>
       <a href="#" data-setup="strategies">Budget strategies</a>
       <a href="#" data-setup="accounts">Accounts</a>
       <a href="#" data-setup="import">Import &amp; snapshots</a>
@@ -3566,6 +3705,26 @@
       <div class="mini muted" style="margin-top:4px">Maps an alternate spelling to a budget line so it counts there in Actuals. <span class="mono">line ← alias</span></div>
       <div id="bgb_alias_groups" class="bgb-alias-groups"></div>
     </div>
+      </section>
+      <!-- TODO-264. Moved off Actuals, where it was a collapsed Tier-3 lid. Sits beside Spelling
+           aliases deliberately: both answer "what does the app read from the payee text?" — an
+           alias maps a spelling onto a budget line for money already logged, a preset decides what
+           the composer fills in NEXT time. Related enough to sit together, distinct enough that
+           folding them into one pane would blur which one moves history and which one does not.
+
+           No <details> here. On Actuals the lid existed because the panel was competing with the
+           ledger for the space; on Setup nothing is competing with it, which is the whole reason
+           this tab exists. -->
+      <section id="setup_payees" data-setup-pane="payees" hidden><h2>Payees</h2>
+        <!-- The count is NOT here any more (TODO-265). It was a "(12)" glued to the end of the
+             lede, which is a lid advertising that something is inside it; a section that is
+             already open does not need advertising. It became an orientation line above the list
+             that also states the sort order. `.pp-lede` caps the measure because `.card p.mini`'s
+             own cap does not reach a Setup section. -->
+        <p class="mini muted pp-lede">When you type a payee, the app fills in the bucket, category
+          and tags you used last time. Correcting one here changes what happens <b>next</b> —
+          nothing already logged moves unless you ask for it.</p>
+        <div id="ac_presets" style="margin-top:8px"></div>
       </section>
       <!-- Renamed from "Budget strategies": this pane now holds three kinds of budget rule, and
            `data-setup="strategies"` is deliberately UNCHANGED -- acShowSetupPane() and the nav both
@@ -3792,22 +3951,12 @@
         <div id="ac_tx_hint" class="mini muted" style="margin-top:-2px">&nbsp;</div>
       </div>
 
-      <!-- Tier 3: Manage (collapsed) — rare admin, out of the daily path -->
-      <!-- TODO-258. The presets are DERIVED (tracking_store.suggestions groups the ledger), which
-           is why there was never anything to edit: a single unusual entry became the permanent
-           default for that payee. This panel lists what the composer will actually DO — corrected
-           and uncorrected alike, because the one quietly mis-filing things is the one nobody has
-           touched — and writes an override row that wins over the history. -->
-      <details id="ac_presets_wrap" style="margin-top:12px">
-        <summary>What the app remembers about your payees <span class="mini muted" id="ac_presets_count"></span></summary>
-        <div class="body">
-          <p class="mini muted" style="margin:6px 0 10px">
-            When you type a payee it fills in the bucket, category and tags you used last time.
-            Correcting one here changes what happens <b>next</b> — nothing already logged moves
-            unless you ask for it.</p>
-          <div id="ac_presets"></div>
-        </div>
-      </details>
+      <!-- TODO-264: the payee panel MOVED to Setup ▸ Payees. It was Tier 3 "rare admin, out of
+           the daily path" behind a <details>, which is the exact shape Setup's own header calls
+           out: "these are SECTIONS on a page, not lids on a page". It is also the same call
+           already made for Split presets — "the presets are the VOCABULARY of an in-row control:
+           vocabulary moves, the control stays". The composer stays here; what it remembers is
+           configuration and lives with the rest of it. -->
     </section>
 
     <!-- RIGHT: plan vs actual -->
@@ -8282,6 +8431,17 @@ function isoLocalDate(d) {
   return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-'
        + String(x.getDate()).padStart(2, '0');
 }
+// The same rule at MONTH granularity, and it earns its own function because the month form hides
+// the bug far better: `new Date().toISOString().slice(0,7)` is wrong for exactly the reason
+// slice(0,10) is, but only ONCE A MONTH -- on the last evening, when UTC has rolled into the next
+// month and the user's calendar has not. Every other evening the two agree, so the defect is
+// invisible for ~29 days and then reports the wrong month on the very day that month's figures are
+// most complete. BUG-0075 found three sites doing this, one of them asking the server for
+// plan-vs-actual on a month that had not begun.
+function isoLocalMonth(d) {
+  const x = d || new Date();
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0');
+}
 
 // directly unit-testable via window.__clientMath. 'all' returns both blank; the endpoint
 // treats missing bounds as unbounded.
@@ -9945,7 +10105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       el.innerHTML = 'No ventures yet — track a course, cert, or gear against what it earns back.';
       vnPublishSummary(); return;
     }
-    const nowMonth = new Date().toISOString().slice(0, 7);
+    const nowMonth = isoLocalMonth();       // BUG-0075: not toISOString — see isoLocalMonth
     el.innerHTML = VN.ventures.map(v => {
       const r = v.roi || {};
       const link = v.tag != null
@@ -10293,6 +10453,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   function sfResetForm() {
     $('sf_name').value = ''; $('sf_monthly').value = ''; $('sf_target').value = ''; $('sf_date').value = '';
     $('sf_recur').value = 'none';
+    // A cleared form has no hand-typed figure to protect, so the fill is armed again. Leaving the
+    // flag set is how the NEXT fund silently gets no help at all.
+    if ($('sf_taxable')) $('sf_taxable').checked = false;
+    sfMonthlyTouched = false;
+    if ($('sf_derive_note')) { $('sf_derive_note').hidden = true; $('sf_derive_note').textContent = ''; }
     sfFillBuckets();
   }
   function sfCancelEdit() {
@@ -10311,11 +10476,110 @@ document.addEventListener('DOMContentLoaded', async () => {
     $('sf_target').value = f.target ? String(f.target) : '';
     $('sf_date').value = f.targetDate || '';
     $('sf_recur').value = f.recurrence || 'none';
+    // A saved fund's monthly is a figure the user already settled on — the fill must not reopen it
+    // and quietly propose a different one just because the form was populated.
+    sfMonthlyTouched = !!f.monthlyContribution;
+    sfApplyDerivedMonthly();
     formatUSDFields();
     $('sf_add').textContent = 'Save changes';
     $('sf_cancel_edit').style.display = '';
     $('sf_name').focus();
   }
+  // ── Working the monthly backwards from the target (TODO-263) ────────────────────────────
+  //
+  // THE OWNER, 2026-08-31: "for the sinking funds, we can have an option of the end goal (USGA for
+  // example is 53 dollars per year + tax), and to the [math] backwards."
+  //
+  // Three conventions already exist for the pieces of this, and all three are REUSED rather than
+  // re-derived, because a second implementation of any of them is a second answer that drifts:
+  //
+  //   1. the rolled-forward anniversary  -> tracking.py `fund_effective_target_date`
+  //   2. whole months, partials rounded UP -> goals.py `_months_between`
+  //   3. local sales tax                  -> `bgb.salesTaxPct`, the Budget builder's one rate
+  //
+  // The month-granularity comparison in (1) is deliberate and copied exactly: an anniversary
+  // falling in the as-of MONTH counts as already arrived, so USGA anchored 2026-08-31, read in
+  // August 2026, targets 2027-08-31 — twelve months, $4.42 — not zero months and the whole $53.
+
+  // Feb 29 anchors resolve to Feb 28 in a non-leap year, matching tracking.py `_roll_anniversary`.
+  function sfRollAnniversary(month, day, year) {
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();   // day 0 of next month = last of this
+    const d = Math.min(day, last);
+    return String(year) + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  }
+
+  function sfEffectiveTargetDate(byDate, recurrence, asOfMonth) {
+    if (recurrence !== 'yearly' || !byDate) return byDate || null;
+    const parts = String(byDate).split('-');
+    if (parts.length !== 3) return byDate;
+    const month = +parts[1], day = +parts[2];
+    let year = +String(asOfMonth).split('-')[0];
+    let cand = sfRollAnniversary(month, day, year);
+    // STRICTLY after the as-of month, exactly as the server does it.
+    while (cand.slice(0, 7) <= asOfMonth) { year += 1; cand = sfRollAnniversary(month, day, year); }
+    return cand;
+  }
+
+  // goals.py `_months_between`, verbatim: partial months round UP so a target due mid-month still
+  // has that month available to save in.
+  function sfMonthsBetween(aIso, bIso) {
+    const a = String(aIso).split('-').map(Number), b = String(bIso).split('-').map(Number);
+    let m = (b[0] - a[0]) * 12 + (b[1] - a[1]);
+    if (b[2] > a[2]) m += 1;
+    return m;
+  }
+
+  // Returns null when there is nothing honest to say — no target, no date, or a date already
+  // reached on a one-time fund (where "per month" has no denominator left and inventing one would
+  // be the flat division DESIGN.md §8 rule 8 exists to forbid).
+  function sfDerivedMonthly(o) {
+    const target = +(o && o.target) || 0;
+    if (!(target > 0) || !o || !o.byDate) return null;
+    const pct = o.taxable ? (+o.salesTaxPct || 0) : 0;
+    const effTarget = target * (1 + pct / 100);
+    const todayIso = o.todayIso;
+    const effDate = sfEffectiveTargetDate(o.byDate, o.recurrence || 'none', todayIso.slice(0, 7));
+    if (!effDate) return null;
+    const months = sfMonthsBetween(todayIso, effDate);
+    if (months < 1) return null;          // already due: there is no monthly, only the whole sum
+    return {
+      monthly: Math.round((effTarget / months) * 100) / 100,
+      months: months,
+      effectiveTarget: Math.round(effTarget * 100) / 100,
+      effectiveDate: effDate,
+      taxAdded: Math.round((effTarget - target) * 100) / 100,
+    };
+  }
+
+  // NEVER overwrites a figure the user typed — the same rule, and the same sentence shape, as the
+  // shared-split fill (TODO-256 / BUG-0074). A preset that silently corrects a deliberate figure
+  // is the "wrong answer that looks right" this app keeps refusing.
+  let sfMonthlyTouched = false;
+  function sfApplyDerivedMonthly() {
+    const note = $('sf_derive_note');
+    const mi = $('sf_monthly');
+    if (!note || !mi) return;
+    const d = sfDerivedMonthly({
+      target: rn($('sf_target').value),
+      byDate: $('sf_date').value,
+      recurrence: $('sf_recur').value || 'none',
+      taxable: !!($('sf_taxable') && $('sf_taxable').checked),
+      salesTaxPct: (typeof bgb !== 'undefined' && bgb) ? (+bgb.salesTaxPct || 0) : 0,
+      todayIso: acToday(),
+    });
+    if (!d) { note.hidden = true; note.textContent = ''; return; }
+    const taxBit = d.taxAdded > 0
+      ? ' (' + acAmt(rn($('sf_target').value)) + ' + ' + acAmt(d.taxAdded) + ' tax)' : '';
+    note.hidden = false;
+    note.textContent = acAmt(d.effectiveTarget) + taxBit + ' by ' + sfDateLabel(d.effectiveDate)
+      + ' is ' + d.months + (d.months === 1 ? ' month' : ' months') + ' away'
+      + (sfMonthlyTouched
+          ? ' — you have changed the monthly by hand, so it is left alone.'
+          : ' — filled in from there.');
+    if (sfMonthlyTouched) return;
+    mi.value = acMoneyEdit(d.monthly);
+  }
+
   async function sfAdd() {
     const name = ($('sf_name').value || '').trim();
     const bucket = $('sf_bucket').value || null;
@@ -10384,6 +10648,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     catch (e2) { showToast('Could not delete the fund'); }
   }
   { const b = $('sf_add'); if (b) b.onclick = sfAdd; }
+  // TODO-263: anything that moves the target, the date, the recurrence or the tax tick re-derives.
+  ['sf_target', 'sf_date', 'sf_recur', 'sf_taxable'].forEach(id => {
+    const el = $(id); if (!el) return;
+    el.addEventListener('input', sfApplyDerivedMonthly);
+    el.addEventListener('change', sfApplyDerivedMonthly);
+  });
+  // Typing in Monthly is taking it over — exactly as typing in the partner field is
+  // (`acPartnerTouched`, TODO-256), and deliberately by the same mechanism.
+  //
+  // NO `isTrusted` CHECK, and that is the point: the fill's own write is a plain `.value =`
+  // assignment, which fires no input event at all, so it cannot latch the flag against the user.
+  // The guard is unnecessary, and an earlier draft that had one shipped a real defect — the
+  // control test caught the fill overwriting a hand-typed $25 — because it also rejected every
+  // programmatic path a person can legitimately reach the field by. Following the convention
+  // already in the file was both simpler and correct; inventing a second one was neither.
+  { const mi = $('sf_monthly');
+    if (mi) mi.addEventListener('input', () => {
+      sfMonthlyTouched = true;
+      sfApplyDerivedMonthly();     // repaint the note so it says the figure is being left alone
+    }); }
   { const b = $('sf_cancel_edit'); if (b) b.onclick = sfCancelEdit; }
   { const l = $('sf_list'); if (l) l.addEventListener('click', e => {
       const bd = e.target.closest('[data-sf-budget]'), ed = e.target.closest('[data-sf-edit]'), ar = e.target.closest('[data-sf-archive]');
@@ -16100,7 +16384,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // unlike everything else in this list, it must be defined ABOVE this line, not merely
   // somewhere in the same IIFE, or this whole Object.assign throws a TDZ ReferenceError and
   // silently drops every key in it, not just acAmt's).
-  if (window.__clientMath) Object.assign(window.__clientMath, { acUtilBand, acLiabForceFor, acSaveLiabValue, acAcctMetaHtml, ACT,
+  if (window.__clientMath) Object.assign(window.__clientMath, { sfDerivedMonthly, sfEffectiveTargetDate, sfMonthsBetween, acUtilBand, acLiabForceFor, acSaveLiabValue, acAcctMetaHtml, ACT,
     acRefundSign, acSignedAmount, acSignedLegAmount, acSignedPartnerOwed, acActualByCat, acPcatRowMath, acMatchRecurring, acAmt, acLineRows,
     scResolveSpouseSalaryForApply, bgGrossSeedValue,
     // TODO-250: custom, named budget strategies — STRATEGIES is the same live object
@@ -16205,6 +16489,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     acWire();
     const sd = $('ac_snap_date'); if (sd && !sd.value) sd.value = (ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month));
     acLoadAccounts();
+    // TODO-264: the payee panel lives HERE now, so its fetch does too. The tab-switch handler
+    // already carries the scar this avoids — hpOnOpen and vnLoad were both left being kicked off
+    // by the tab their section used to live on, and neither ever ran again.
+    acPresetsFetch();
   }
 
   function acOnOpen() {
@@ -16215,7 +16503,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sd = $('ac_snap_date'); if (sd && !sd.value) sd.value = (ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month));
     acRenderMonth();
     acLoadSuggest();
-    acPresetsFetch();          // TODO-258: the panel that corrects what acLoadSuggest applies
+    // acPresetsFetch() moved to acOnSetupOpen with the panel it draws (TODO-264). The COMPOSER's
+    // autofill reads ACT.suggest (acLoadSuggest, above), not ACT.presets, so nothing here needs it.
     acLoadTags();
     acLoadTemplates();
     acRenderTagChips();
@@ -16359,80 +16648,207 @@ document.addEventListener('DOMContentLoaded', async () => {
   // count, because those rows were reconciled against a bank statement and rewriting them silently
   // is how a ledger stops matching it.
   ACT.presets = []; ACT.presetsOk = true; ACT.presetEdit = null; ACT.presetOffer = null;
+  ACT.presetFind = ''; ACT.presetFindFocus = false;
+  // Starts TRUE so the first paint is the skeleton, never the empty state. `presetsOk`
+  // alone cannot express "not asked yet", and an empty list is indistinguishable from a
+  // list that has not arrived — which is how a panel comes to say "nothing remembered"
+  // about an account full of payees.
+  ACT.presetsLoading = true;
 
   async function acPresetsFetch() {
+    // Only the FIRST load paints a skeleton. A refetch after saving already has a list on screen,
+    // and replacing it with grey bars for 200ms reads as the save having destroyed something.
+    if (!ACT.presets.length) { ACT.presetsLoading = true; acPresetsRender(); }
     try {
       const d = await getJSON('/api/tracking/payee-presets');
       ACT.presets = (d && d.presets) || []; ACT.presetsOk = true;
     } catch (e) { ACT.presetsOk = false; }
+    ACT.presetsLoading = false;
     acPresetsRender();
   }
 
   function acPresetTagsText(p) { return (p.tags || []).join(', '); }
 
+  // TODO-265 (direction A). The count moved out of the lede into an orientation line that also
+  // states the sort — which was never stated anywhere, though the list has always been ordered
+  // most-used-first (tracking_store.py: `-count, key`).
+  // The last time this payee was actually spent against. `last` has been in the payload since
+  // TODO-258 (tracking_store.py) and the panel threw it away; direction B noticed.
+  //
+  // THE STALENESS LINE IS 18 MONTHS, NOT `ivBalanceAge`'s 90 DAYS, and reusing that would have
+  // been the day's recurring mistake in a new place. A yearly payment — the owner's USGA is the
+  // example that started this — is 11 months old for most of its life and entirely healthy. At 90
+  // days it would wear a warning for nine months in twelve, which trains the reader to ignore the
+  // colour on the rows where it means something. Eighteen months is the first point at which even
+  // an annual rule has missed a cycle.
+  //
+  // The WORDING is `ivBalanceAge`'s, so "5 months ago" reads the same here as on an account.
+  function acPresetAge(last) {
+    const a = (typeof ivBalanceAge === 'function') ? ivBalanceAge(last) : null;
+    if (!a) return null;
+    // A compact form, because this sits in a 56px track under the use count. The full sentence is
+    // the title, so nothing is lost — it is abbreviated, not withheld.
+    const d = a.days;
+    let short;
+    if (d <= 1) short = d === 0 ? 'today' : 'yest.';
+    else if (d < 14) short = d + 'd';
+    else if (d < 60) short = Math.round(d / 7) + 'w';
+    else short = Math.round(d / 30) + 'mo';
+    return { short: short, text: a.text, stale: d >= 548 };   // 548d ≈ 18 months
+  }
+
+  function acPresetsHead() {
+    return '<div class="pp-head" aria-hidden="true">'
+         + '<span class="ac-lbl is-name">Payee</span>'
+         + '<span class="ac-lbl is-bucket">Bucket</span>'
+         + '<span class="ac-lbl is-fills">Category and tags</span>'
+         + '<span class="ac-lbl is-used">Used</span>'
+         + '</div>';
+  }
+
+  // A STATIC skeleton (DESIGN.md §7 forbids motion that loops or runs on load). Its real job is
+  // that the empty state can never flash before the fetch resolves — a panel that says "nothing
+  // remembered yet" for 300ms is telling the user something false, which is the transient half of
+  // the BUG-0056 rule the failure branch below covers for transport errors.
+  function acPresetsSkeleton() {
+    const w = [[72, 64, 88, 42], [58, 52, 66, 34], [80, 70, 74, 46], [64, 60, 82, 38]];
+    return '<div class="pp-list" aria-hidden="true">' + w.map(r =>
+        '<div class="pp-row pp-skel">'
+      + '<span class="pp-name"><i class="sk" style="width:' + r[0] + '%"></i></span>'
+      + '<span class="pp-bucket"><i class="sk" style="width:' + r[1] + '%"></i></span>'
+      + '<span class="pp-sub"><i class="sk" style="width:' + r[2] + '%"></i></span>'
+      + '<span class="pp-count"><i class="sk" style="width:' + r[3] + '%"></i></span>'
+      + '</div>').join('') + '</div>';
+  }
+
   function acPresetsRender() {
     const el = $('ac_presets'); if (!el) return;
-    const cnt = $('ac_presets_count');
-    if (cnt) cnt.textContent = ACT.presetsOk && ACT.presets.length ? ' (' + ACT.presets.length + ')' : '';
+    if (ACT.presetsLoading) { el.innerHTML = acPresetsSkeleton(); return; }
     if (!ACT.presetsOk) {
-      // Never an empty-state claim over a transport failure (the BUG-0056 rule).
-      el.innerHTML = '<div class="warn-box">Could not load what the app remembers — nothing has '
-                   + 'been changed. Reopen this tab to try again.</div>';
+      // Never an empty-state claim over a transport failure (the BUG-0056 rule). The old copy
+      // said "Reopen this tab to try again", which was true of a <details> lid and is false of a
+      // section that is already open — so it now offers the retry it names.
+      el.innerHTML = '<div class="pp-fail warn-box">Could not load what the app remembers — '
+                   + 'nothing has been changed.'
+                   + '<div class="pp-fail-acts"><button type="button" data-ppretry="1">Try again</button></div></div>';
       return;
     }
     if (!ACT.presets.length) {
-      el.innerHTML = '<div class="mini muted">Nothing remembered yet. Log a payment with a payee '
-                   + 'and the app starts filling that payee in for you.</div>';
+      el.innerHTML = '<div class="pp-empty"><p>Nothing remembered yet. Log a payment with a payee '
+                   + 'and the app starts filling that payee in for you.</p></div>';
       return;
     }
-    let h = '<div class="pp-list">';
-    ACT.presets.forEach(p => {
+    const find = (ACT.presetFind || '').trim().toLowerCase();
+    const shown = find
+      ? ACT.presets.filter(p => (p.description || p.key || '').toLowerCase().indexOf(find) >= 0)
+      : ACT.presets;
+
+    // The find box appears only when the list is long enough to need it; below that it is one
+    // more control between the reader and eight rows they can already see.
+    const bar = '<div class="pp-bar"><span class="mini muted">'
+      + (find
+          ? esc(String(shown.length)) + ' of ' + ACT.presets.length + ' payees'
+          : ACT.presets.length + (ACT.presets.length === 1 ? ' payee remembered' : ' payees remembered'))
+      + ', most used first</span>'
+      // Shown when the list is long enough to need it OR when a filter is already active — a
+      // filter arriving from the composer with no box to clear it would look like a broken list.
+      + ((ACT.presets.length > 8 || find)
+          ? '<span class="input-pair pp-find"><input type="text" id="ac_presets_find" '
+            + 'placeholder="Find a payee…" aria-label="Find a payee" value="' + esc(ACT.presetFind || '') + '"></span>'
+          : '')
+      + '</div>';
+
+    if (!shown.length) {
+      el.innerHTML = bar + '<div class="pp-none">No payee matches “' + esc(ACT.presetFind || '') + '”.</div>';
+      acPresetsWireFind();
+      return;
+    }
+
+    let h = bar + acPresetsHead() + '<div class="pp-list">';
+    shown.forEach(p => {
       const bucket = p.bucket ? (KINDS[p.bucket] ? KINDS[p.bucket].label : p.bucket) : '—';
       const bits = [];
       if (p.category) bits.push(esc(p.category));
       if (p.tags && p.tags.length) bits.push(p.tags.map(esc).join(', '));
-      if (p.corrected) bits.push('<span class="pp-fixed">corrected</span>');
-      h += '<div class="pp-row" data-pprow="' + esc(p.key) + '">'
-         + '<span class="pp-name">' + esc(p.description || p.key)
-         + '<span class="pp-sub">' + (bits.join(' · ') || 'no category or tags') + '</span></span>'
+      const editing = ACT.presetEdit === p.key;
+      const name = esc(p.description || p.key);
+      h += '<div class="pp-row' + (editing ? ' is-editing' : '') + '" data-pprow="' + esc(p.key) + '">'
+         + '<span class="pp-name">' + name + '</span>'
+         // "corrected" is `.mng-flag`, not bare --accent: --accent means "clickable" in this row.
+         + (p.corrected ? '<span class="mng-flag">corrected</span>' : '')
          + '<span class="pp-bucket">' + esc(bucket) + '</span>'
-         + '<span class="pp-count">' + (p.count ? p.count + '×' : '—') + '</span>'
+         + '<span class="pp-sub">' + (bits.join(' · ') || 'no category or tags') + '</span>'
+         + '<span class="pp-count">' + (p.count ? p.count + '×' : '—')
+         + (function () {
+             const a = acPresetAge(p.last);
+             if (!a) return '';
+             // A step DOWN from the value it qualifies, in the same column — DESIGN.md §4.3's
+             // rule for a figure's derived companion, and the shape `.jc-stat .cad` already uses.
+             return '<span class="pp-age age-tag' + (a.stale ? ' is-stale' : '') + '" title="last used '
+                  + esc(a.text) + '">' + esc(a.short) + '</span>';
+           })()
+         + '</span>'
          + '<span class="pp-acts">'
          + '<button type="button" class="gl-act gl-act-primary" data-ppedit="' + esc(p.key) + '"'
-         + ' aria-label="Change what is remembered for ' + esc(p.description || p.key) + '">✎</button>'
+         + ' aria-label="Change what is remembered for ' + name + '">✎</button>'
+         // A revert is not a delete: `.gl-act-del` hovers to --bad, which frames "go back to what
+         // your history says" as destruction. It is the least destructive control on the row.
          + (p.corrected
-             ? '<button type="button" class="gl-act gl-act-del" data-ppreset="' + esc(p.key) + '"'
+             ? '<button type="button" class="gl-act" data-ppreset="' + esc(p.key) + '"'
                + ' title="Go back to what your history says" aria-label="Undo the correction for '
-               + esc(p.description || p.key) + '">↺</button>'
+               + name + '">↺</button>'
              : '')
          + '</span>';
-      if (ACT.presetEdit === p.key) {
+      if (editing) {
         h += '<div class="pp-edit">'
-           + '<label class="ac-field"><span class="ac-lbl">Bucket</span>'
+           + '<label class="ac-field is-bucket"><span class="ac-lbl">Bucket</span>'
            + '<select data-ppbucket><option value="">—</option>'
            + Object.keys(KINDS).map(k => '<option value="' + k + '"' + (p.bucket === k ? ' selected' : '')
                + '>' + esc(KINDS[k].label) + '</option>').join('')
            + '</select></label>'
-           + '<label class="ac-field"><span class="ac-lbl">Category</span>'
+           + '<label class="ac-field is-cat"><span class="ac-lbl">Category</span>'
            + '<input type="text" data-ppcat value="' + esc(p.category || '') + '"></label>'
-           + '<label class="ac-field"><span class="ac-lbl">Tags <span style="text-transform:none">· comma separated</span></span>'
+           + '<label class="ac-field is-tags"><span class="ac-lbl">Tags '
+           + '<span class="is-plain">· comma separated</span></span>'
            + '<input type="text" data-pptags value="' + esc(acPresetTagsText(p)) + '"></label>'
-           + '<span class="pp-acts">'
-           + '<button type="button" class="gl-act gl-act-done" data-ppsave="' + esc(p.key) + '">Save</button>'
+           // Save is a COMMIT, and §4.2 gives commits to button.primary. It shipped as `.gl-act`
+           // in a row where every other control is also a borderless text action, so the editor
+           // had no primary at all.
+           + '<span class="pp-edit-acts">'
+           + '<button type="button" class="primary" data-ppsave="' + esc(p.key) + '">Save</button>'
            + '<button type="button" class="gl-act" data-ppcancel="1">Cancel</button>'
            + '</span></div>';
       }
       if (ACT.presetOffer && ACT.presetOffer.key === p.key) {
         const n = ACT.presetOffer.count;
-        h += '<div class="pp-offer">Saved — future entries use this. '
-           + n + ' already logged ' + (n === 1 ? 'entry uses' : 'entries use') + ' the old one. '
-           + '<button type="button" class="gl-act gl-act-primary" data-pprefile="' + esc(p.key) + '">'
+        h += '<div class="pp-offer"><div class="news-box" role="status">'
+           + 'Saved — future entries use this. <b>' + n + '</b> already logged '
+           + (n === 1 ? 'entry uses' : 'entries use') + ' the old one.'
+           + '<span class="pp-offer-acts">'
+           + '<button type="button" data-pprefile="' + esc(p.key) + '">'
            + 'Also re-file ' + (n === 1 ? 'it' : 'them') + '</button>'
-           + '<button type="button" class="gl-act" data-ppdismiss="1">Leave them</button></div>';
+           + '<button type="button" class="gl-act" data-ppdismiss="1">Leave them</button>'
+           + '</span></div></div>';
       }
       h += '</div>';
     });
     el.innerHTML = h + '</div>';
+    acPresetsWireFind();
+  }
+
+  // Re-bound after every render because the input is inside the replaced markup. Focus and caret
+  // are restored: without it, typing the second character of a search re-renders the list and
+  // drops you out of the field you are still typing into.
+  function acPresetsWireFind() {
+    const fi = $('ac_presets_find'); if (!fi) return;
+    if (ACT.presetFindFocus) {
+      fi.focus();
+      try { fi.setSelectionRange(fi.value.length, fi.value.length); } catch (e) {}
+    }
+    fi.addEventListener('input', () => {
+      ACT.presetFind = fi.value; ACT.presetFindFocus = true; acPresetsRender();
+    });
+    fi.addEventListener('blur', () => { ACT.presetFindFocus = false; });
   }
 
   function acPresetFormValues(key) {
@@ -16521,7 +16937,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (bsel && hit.bucket != null) { bsel.value = hit.bucket; acFillCatList(); }
     if (cat && !cat.value && hit.category) cat.value = hit.category;
     if (hit.tags && hit.tags.length) hit.tags.forEach(t => acAddTag(t));   // also auto-fill its usual tags (merges, dedups, removable)
-    if (hint) hint.innerHTML = '↩ from last time: <b>' + esc(KINDS[hit.bucket] ? KINDS[hit.bucket].label : (hit.bucket || '—')) + '</b>' + (hit.category ? ' · ' + esc(hit.category) : '') + (hit.tags && hit.tags.length ? ' · ' + hit.tags.map(esc).join(', ') : '') + ' <span class="muted">(editable)</span>';
+    // TODO-266: "(editable)" was true and useless — it said the rule could be changed without
+    // saying where, and since TODO-264 the answer is another tab. The moment you notice a wrong
+    // autofill is while you are logging, so the pointer belongs at that moment.
+    //
+    // A <button>, never an anchor: there is no URL to go to, and this project has shipped a bare
+    // action-anchor with no :focus-visible twice. A button is covered by the global enumerated
+    // focus rule by construction, so the regression cannot recur here.
+    //
+    // Setup's own precedent is that moved sections leave no back-pointer (Categories, Split
+    // presets). This is the deliberate exception, and the reason is the timing: nobody discovers a
+    // mis-filed category while browsing Setup — they discover it mid-entry, holding the payee.
+    if (hint) hint.innerHTML = '↩ from last time: <b>' + esc(KINDS[hit.bucket] ? KINDS[hit.bucket].label : (hit.bucket || '—')) + '</b>' + (hit.category ? ' · ' + esc(hit.category) : '') + (hit.tags && hit.tags.length ? ' · ' + hit.tags.map(esc).join(', ') : '')
+      + ' <button type="button" class="gl-act ac-hint-fix" data-ppgoto="' + esc(memo)
+      + '">Change what it fills in</button>';
+    // BUG-0074: the category above is assigned, not typed, so `ac_tx_cat`'s own input/change
+    // listeners never run — and those are what apply the shared budget's split (TODO-256). The
+    // result depended on WHICH FIELD YOU FILLED FIRST: payee→amount worked (the amount's listener
+    // rescued it), amount→payee silently did not. The form's own order is amount (above) then
+    // payee (below), so the default path was the broken one.
+    //
+    // Called directly rather than dispatched as a synthetic `input`. A synthetic event would also
+    // re-enter the combobox/category machinery for a value nobody typed, and this needs exactly
+    // one thing: the same fill the manual path gets, from the same function, so there is no second
+    // convention to drift (the lesson BUG-0066 was: follow the existing apportionment, do not
+    // invent a parallel one). Idempotent, and it still honours acPartnerTouched.
+    acApplySharedPreset();
   }
 
   // Enter in Category / Payee accepts the top datalist suggestion (prefix match beats substring)
@@ -16926,7 +17367,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (let i = n - 1; i >= 0; i--) {
       // Day 0 of the NEXT month is the last day of this one, and building it in UTC keeps the
       // date from sliding a day west of Greenwich (the BUG-0042 class).
-      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 0));
+      // BUG-0075: the ANCHOR is the user's LOCAL year/month; only the CONSTRUCTION is UTC.
+      // `now.getUTCMonth()` made this window follow Greenwich's calendar, so on the last day of a
+      // month, from ~19:00 US Central onward, it appended a month-end that had not happened and
+      // the sparkline drew today's balance as though it were next month's — precisely the line
+      // the "never draws a balance you did not have" guard exists to prevent.
+      // Date.UTC for CONSTRUCTION stays (BUG-0042: a local `new Date(y, m, 0)` slides a day west
+      // of Greenwich). The two facts are separate and both are true.
+      const d = new Date(Date.UTC(now.getFullYear(), now.getMonth() - i + 1, 0));
       out.push(d.toISOString().slice(0, 10));
     }
     return out;
@@ -18212,7 +18660,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (bk) bk.innerHTML = '<option value="">—</option>' + Object.keys(KINDS).map(k =>
       '<option value="' + k + '">' + esc(KINDS[k].label) + '</option>').join('');
     const an = $('sch_anchor');
-    if (an && !an.value) an.value = new Date().toISOString().slice(0, 10);
+    if (an && !an.value) an.value = isoLocalDate();      // BUG-0075: the UTC date is tomorrow's, all evening
     // Shape the form the FIRST time it is built. Without this it opens showing every cadence
     // field at once — weekday, both day pickers, the interval and the month — with an empty
     // preview, and only tidies itself once the user changes something. Guarded so a later
@@ -18272,7 +18720,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       day1: (f === 'semimonthly' || f === 'monthly' || f === 'yearly') ? +(($('sch_d1') || {}).value) || 1 : null,
       day2: f === 'semimonthly' ? +(($('sch_d2') || {}).value) || SCH_LAST_DAY : null,
       monthOfYear: f === 'yearly' ? +(($('sch_moy') || {}).value) || 1 : null,
-      anchorOn: (($('sch_anchor') || {}).value) || new Date().toISOString().slice(0, 10),
+      // BUG-0075: isoLocalDate, not toISOString — the latter is the UTC date, so a schedule saved
+      // in the evening anywhere west of Greenwich was anchored on TOMORROW. On the last evening of
+      // a month that anchor lands in the NEXT month and `schedules.expand` then produces nothing
+      // for the current one: the occurrence you just created for today does not exist.
+      anchorOn: (($('sch_anchor') || {}).value) || isoLocalDate(),
       weekendShift: (($('sch_shift') || {}).value) || 'none',
       autoPost: !!($('sch_auto') || {}).checked,
     };
@@ -18298,7 +18750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     set('sch_d1', s && s.day1 != null ? String(s.day1) : '15');
     set('sch_d2', s && s.day2 != null ? String(s.day2) : String(SCH_LAST_DAY));
     if (s && s.monthOfYear) set('sch_moy', String(s.monthOfYear));
-    set('sch_anchor', s ? s.anchorOn : new Date().toISOString().slice(0, 10));
+    set('sch_anchor', s ? s.anchorOn : isoLocalDate());   // BUG-0075, as above
     set('sch_shift', s ? s.weekendShift : 'before');
     const cancel = $('sch_cancel'); if (cancel) cancel.style.display = s ? '' : 'none';
     const save = $('sch_save'); if (save) save.textContent = s ? 'Update schedule' : 'Save schedule';
@@ -18398,7 +18850,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const dateEl = $('ac_tx_date');
     if (dateEl) {
       if (ACT.month === acNowMonth()) {
-        dateEl.value = new Date().toISOString().slice(0, 10);
+        // BUG-0075: acNowMonth() is LOCAL, so pairing it with the UTC date was internally
+        // inconsistent — on the last evening of a month this prefilled a date in the NEXT month
+        // while the branch it sits in had just concluded we are viewing THIS one.
+        dateEl.value = isoLocalDate();
       } else if (r.dueDay) {
         const [y, mo] = ACT.month.split('-').map(Number);
         const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();   // day 0 of next month = last of this
@@ -19225,6 +19680,101 @@ document.addEventListener('DOMContentLoaded', async () => {
       const e = document.getElementById(id); if (e) e.addEventListener('change', schSyncFormShape);
     });
 
+  // ---- Learned payee presets (TODO-258) ----
+  //
+  // TODO-264: extracted from the #tab-actuals delegate and bound to BOTH panels, because the panel
+  // it drives now lives on #tab-setup. Moving the markup without moving the delegation ROOT is a
+  // quieter version of the same fault the tab-switch handler already carries a scar for: every
+  // control still rendered, every click reached nothing, and the only symptom was that ✎ did
+  // nothing at all. Bound to both rather than moved, so a preset row rendered anywhere still works.
+  async function acPresetDelegate(ev) {
+    // ---- Learned payee presets (TODO-258) ----
+    { const e = ev.target.closest('[data-ppedit]');
+      if (e) { ev.preventDefault(); ACT.presetOffer = null;
+        ACT.presetEdit = ACT.presetEdit === e.dataset.ppedit ? null : e.dataset.ppedit;
+        acPresetsRender(); return true; } }
+    // Carries the payee across. Landing on the TOP of a forty-row list having just been asked
+    // "which one?" is the kind of hand-off that makes people give up on the trip.
+    { const go = ev.target.closest('[data-ppgoto]');
+      if (go) {
+        ev.preventDefault();
+        const want = go.dataset.ppgoto || '';
+        const tb = document.querySelector('#tabbar .tab-btn[data-tab="setup"]');
+        if (tb) tb.click();
+        acShowSetupPane('payees');
+        ACT.presetFind = want;
+        ACT.presetFindFocus = false;
+        // The pane's own open path refetches; render now so the filter is applied to what is
+        // already in hand, and again when the fetch lands.
+        acPresetsRender();
+        const row = document.querySelector('#ac_presets .pp-row');
+        if (row) row.scrollIntoView({
+          behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+                      ? 'auto' : 'smooth', block: 'center' });
+        return true;
+      } }
+    { const rt = ev.target.closest('[data-ppretry]');
+      if (rt) { ev.preventDefault(); await acPresetsFetch(); return true; } }
+    { const c = ev.target.closest('[data-ppcancel]');
+      if (c) { ev.preventDefault(); ACT.presetEdit = null; acPresetsRender(); return true; } }
+    { const d = ev.target.closest('[data-ppdismiss]');
+      if (d) { ev.preventDefault(); ACT.presetOffer = null; acPresetsRender(); return true; } }
+    { const sv = ev.target.closest('[data-ppsave]');
+      if (sv) {
+        ev.preventDefault();
+        if (acWriteGuard()) return true;
+        const key = sv.dataset.ppsave, body = acPresetFormValues(key);
+        if (!body) return true;
+        let saved;
+        try { saved = await put('/api/tracking/payee-presets', body); }
+        catch (er) { showToast('Could not save that — ' + (errDetail(er) || 'the server refused it')); return true; }
+        ACT.presetEdit = null;
+        // The offer is made ONLY when there is something to offer, and it names the number:
+        // asking somebody to authorise an unknown amount of rewriting is not asking.
+        ACT.presetOffer = (saved && saved.loggedCount > 0)
+          ? { key: key, count: saved.loggedCount } : null;
+        await acPresetsFetch();
+        acLoadSuggest();                       // the composer reads /suggest, so refresh it too
+        return true;
+      } }
+    { const rf = ev.target.closest('[data-pprefile]');
+      if (rf) {
+        ev.preventDefault();
+        if (acWriteGuard()) return true;
+        const key = rf.dataset.pprefile;
+        const p = ACT.presets.find(x => x.key === key); if (!p) return true;
+        let out;
+        try {
+          out = await post('/api/tracking/payee-presets/refile', {
+            description: p.description || key, bucket: p.bucket,
+            category: p.category, tags: p.tags || [] });
+        } catch (er) { showToast('Could not re-file those — ' + (errDetail(er) || 'the server refused it')); return true; }
+        ACT.presetOffer = null;
+        const n = (out && out.refiled) || 0;
+        const skipped = (out && out.skippedSplits) || 0;
+        showToast('Re-filed ' + n + ' ' + (n === 1 ? 'entry' : 'entries')
+                + (skipped ? ' · ' + skipped + ' split left alone' : ''));
+        await acPresetsFetch(); acRefresh();
+        return true;
+      } }
+    { const rs = ev.target.closest('[data-ppreset]');
+      if (rs) {
+        ev.preventDefault();
+        if (acWriteGuard()) return true;
+        try { await del('/api/tracking/payee-presets/' + encodeURIComponent(rs.dataset.ppreset)); }
+        catch (er) { showToast('Could not undo that — ' + (errDetail(er) || 'the server refused it')); return true; }
+        ACT.presetEdit = null; ACT.presetOffer = null;
+        await acPresetsFetch(); acLoadSuggest();
+        return true;
+      } }
+    return false;
+  }
+
+    // The payee panel lives on Setup now, so Setup needs the same delegate. Nothing else on that
+    // tab uses these attributes, so this listener is inert for every other click.
+    { const sp = document.getElementById('tab-setup');
+      if (sp) sp.addEventListener('click', async ev => { await acPresetDelegate(ev); }); }
+
     const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
       // Prefill the composer from a recurring bill that has not arrived yet. First in the chain
@@ -19233,63 +19783,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       { const lg = ev.target.closest('[data-reclog]');
         if (lg) { ev.preventDefault(); acLogFromRecurring(lg.dataset.reclog); return; } }
 
-      // ---- Learned payee presets (TODO-258) ----
-      { const e = ev.target.closest('[data-ppedit]');
-        if (e) { ev.preventDefault(); ACT.presetOffer = null;
-          ACT.presetEdit = ACT.presetEdit === e.dataset.ppedit ? null : e.dataset.ppedit;
-          acPresetsRender(); return; } }
-      { const c = ev.target.closest('[data-ppcancel]');
-        if (c) { ev.preventDefault(); ACT.presetEdit = null; acPresetsRender(); return; } }
-      { const d = ev.target.closest('[data-ppdismiss]');
-        if (d) { ev.preventDefault(); ACT.presetOffer = null; acPresetsRender(); return; } }
-      { const sv = ev.target.closest('[data-ppsave]');
-        if (sv) {
-          ev.preventDefault();
-          if (acWriteGuard()) return;
-          const key = sv.dataset.ppsave, body = acPresetFormValues(key);
-          if (!body) return;
-          let saved;
-          try { saved = await put('/api/tracking/payee-presets', body); }
-          catch (er) { showToast('Could not save that — ' + (errDetail(er) || 'the server refused it')); return; }
-          ACT.presetEdit = null;
-          // The offer is made ONLY when there is something to offer, and it names the number:
-          // asking somebody to authorise an unknown amount of rewriting is not asking.
-          ACT.presetOffer = (saved && saved.loggedCount > 0)
-            ? { key: key, count: saved.loggedCount } : null;
-          await acPresetsFetch();
-          acLoadSuggest();                       // the composer reads /suggest, so refresh it too
-          return;
-        } }
-      { const rf = ev.target.closest('[data-pprefile]');
-        if (rf) {
-          ev.preventDefault();
-          if (acWriteGuard()) return;
-          const key = rf.dataset.pprefile;
-          const p = ACT.presets.find(x => x.key === key); if (!p) return;
-          let out;
-          try {
-            out = await post('/api/tracking/payee-presets/refile', {
-              description: p.description || key, bucket: p.bucket,
-              category: p.category, tags: p.tags || [] });
-          } catch (er) { showToast('Could not re-file those — ' + (errDetail(er) || 'the server refused it')); return; }
-          ACT.presetOffer = null;
-          const n = (out && out.refiled) || 0;
-          const skipped = (out && out.skippedSplits) || 0;
-          showToast('Re-filed ' + n + ' ' + (n === 1 ? 'entry' : 'entries')
-                  + (skipped ? ' · ' + skipped + ' split left alone' : ''));
-          await acPresetsFetch(); acRefresh();
-          return;
-        } }
-      { const rs = ev.target.closest('[data-ppreset]');
-        if (rs) {
-          ev.preventDefault();
-          if (acWriteGuard()) return;
-          try { await del('/api/tracking/payee-presets/' + encodeURIComponent(rs.dataset.ppreset)); }
-          catch (er) { showToast('Could not undo that — ' + (errDetail(er) || 'the server refused it')); return; }
-          ACT.presetEdit = null; ACT.presetOffer = null;
-          await acPresetsFetch(); acLoadSuggest();
-          return;
-        } }
+      if (await acPresetDelegate(ev)) return;
 
       // ---- Scheduled money ----
       // The settled-and-on-plan fold. Nothing is deleted by folding and the arithmetic in the
@@ -20007,7 +20501,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function fireGetLatestNW() {
     // Prefer a real balance snapshot from the current month's plan-vs-actual response.
     try {
-      const nowMonth = new Date().toISOString().slice(0, 7);
+      // BUG-0075: this asked for NEXT month's plan-vs-actual on the last evening of every month,
+      // and a month that has not started has no snapshots — so the FIRE tab fell through to its
+      // weaker fallback on the one day the month's real figure was most complete.
+      const nowMonth = isoLocalMonth();
       const data = await getJSON('/api/tracking/plan-vs-actual?month=' + nowMonth);
       const snaps = (data.comparison && data.comparison.netWorth && data.comparison.netWorth.realSnapshots)
                  || (data.actuals && data.actuals.netWorthSnapshots) || [];
