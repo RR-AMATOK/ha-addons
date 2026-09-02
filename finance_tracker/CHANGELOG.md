@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.7
+
+The budget row is a readable width again, and a line's name now sits next to its number instead of
+most of a screen away from it.
+
+**The row no longer stretches to fill the window**
+
+There were **838 pixels of empty space** between a line's chips and its total — the same 838px
+whether your window was 1500px or 1900px wide, and still 538px at 1100px. The row was stretching to
+whatever width it was given, so the two things you actually read together, the name and the amount
+it costs you, ended up at opposite ends of it.
+
+The row now holds a fixed, comfortable width, and the gap is **12px on a line with tags, 188px on
+one without**. It is the same width on a laptop and on a large monitor, so the budget looks the
+same wherever you open it.
+
+**Longer names fit**
+
+The name box grew from 150px to 270px. Names like "Health insurance premium" and "Youtube Premium
+Family" were being cut off before; they fit now.
+
+**Numbers line up with the totals above them**
+
+A bucket's total and a group's subtotal each sat 8px to the right of the column of numbers beneath
+them — close enough to look almost right, which is worse than looking wrong. All three now sit on
+one line. Grouped lines like the ones under **HOUSING** stay on that same column too.
+
+**Shared lines read more quietly**
+
+- Every shared line was labelled `HOUSEHOLD` even though its tinted background and its "You + …"
+  line already said so. The badge is gone; nothing is lost and the row is calmer.
+- A shared line whose partner has not set a name showed a long string of letters and numbers where
+  the name should be, which spilled over the amount beside it. It now reads **"You + your
+  partner"**, which is what it was always meant to say.
+- Shared lines were slightly different heights depending on how long that label was. They are all
+  the same height now.
+
 ## 0.8.6
 
 Shared expenses now behave like every other budget line — including being set up as a recurring
