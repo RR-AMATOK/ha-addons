@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.8.6
+
+Shared expenses now behave like every other budget line — including being set up as a recurring
+bill, which they could not be at all before.
+
+**A shared line is a budget row again**
+
+Since 0.8.4 a shared line had been rendering with more cells than the budget table has columns.
+The visible result: the shared line's numbers sat under the wrong headings, and *every* line in
+that budget — shared or not — was squeezed into about half the width available, with a wide empty
+band down the right-hand side. Both are fixed. Shared and personal lines now sit on exactly the
+same six columns.
+
+**The ⋮ menu reaches shared lines**
+
+- **Recurring bill.** Tick it on a shared line and pick the day, exactly as on a personal one. The
+  bill is booked at **your share**, not the whole amount — an $800 grocery line split 50/50 is a
+  $400 bill in your forecast, so your partner's half is never counted as money leaving your
+  account.
+- **Edit** moved into the ⋮ menu, so every row on the budget now has one place for its actions
+  instead of a link on some rows and a menu on others.
+- The menu **states** the split, the whole bill and the sales-tax setting, but does not let you
+  change them from the row — those are agreed with the other person and still change only through
+  the shared editor's Save.
+
+**Also fixed**
+
+- The household-only block (shared lines in a category you have no bucket for) was sizing its
+  columns independently of the rest of the budget. It lines up now.
+- Cancelling a shared edit dropped keyboard focus to the top of the page.
+
 ## 0.8.5
 
 Three fixes to the budget line's **⋮** menu, all of them things 0.8.4 got wrong.

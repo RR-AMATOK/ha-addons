@@ -1849,9 +1849,8 @@
   .hb-tr > td { background:color-mix(in srgb, var(--accent) 5%, transparent); }
   /* `.res-table` right-aligns every cell except the first, which is right for numeric columns
      but pushed the shared line's NAME to the right edge of its cell while the local rows' name
-     INPUTS filled theirs from the left -- the two read as different columns. Left-align the
-     text cells; the money columns keep the table's right alignment. */
-  .hb-tr > td:nth-child(2), .hb-tr > td:nth-child(4) { text-align:left; }
+     INPUTS filled theirs from the left -- the two read as different columns. Now covered for BOTH
+     row shapes by `.bgb-items td:nth-child(-n+4)` below; kept only as the record of why. */
   .hb-tr:last-of-type > td { border-bottom:1px solid var(--line); }
   .hb-tr .gl-act { white-space:nowrap; }
   .hb-grip { cursor:grab; }
@@ -12813,6 +12812,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const mine = (line.shares || []).find(s => s.userId === window.__scopeId) || null;
     const pct = mine && mine.ratioBps != null ? Math.round(mine.ratioBps / 100 * 10) / 10 : null;
     const totalUsd = line.totalCents != null ? line.totalCents / 100 : null;
+    // The menu key namespace. Local rows key on `bucket_group_index`, which a shared line has no
+    // equivalent of -- it is placed per-user and has no index in anyone's plan -- so it keys on its
+    // server id instead. `hb` prefixed so the two namespaces can never collide.
+    const key = 'hb' + line.id;
+    const nameFor = esc(line.name || 'untitled');
+    // SAME flag vocabulary and SAME order as a local row, because the two are now rows of one
+    // list and the eye reads down a column. `Household` is the one flag a local row cannot have,
+    // and it replaces the old dedicated column that used to carry that meaning.
+    let flags = '<span data-recchip="' + key + '"></span>';
+    if (line.taxable) flags += '<span class="mng-flag" title="local sales tax is added">+tax</span>';
+    if (pct != null) flags += '<span class="mng-flag" title="shared -- you pay ' + pct + '%">Your ' + pct + '%</span>';
+    flags += '<span class="hb-badge" title="' + esc(hbDetailText(line, mine)) + '">Household</span>';
     return '<tr class="hb-tr" data-hbline="' + line.id + '" data-hbrow="1">'
       + '<td class="bgb-grip hb-grip" draggable="true" title="drag to reorder shared lines">&#10287;</td>'
       + '<td><span class="hb-name">' + esc(line.name) + '</span>'
@@ -12820,14 +12831,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<td>' + (totalUsd != null
           ? '<span class="hb-val" title="the whole bill, agreed with everyone on this line">' + f2(totalUsd) + '</span>'
           : '<span class="hb-val hb-val-muted" title="a pooled line has no single total -- it is the sum of contributions">pooled</span>') + '</td>'
-      + '<td>' + (line.taxable ? '<span class="mini muted">tax</span>' : '') + '</td>'
-      + '<td>' + (pct != null
-          ? '<span class="hb-val" title="your share of it">' + pct + '%</span>'
-          : '<span class="hb-val hb-val-muted">your part</span>') + '</td>'
+      + '<td><span class="bgb-flags">' + flags + '</span></td>'
       + '<td class="num hb-amt">' + f2(hbCentsToUsd(line.yourShareCents)) + '</td>'
-      + '<td><a href="#" class="gl-act gl-act-primary" data-hbedit="' + line.id + '"'
-        + ' aria-label="Edit ' + esc(line.name) + ', shared with ' + esc(hbParticipantLabel(line)) + '">Edit</a></td>'
-      + '<td></td>'
+      // The same overflow menu every other budget row has. What is NOT in it matters as much as
+      // what is: no split preset, no sales-tax tick and no delete, because all three are agreed
+      // with another person and change only through the shared editor's explicit Save. The menu
+      // STATES them (readonly rows) and offers the editor; it never lets the row contradict it.
+      + '<td class="bgb-rowmenu-cell">'
+      +   '<button type="button" class="bgb-dots" data-rowmenu="' + key + '" aria-haspopup="true"'
+      +   ' aria-expanded="false" aria-label="More options for ' + nameFor + '">&#8942;</button>'
+      +   '<div class="backup-popup bgb-rowmenu" data-rowmenupanel="' + key + '" hidden role="menu"'
+      +   ' aria-label="Options for ' + nameFor + '">'
+      +     '<div class="filter-opt bgb-mi" style="cursor:default"><span>Your share</span>'
+      +       '<span class="bgb-mi-val">' + (pct != null ? pct + '%' : 'pooled') + '</span></div>'
+      +     '<div class="filter-opt bgb-mi" style="cursor:default"><span>Whole bill</span>'
+      +       '<span class="bgb-mi-val">' + (totalUsd != null ? f2(totalUsd) : 'pooled') + '</span></div>'
+      +     '<div class="filter-opt bgb-mi" style="cursor:default"><span>Add sales tax</span>'
+      +       '<span class="bgb-mi-val">' + (line.taxable ? 'on' : 'off') + '</span></div>'
+      +     '<hr>'
+      +     '<button type="button" class="filter-opt" data-hbedit="' + line.id + '"'
+      +     ' aria-label="Edit ' + nameFor + ', shared with ' + esc(hbParticipantLabel(line)) + '">'
+      +     'Edit shared line&hellip;</button>'
+      +     '<div class="bgb-rec" data-recsec="' + key + '">'
+      +       '<label class="filter-opt bgb-mi" title="a bill that arrives every month">'
+      +         '<span style="display:flex;align-items:center;gap:7px">'
+      +         '<input type="checkbox" data-rectick="' + key + '"> Recurring bill</span>'
+      +         '<span class="bgb-mi-val" data-recval="' + key + '">no</span></label>'
+      +       '<div class="bgb-rec-body" data-recbody="' + key + '" hidden></div>'
+      +     '</div>'
+      +   '</div>'
+      + '</td>'
       + '</tr>';
   }
 
@@ -12893,8 +12926,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<span class="mini muted" title="No local budget bucket uses this category yet -- these shared lines still count toward your totals below.">household only</span>'
       + '<span class="bgb-bsum hb-orphan-bsum" data-hbkind="' + esc(kind) + '"></span>'
       + '</div>'
-      // Same table shell as a real bucket -- these are <tr>s now, so they need one.
-      + '<table class="res-table bgb-items"><tbody>' + hbLinesHtml(lines) + '</tbody></table>'
+      // Same table shell as a real bucket -- these are <tr>s now, so they need one. And the SAME
+      // colgroup: `.bgb-items` is `table-layout: fixed`, so a table without one takes its column
+      // widths from whatever its first row happens to be, and this orphan block would not line up
+      // with the ordinary buckets above it. Kept identical to itemsTable()'s by construction.
+      + '<table class="res-table bgb-items">' + bgbItemsColgroup()
+      + '<tbody>' + hbLinesHtml(lines) + '</tbody></table>'
       + '</div>';
   }
 
@@ -12938,7 +12975,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // A <tr>/<td colspan> now, not a bare <div>: the row it replaces lives inside the items
     // table, so the editor has to be a table row or the browser hoists it out and it renders
     // above the whole bucket.
-    return '<tr class="hb-edit-tr"><td colspan="8">'
+    return '<tr class="hb-edit-tr"><td colspan="6">'
       + '<div class="hb-editing" data-hbline="' + line.id + '">'
       + '<div class="hb-edit-title"><span class="hb-badge">Shared</span> Editing a shared line &mdash; saving changes it for everyone on it.</div>'
       + '<div class="ac-row" style="flex-wrap:wrap">' + body + '</div>'
@@ -13083,13 +13120,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     hbEditId = +id;
     bgbRender();
     const f = document.querySelector('[data-hb-ratio="' + id + '"], [data-hb-contrib="' + id + '"], [data-hb-name="' + id + '"]');
-    if (f) f.focus();
+    // preventScroll for the same reason the row menu needs it (BUG-0081b): the editor replaces a
+    // row in place, so there is nothing to scroll TO, and focus()'s default drags the page.
+    if (f) f.focus({ preventScroll: true });
   }
   function hbCancelEdit(id) {
     hbEditId = null;
     bgbRender();
-    const btn = id != null ? document.querySelector('[data-hbedit="' + id + '"]') : null;
-    if (btn) btn.focus();
+    // Return focus to the ⋮ TRIGGER, not to the Edit control. Edit moved inside the row menu, and
+    // the menu re-renders closed -- so `[data-hbedit]` is now inside a `[hidden]` subtree and
+    // focusing it silently does nothing, dropping a keyboard user back at the top of the document.
+    // The trigger is the thing that is actually on screen, and it is what opens the menu again.
+    const back = id != null
+      ? (document.querySelector('[data-rowmenu="' + CSS.escape('hb' + id) + '"]')
+         || document.querySelector('[data-hbedit="' + id + '"]'))
+      : null;
+    if (back) back.focus({ preventScroll: true });
   }
   // Keep the editor's "%" and "$" fields in lockstep. Percent is the stored truth (the API
   // takes ratioBps), so the dollar box is a second way to REACH a percent, never a second
@@ -13245,7 +13291,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const b = bgb.buckets[bi];
     if (hbRoster === null) {
       hbFetchRoster();
-      return '<tr><td colspan="8"><span class="mini muted">Loading household roster&hellip;</span></td></tr>';
+      return '<tr><td colspan="6"><span class="mini muted">Loading household roster&hellip;</span></td></tr>';
     }
     const members = hbRoster;
     const defaultOwnerPct = it.split == null ? 100 : Math.max(0, Math.min(100, +it.split));
@@ -13299,7 +13345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nudge = !members.length
       ? '<p class="mini muted">No other household member has opened the app yet &mdash; this line will be 100% yours until someone joins. You can still create it now, or invite them first.</p>'
       : '';
-    return '<tr data-hbpromo="' + bi + '_' + g + '_' + ii + '"><td colspan="8">'
+    return '<tr data-hbpromo="' + bi + '_' + g + '_' + ii + '"><td colspan="6">'
       + '<div class="hb-editing">'
       + '<div class="hb-edit-title"><span class="hb-badge">Household</span> Promote &ldquo;' + esc(it.name) + '&rdquo; to a shared line &mdash; the local line is removed once this is created, so it is never counted twice.</div>'
       + '<div class="ac-row" style="flex-wrap:wrap">'
@@ -13680,10 +13726,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   function bgbSyncRecurringUI() {
     const known = SCH_STATE.listOk !== false && Array.isArray(SCH_STATE.schedules);
     document.querySelectorAll('[data-recchip]').forEach(chip => {
-      const row = chip.closest('tr[data-b]'); if (!row) return;
-      const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
-      const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
-      const sc = (known && it) ? bgbScheduleFor(kind, it.name) : null;
+      const row = chip.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
+      const tgt = bgbRecTargetFor(row); if (!tgt) return;
+      const sc = known ? bgbScheduleFor(tgt.kind, tgt.name) : null;
       chip.innerHTML = sc
         ? '<span class="mng-flag" title="' + esc(schCadenceText(sc)) + '">due '
           + esc(schDayLabel(bgbScheduleIsSimple(sc) ? sc.day1 : sc.day1)) + '</span>'
@@ -13706,16 +13751,56 @@ document.addEventListener('DOMContentLoaded', async () => {
           + '<button type="button" class="gl-act gl-act-primary" data-recopen="' + esc(String(sc.id)) + '">'
           + 'Edit in Scheduled money…</button>';
       } else {
-        const shared = it ? bgbLinesSharingKey(kind, it.name) : 1;
+        const shared = tgt.shared;
         body.innerHTML = '<select data-recday2="' + esc(key) + '" aria-label="Day of the month it posts">'
           + bgbDayOptions(sc.day1) + '</select>'
           + (+sc.day1 >= 29 && +sc.day1 <= 31
               ? '<span class="bgb-rec-note">Short months fall back to their last day.</span>' : '')
           + (shared > 1
-              ? '<span class="bgb-rec-warn">' + shared + ' budget lines are called “' + esc(it.name)
+              ? '<span class="bgb-rec-warn">' + shared + ' budget lines are called “' + esc(tgt.name)
                 + '” here, and they share this one bill.</span>' : '');
       }
     });
+  }
+
+  // The six columns of the budget row, in one place. BOTH tables that render `.bgb-items` need
+  // it -- the ordinary bucket and the household-only orphan block -- and a copy in each is how
+  // they drift out of alignment.
+  //
+  // The FLEXIBLE column is the flags one, not the name. Getting that backwards is what put the
+  // owner's boxes a thousand pixels right of where they belong: `.res-table` aligns every cell
+  // RIGHT, so an unsized name column absorbed all the slack and its 150px input floated at the far
+  // edge of it. The name is a fixed-width input; the flags cell holds a variable number of chips
+  // and is the only thing here that genuinely wants the room.
+  function bgbItemsColgroup() {
+    return '<colgroup><col style="width:26px"><col style="width:170px"><col style="width:104px">'
+         + '<col><col style="width:104px"><col style="width:52px"></colgroup>';
+  }
+
+  // Which line does this row describe? TWO row shapes share the items table now: a local item
+  // (data-b/data-g/data-i, an index into the plan) and a shared household line (data-hbline, a
+  // server id). They join to a schedule the SAME way -- bucket KIND plus lowercased name -- so
+  // resolving the shape once here keeps every caller below shape-agnostic.
+  //
+  // `line.bucket` is already a KIND on the server ('need'/'want'/...), which is exactly what the
+  // join wants, so a shared line needs no placement lookup to answer this.
+  function bgbRecTargetFor(row) {
+    if (!row || !row.dataset) return null;
+    if (row.dataset.hbline != null) {
+      const line = (hb.lines || []).find(l => String(l.id) === String(row.dataset.hbline));
+      if (!line) return null;
+      const kind = line.bucket || 'other';
+      return { kind: kind, name: line.name || '', hb: line,
+               // Your share, not the whole bill -- see the amount note in the tick handler.
+               amount: hbCentsToUsd(line.yourShareCents),
+               shared: bgbLinesSharingKey(kind, line.name) };
+    }
+    if (row.dataset.b == null) return null;
+    const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
+    if (!it) return null;
+    const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
+    return { kind: kind, name: it.name || '', it: it, amount: myShare(it),
+             shared: bgbLinesSharingKey(kind, it.name) };
   }
 
   function bgbScheduleFor(kind, name) {
@@ -13730,12 +13815,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // before this control existed and true after; the difference is that it is now said out loud.
   function bgbLinesSharingKey(kind, name) {
     const want = String(name || '').trim().toLowerCase();
+    if (!want) return 0;
     let n = 0;
     (bgb.buckets || []).forEach(b => {
       if ((b.kind || 'other') !== kind) return;
       const scan = it => { if ((it.name || '').trim().toLowerCase() === want) n++; };
       (b.items || []).forEach(scan);
       (b.groups || []).forEach(g => (g.items || []).forEach(scan));
+    });
+    // Shared lines land on the same key and therefore collide the same way -- a local "Rent" in a
+    // need bucket and a SHARED "Rent" are one bill to the join, and the warning has to say so or
+    // it under-reports exactly the case a household is most likely to create.
+    (hb.lines || []).forEach(l => {
+      if ((l.bucket || 'other') !== kind) return;
+      if (String(l.name || '').trim().toLowerCase() === want) n++;
     });
     return n;
   }
@@ -13792,8 +13885,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           // every cell RIGHT, so an unsized name column absorbed all the slack and its 150px input
           // floated at the far edge of it. The name is a fixed-width input; the flags cell holds a
           // variable number of chips and is the only thing here that genuinely wants the room.
-          + '<colgroup><col style="width:26px"><col style="width:170px"><col style="width:104px">'
-          + '<col><col style="width:104px"><col style="width:52px"></colgroup>'
+          + bgbItemsColgroup()
           + '<tbody>' + (leadRows || '');
     items.forEach((it, ii) => {
       // Promote-from-local (§12 Slice B row): this ONE local row swaps for the promotion panel
@@ -14352,10 +14444,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       // the other half of.
       if (t && t.dataset && t.dataset.recday2 != null) {
         if (acWriteGuard()) return;
-        const row = t.closest('tr[data-b]'); if (!row) return;
-        const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
-        const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
-        const sc = it && bgbScheduleFor(kind, it.name);
+        const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
+        const tgt = bgbRecTargetFor(row); if (!tgt) return;
+        const sc = bgbScheduleFor(tgt.kind, tgt.name);
         if (!sc) return;
         try {
           await patch('/api/tracking/schedules/' + sc.id, { day1: +t.value });
@@ -14369,15 +14460,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // The tick itself.
       if (t && t.dataset && t.dataset.rectick != null) {
         if (acWriteGuard()) { t.checked = !t.checked; return; }
-        const row = t.closest('tr[data-b]'); if (!row) return;
-        const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
-        const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
-        if (!it || !(it.name || '').trim()) { t.checked = false; showToast('Name the line first'); return; }
-        const sc = bgbScheduleFor(kind, it.name);
+        const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
+        const tgt = bgbRecTargetFor(row); if (!tgt) return;
+        const it = tgt.hb || tgt.it;
+        const kind = tgt.kind;
+        if (!(tgt.name || '').trim()) { t.checked = false; showToast('Name the line first'); return; }
+        const sc = bgbScheduleFor(kind, tgt.name);
         try {
           if (t.checked && !sc) {
+            // YOUR SHARE, not the whole bill -- the same rule a local split line already follows
+            // (`myShare(it)`). The schedule models money leaving YOUR account, so a $2,140 rent at
+            // 65% is a $1,391 bill here. A shared line is the same question with the split agreed
+            // on the server instead of typed into the row, so `yourShareCents` answers it.
             await post('/api/tracking/schedules', {
-              name: it.name, direction: 'out', amount: myShare(it), bucket: kind, category: it.name,
+              name: tgt.name, direction: 'out', amount: tgt.amount, bucket: kind, category: tgt.name,
               accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
               anchorOn: (ACT.month || acNowMonth()) + '-01',
               // A budget line is a PLANNED figure, not a bill you have seen — electricity is
@@ -14390,7 +14486,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // shift, an end date) is real work that would be destroyed silently, so it is named
             // before it goes.
             if (!bgbScheduleIsSimple(sc)) {
-              const ok = confirm('Stop tracking “' + it.name + '” as a bill?\n\n'
+              const ok = confirm('Stop tracking “' + tgt.name + '” as a bill?\n\n'
                 + schCadenceText(sc) + '\n\nThat rule is deleted. Transactions already logged stay '
                 + 'in your ledger — only the future occurrences stop.');
               if (!ok) { t.checked = true; return; }
