@@ -531,6 +531,20 @@
      `.bgb-rowmenu-cell { position: relative }` is the load-bearing line: without it the absolutely
      positioned panel anchors to whatever distant ancestor happens to be positioned. */
   .bgb-items { table-layout: fixed; }
+  /* A11Y-001. Quiet enough to read as a label rather than a row of data — this sits above a dense
+     table the owner scans daily, and a header that competes with the rows costs the scanning speed
+     the density exists to buy. */
+  .bgb-head th { font-size: var(--fs-2xs); font-weight: var(--fw-semibold);
+                 text-transform: uppercase; letter-spacing: var(--ls-caps);
+                 color: var(--muted); padding-top: 2px; padding-bottom: 5px;
+                 border-bottom: 1px solid var(--line); white-space: nowrap; }
+  /* Clipped, not `display:none` and not `hidden` — both of those take it out of the accessibility
+     tree, which is the entire thing this exists to be in. */
+  .bgb-head.is-quiet th { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                          overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+                          border: 0; }
+  .vis-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
   .bgb-flags { display: flex; gap: var(--space-1); flex-wrap: wrap; justify-content: flex-start; }
   .bgb-rowmenu-cell { position: relative; overflow: visible; }
   .bgb-rowmenu { width: 232px; padding: 8px; text-align: left; }
@@ -1846,7 +1860,7 @@
      the moment anyone gives `.bgb-iname` a fixed width. Guarded by
      test_the_first_four_columns_stay_left_aligned, which reads computed style AND the chip offset
      rather than the input's rect — the check that survived deletion and taught me this. */
-  .bgb-items td:nth-child(-n+4) { text-align: left; }
+  .bgb-items td:nth-child(-n+4), .bgb-items th:nth-child(-n+4) { text-align: left; }
   .bgb-items .bgb-flags { justify-content: flex-start; }
   .bgb-items input[type=text], .bgb-items input[type=number] { background:var(--field); border:1px solid var(--line); color:var(--text); border-radius:5px; padding:4px 6px; font-size:var(--fs-sm); }
   /* 100%, because the NAME is now the flexible column. At a 780px bucket that resolves to a
@@ -4580,7 +4594,11 @@ const TAB_SCREENS = {
   tax: [
     { key: 'taxes', label: 'Your taxes', sections: [
         'tax_comp_card', 'tax_invest_card', 'tax_equity_card',
-        'tax_pretax_card', 'tax_posttax_card', 'tax_additions_card',
+        // BUG-0090: `tax_other_elections_card` shipped 2026-08-30 and was never listed here, so
+        // the "section in no screen stays visible everywhere" fallback above put a paycheck-
+        // elections card on Max out, WA vs TX, Tax tables AND Job change. Listed beside the other
+        // two paycheck-deduction cards, which is where it belongs by meaning.
+        'tax_pretax_card', 'tax_posttax_card', 'tax_other_elections_card', 'tax_additions_card',
         'tax_summary_card', 'bonusCard', 'filingCard',
         'tax_wagebase_card', 'tax_breakdown_card', 'tax_cashflow_card'] },
     { key: 'maxout', label: 'Max out',    sections: ['maxoutCard'],     solo: true },
@@ -4599,7 +4617,11 @@ const TAB_SCREENS = {
   // what-if. Accounts and Net worth stay together because the chart exists to prove the balances
   // and cannot render before one exists -- a traced coupling, not a preference.
   invest: [
-    { key: 'accounts',   label: 'Accounts',    sections: ['iv_accounts_card', 'iv_nw_card'] },
+    // BUG-0090, second instance — found by the guard on its first run, not by anyone looking.
+    // `fp_card` ("Progress to FI") was unlisted too, so it rendered on Accounts, Next dollar AND
+    // Projection. Placed here because it logs NET WORTH against the FI number, which is this
+    // screen's subject; its DOM position sits between the two pairs and settles nothing.
+    { key: 'accounts',   label: 'Accounts',    sections: ['iv_accounts_card', 'iv_nw_card', 'fp_card'] },
     // solo, so both cards stack full-width in DOM order (Plan first). The two-column shape gave
     // the nineteen inputs a 380px rail and the one-line verdict 950px, which is backwards.
     { key: 'nextdollar', label: 'Next dollar', sections: ['iv_out_card', 'iv_plan_card'], solo: true },
@@ -13011,7 +13033,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // colgroup: `.bgb-items` is `table-layout: fixed`, so a table without one takes its column
       // widths from whatever its first row happens to be, and this orphan block would not line up
       // with the ordinary buckets above it. Kept identical to itemsTable()'s by construction.
-      + '<table class="res-table bgb-items">' + bgbItemsColgroup()
+      + '<table class="res-table bgb-items">' + bgbItemsColgroup() + bgbItemsHead(true)
       + '<tbody>' + hbLinesHtml(lines) + '</tbody></table>'
       + '</div>';
   }
@@ -13891,6 +13913,36 @@ document.addEventListener('DOMContentLoaded', async () => {
          + '<col style="width:188px"><col style="width:104px"><col style="width:52px"></colgroup>';
   }
 
+  // A11Y-001 / WCAG 1.3.1. `.bgb-items` shipped with a `<colgroup>` and a `<tbody>` and NO
+  // `<thead>` at all — no column headers, while other tables in this file have them. That is
+  // worse here than it would be almost anywhere else, because TWO ROW SHAPES SHARE ONE GRID: a
+  // local row's editable amount sits where a shared row's whole bill sits, and a local row's
+  // computed total sits where a shared row's `your share` sits. Without headers there is nothing
+  // to tell them apart by ear.
+  //
+  // The labels are chosen to be true of BOTH shapes, which is the only thing that makes one grid
+  // honest. "Your share" in particular: a local total is `amount × (1+tax) × split` and a shared
+  // one is `yourShareCents`, and both answer "what does this cost me" — the header says out loud
+  // what the column already meant.
+  //
+  // VISIBLE on the bucket's own table, QUIET on a group's. The owner chose visible headers; three
+  // repetitions of the same six labels inside one bucket would be noise, not information, so a
+  // group's table carries the same `<th scope="col">` elements clipped to a screen reader. Every
+  // table gets real headers either way — the choice is only whether they are painted.
+  function bgbItemsHead(visible) {
+    const th = (label, hidden, cls) =>
+      '<th scope="col"' + (cls ? ' class="' + cls + '"' : '') + '>'
+      + (hidden ? '<span class="vis-hidden">' + label + '</span>' : label) + '</th>';
+    return '<thead class="bgb-head' + (visible ? '' : ' is-quiet') + '"><tr>'
+      + th('Reorder', true)
+      + th('Line', false)
+      + th('Amount', false)
+      + th('Flags', false)
+      + th('Your share', false, 'num')
+      + th('Actions', true)
+      + '</tr></thead>';
+  }
+
   // Which line does this row describe? TWO row shapes share the items table now: a local item
   // (data-b/data-g/data-i, an index into the plan) and a shared household line (data-hbline, a
   // server id). They join to a schedule the SAME way -- bucket KIND plus lowercased name -- so
@@ -14026,7 +14078,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // (first, so settled household obligations read before the working set -- spec §J1) rather
   // than in a separate list after it, which is the only way their columns can line up with the
   // local rows and the only way the existing row-based drag system can see them at all.
-  function itemsTable(bi, g, items, leadRows) {
+  function itemsTable(bi, g, items, leadRows, headVisible) {
     // TODO-267: declared tracks. Without them each bucket's table sized its own columns, so a
     // chip on three rows in one bucket widened that bucket's flags column and no other — the
     // ragged wall one level down, and the same root cause as BUG-0076. `table-layout:fixed`
@@ -14038,6 +14090,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           // floated at the far edge of it. The name is a fixed-width input; the flags cell holds a
           // variable number of chips and is the only thing here that genuinely wants the room.
           + bgbItemsColgroup()
+          // A visible header over an empty table is a promise about rows that are not there, so
+          // an empty bucket keeps the quiet one — the semantics without the furniture.
+          + bgbItemsHead(!!headVisible && !!((leadRows || '').length || (items || []).length))
           + '<tbody>' + (leadRows || '');
     items.forEach((it, ii) => {
       // Promote-from-local (§12 Slice B row): this ONE local row swaps for the promotion panel
@@ -14127,7 +14182,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Shared lines are now rows of the SAME table as the local items (§5.1), not a separate
         // list appended after it -- so the columns align, the drag grip works, and the block
         // stops reading as a stranded band between the table and the groups below.
-        h += itemsTable(bi, 'd', b.items, hbLines.length ? hbLinesHtml(hbLines) : '')
+        h += itemsTable(bi, 'd', b.items, hbLines.length ? hbLinesHtml(hbLines) : '', true)
           + '<button class="seed-btn bgb-additem" data-add="' + bi + '_d">+ item</button>';
         // optional named sub-groups
         b.groups.forEach((g, gi) => {
@@ -14138,7 +14193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Shared lines placed INSIDE this sub-group render here, with its items -- a
             // subscription shared out of `Basic Wants > SUBSCRIPTIONS` stays in SUBSCRIPTIONS
             // instead of being hoisted to the top of whichever bucket matched its kind first.
-            + (function () { const gl = hbLinesAt(hbAsg, hbBucketKey(b, bi), hbGroupKey(g, gi)); return itemsTable(bi, gi, g.items, gl.length ? hbLinesHtml(gl) : ''); })()
+            + (function () { const gl = hbLinesAt(hbAsg, hbBucketKey(b, bi), hbGroupKey(g, gi)); return itemsTable(bi, gi, g.items, gl.length ? hbLinesHtml(gl) : '', false); })()
             + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
         });
         h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button>';

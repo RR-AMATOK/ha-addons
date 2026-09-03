@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.9
+
+**Fixed: “Other voluntary elections” appeared on every tax screen**
+
+The card belongs on **Your taxes**. It was also sitting at the top of **Max out**, **WA vs TX**,
+**Tax tables** and **Job change**, where it had nothing to do with what you were looking at. It now
+appears on Your taxes only, beside the pre-tax and post-tax cards.
+
+**Fixed: “Progress to FI” appeared on every Invest screen**
+
+The same thing, found while fixing the first. It was showing on **Accounts**, **Next dollar** and
+**Projection**. It now sits with **Accounts & net worth**, which is where it logs to — tell me if
+you would rather it lived somewhere else.
+
+**The budget table has column headers**
+
+Each bucket’s list now has a header row — **Line · Amount · Flags · Your share** — where before it
+had none at all. It reads better, and more importantly a screen reader can now tell the three money
+columns apart, which it could not do before. A group like HOUSING does not repeat the row; once per
+bucket is enough.
+
+“Your share” names what that last column always meant: for a personal line it is the amount plus
+tax and your split, and for a shared line it is your part of the bill. Same question, one label.
+
 ## 0.8.8
 
 Scheduled money folds away, and a bill logged from its schedule now matches the same bill typed in
