@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.8.8
+
+Scheduled money folds away, and a bill logged from its schedule now matches the same bill typed in
+by hand.
+
+**The Scheduled money list collapses**
+
+Sixteen items in a normal September filled the screen. Click the **Scheduled money** heading to fold
+the list away; the summary line stays, so the section still tells you *"16 in September · 0 came
+through · 16 still to come"* at a glance. Your choice is remembered.
+
+It never folds over a problem: if the month's schedules could not be reached, the warning stays on
+screen whatever you last chose.
+
+**Fixed: a logged bill lost its payee and its tags**
+
+Your Rent is billed by **AMLI - Rent**, and that name is what carries the `Housing` tag. A bill
+posted from its schedule went in as plain "Rent", which matched none of your saved payees — so it
+arrived with no tags at all and did not look like the entries you make by hand.
+
+The recurring section in a budget line's **⋮** menu now has a **Payee** box, filled in from what
+you have actually logged for that category. Set it once and every future posting carries your usual
+tags.
+
+**Fixed: a shared bill was logged for your share only, with nothing owed**
+
+Rent is $2,140 split 65/35. Logging it from the schedule recorded **−$1,391 with nothing owed**,
+where entering it by hand records **−$2,140 with $749 owed by your partner**. The two disagreed,
+and the schedule's version was wrong.
+
+A shared bill now stores and shows the **whole bill**, and logging it records your partner's share
+as owed — the same shape as your manual entries. Your own cost is unchanged at $1,391; it is simply
+worked out the same way in both places now.
+
+**The split is read fresh every time.** If you renegotiate a shared line, the next posting uses the
+new split without you having to touch the bill.
+
+**Worth checking once:** any recurring bill you set up before this release still holds the old
+figure. Open its **⋮** menu to see the amount and set its payee.
+
 ## 0.8.7
 
 The budget row is a readable width again, and a line's name now sits next to its number instead of

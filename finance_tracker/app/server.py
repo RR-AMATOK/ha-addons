@@ -2528,6 +2528,10 @@ class ScheduleModel(BaseModel):
     weekend_shift: Literal["none", "before", "after"] = Field("none", alias="weekendShift")
     auto_post: bool = Field(False, alias="autoPost")
     active: bool = True
+    # Basis points of the PARTNER's share (3500 = they owe 35%); None = not shared. The FALLBACK
+    # for a LOCAL budget line, whose split the server cannot see; a live household split line
+    # matching bucket+category wins over it at post time.
+    partner_split_bps: int | None = Field(None, ge=0, le=10000, alias="partnerSplitBps")
     model_config = {"populate_by_name": True}
 
 
@@ -2556,6 +2560,7 @@ class SchedulePatchModel(BaseModel):
     weekend_shift: Literal["none", "before", "after"] | None = Field(None, alias="weekendShift")
     auto_post: bool | None = Field(None, alias="autoPost")
     active: bool | None = None
+    partner_split_bps: int | None = Field(None, ge=0, le=10000, alias="partnerSplitBps")
     model_config = {"populate_by_name": True}
 
 
@@ -2595,6 +2600,7 @@ def _schedule_fields(m, *, partial: bool) -> dict:
         "month_of_year": "month_of_year", "anchor_on": "anchor_on", "end_mode": "end_mode",
         "ends_on": "ends_on", "end_count": "end_count", "weekend_shift": "weekend_shift",
         "auto_post": "auto_post", "active": "active",
+        "partner_split_bps": "partner_split_bps",
     }
     for src, dst in mapping.items():
         if src in raw:

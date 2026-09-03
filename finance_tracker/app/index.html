@@ -551,6 +551,9 @@
   .bgb-rec-body { padding: 6px 8px 8px; }
   .bgb-rec-body[hidden] { display: none; }
   .bgb-rec-body select { width: 100%; }
+  .bgb-rec-payee { display:block; margin-top:6px; }
+  .bgb-rec-payee > span { display:block; font-size:var(--fs-2xs); color:var(--muted); margin-bottom:2px; }
+  .bgb-rec-payee input { width:100%; }
   .bgb-rec-note { display: block; font-size: var(--fs-2xs); color: var(--muted); margin-top: 6px; }
   .bgb-rec-cadence { display: block; font-size: var(--fs-xs); color: var(--text); margin-bottom: 6px; }
   .bgb-rec-warn { display: block; font-size: var(--fs-2xs); color: var(--warn-text-strong, var(--warn));
@@ -1971,6 +1974,17 @@
   .hb-share-foot .seed-btn:disabled { opacity:.55; cursor:not-allowed; }
   .hb-orphan-bucket .bgb-bhead { flex-wrap:wrap; }
   .subhead { font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); font-weight:var(--fw-semibold); color:var(--muted); margin:10px 0 4px; }
+  /* A section header that discloses. Same ▾/▸ vocabulary as the budget bucket's collapse so the
+     two read as one gesture; a <button> rather than the div itself, because the whole header is
+     the target and a div cannot be tabbed to or activated with a key. Inherits the subhead's type
+     so the control is the heading rather than something bolted beside it. */
+  .subhead-toggle { background:none; border:none; padding:0; margin:0; font:inherit; color:inherit;
+                    text-transform:inherit; letter-spacing:inherit; cursor:pointer;
+                    display:inline-flex; align-items:center; gap:6px; }
+  .subhead-toggle:hover { color:var(--text); }
+  .subhead-toggle[aria-disabled="true"] { cursor:default; }
+  .subhead-toggle[aria-disabled="true"]:hover { color:inherit; }
+  .subhead-chev { font-size:var(--fs-sm); line-height:1; }
   .res-table { width:100%; border-collapse:collapse; font-size:var(--fs-md); margin-top:6px; }
   .res-table th, .res-table td { text-align:right; padding:6px 6px; border-bottom:1px solid var(--line-faint); }
   .res-table th:first-child, .res-table td:first-child { text-align:left; }
@@ -4100,7 +4114,10 @@
            answered "what has the engine not posted?" while the list below answered "what has the
            ledger seen?", and both were drawn as authoritative, so a bill logged by hand appeared
            in both at once under two different definitions of done. -->
-      <div class="subhead" style="margin-top:14px">Scheduled money <span class="mini muted" id="ac_rec_month"></span></div>
+      <div class="subhead" style="margin-top:14px">
+        <button type="button" class="subhead-toggle" id="sch_collapse" aria-controls="sch_dated"
+                aria-expanded="true"><span class="subhead-chev" aria-hidden="true">&#9662;</span>
+          Scheduled money <span class="mini muted" id="ac_rec_month"></span></button></div>
       <!-- What automatic posting could not do. ABOVE the list because a schedule the user
            switched auto-post on for is one they stopped watching, so its failure has to come
            looking for them rather than wait to be found. -->
@@ -13816,10 +13833,27 @@ document.addEventListener('DOMContentLoaded', async () => {
           + 'Edit in Scheduled money…</button>';
       } else {
         const shared = tgt.shared;
+        // THE PAYEE. `payee_preset` is keyed on `LOWER(TRIM(description))`, so this box is the
+        // difference between a posted bill that carries your tags and one that carries none. It
+        // is prefilled from what you have actually logged for this category, and it is an input
+        // rather than a fixed label because history is a good guess, not an authority.
+        const payee = sc.description || '';
+        const guess = tgt.payee || '';
         body.innerHTML = '<select data-recday2="' + esc(key) + '" aria-label="Day of the month it posts">'
           + bgbDayOptions(sc.day1) + '</select>'
           + (+sc.day1 >= 29 && +sc.day1 <= 31
               ? '<span class="bgb-rec-note">Short months fall back to their last day.</span>' : '')
+          + '<label class="bgb-rec-payee"><span>Payee</span>'
+          +   '<input type="text" data-recpayee="' + esc(key) + '" value="' + esc(payee)
+          +   '" placeholder="' + esc(guess || tgt.name) + '"'
+          +   ' aria-label="Payee this bill is logged under"></label>'
+          + (!payee && guess
+              ? '<span class="bgb-rec-note">Suggested from what you have logged: <b>' + esc(guess)
+                + '</b>. Saving it is what carries your tags across.</span>'
+              : (payee
+                  ? '<span class="bgb-rec-note">Logged under this name, so it picks up its usual tags.</span>'
+                  : '<span class="bgb-rec-note">Logs under “' + esc(tgt.name)
+                    + '”, which matches none of your saved payees — so no tags carry across.</span>'))
           + (shared > 1
               ? '<span class="bgb-rec-warn">' + shared + ' budget lines are called “' + esc(tgt.name)
                 + '” here, and they share this one bill.</span>' : '');
@@ -13864,22 +13898,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   //
   // `line.bucket` is already a KIND on the server ('need'/'want'/...), which is exactly what the
   // join wants, so a shared line needs no placement lookup to answer this.
+  // The payee this category is usually paid to, from what has ACTUALLY been logged. `Rent` is
+  // billed by `AMLI - Rent`, and that string is the key the whole tagging system turns on
+  // (`payee_preset.dkey` is `LOWER(TRIM(description))`), so a bill posted under its bare budget
+  // name picks up none of the tags the same bill picks up when typed by hand. Suggested, never
+  // imposed: the menu shows it in an editable box.
+  function bgbPayeeFor(category) {
+    const cat = String(category || '').trim().toLowerCase();
+    if (!cat) return '';
+    let best = null;
+    const all = (ACT && ACT.suggest && ACT.suggest.payees) || {};
+    Object.keys(all).forEach(k => {
+      const p = all[k];
+      if (!p || String(p.category || '').trim().toLowerCase() !== cat) return;
+      if (!best || (+p.count || 0) > (+best.count || 0)) best = p;
+    });
+    return best ? String(best.description || '') : '';
+  }
+
   function bgbRecTargetFor(row) {
     if (!row || !row.dataset) return null;
     if (row.dataset.hbline != null) {
       const line = (hb.lines || []).find(l => String(l.id) === String(row.dataset.hbline));
       if (!line) return null;
       const kind = line.bucket || 'other';
-      return { kind: kind, name: line.name || '', hb: line,
-               // Your share, not the whole bill -- see the amount note in the tick handler.
-               amount: hbCentsToUsd(line.yourShareCents),
-               shared: bgbLinesSharingKey(kind, line.name) };
+      const name = line.name || '';
+      // THE WHOLE BILL, not your share. A schedule models the money that leaves the account, and
+      // for a shared line that is the entire rent; the partner's half is recorded as owed, not
+      // subtracted. This reverses the 0.8.6 choice, which booked `yourShareCents` and so produced
+      // a ledger row that disagreed with the same bill entered by hand.
+      //
+      // A POOLED line has no single total by definition, so there is nothing to split and your
+      // contribution IS the whole of your side of it.
+      const pooled = line.totalCents == null;
+      return { kind: kind, name: name, hb: line,
+               amount: pooled ? hbCentsToUsd(line.yourShareCents) : hbCentsToUsd(line.totalCents),
+               // NULL on purpose. The server resolves a household split LIVE from the shared
+               // budget on every posting, so storing a copy here would be a second source that
+               // goes stale the moment the split is renegotiated.
+               partnerBps: null,
+               payee: bgbPayeeFor(name),
+               shared: bgbLinesSharingKey(kind, name) };
     }
     if (row.dataset.b == null) return null;
     const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
     if (!it) return null;
     const kind = (bgb.buckets[+row.dataset.b] || {}).kind || 'other';
-    return { kind: kind, name: it.name || '', it: it, amount: myShare(it),
+    const sp = (it.split == null ? 100 : (+it.split || 0));
+    return { kind: kind, name: it.name || '', it: it,
+             // itemTotal(), not myShare(): tax-inclusive, split NOT applied. Same rule as above.
+             amount: itemTotal(it),
+             // A LOCAL line's split lives in this browser's blob and the server cannot see it, so
+             // here it IS carried on the schedule — the one case the stored fallback exists for.
+             partnerBps: sp >= 100 ? null : Math.round((100 - sp) * 100),
+             payee: bgbPayeeFor(it.name),
              shared: bgbLinesSharingKey(kind, it.name) };
   }
 
@@ -14522,6 +14594,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       // The day picker. PATCHes day1 rather than re-POSTing the schedule, so changing the day can
       // never create a second bill — the mistake the old upsert-by-POST made and that BUG-0079 is
       // the other half of.
+      if (t && t.dataset && t.dataset.recpayee != null) {
+        if (acWriteGuard()) return;
+        const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
+        const tgt = bgbRecTargetFor(row); if (!tgt) return;
+        const sc = bgbScheduleFor(tgt.kind, tgt.name);
+        if (!sc) return;
+        // Empty CLEARS it (null), rather than storing "" — an empty string is a payee key that
+        // matches nothing, and the store's patch treats null as "clear this nullable field".
+        const v = String(t.value || '').trim();
+        try {
+          await patch('/api/tracking/schedules/' + sc.id, { description: v || null });
+          if (window.__recurringSetup) await window.__recurringSetup.ensure();
+        } catch (er) {
+          showToast('Could not save that payee — ' + (errDetail(er) || 'the server refused it'));
+        }
+        return;
+      }
+
       if (t && t.dataset && t.dataset.recday2 != null) {
         if (acWriteGuard()) return;
         const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
@@ -14548,12 +14638,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const sc = bgbScheduleFor(kind, tgt.name);
         try {
           if (t.checked && !sc) {
-            // YOUR SHARE, not the whole bill -- the same rule a local split line already follows
-            // (`myShare(it)`). The schedule models money leaving YOUR account, so a $2,140 rent at
-            // 65% is a $1,391 bill here. A shared line is the same question with the split agreed
-            // on the server instead of typed into the row, so `yourShareCents` answers it.
+            // THE WHOLE BILL, and the split recorded alongside it. 0.8.6 booked your share here
+            // and it was wrong: the ledger then showed -$1,391 with nothing owed, where the same
+            // rent typed by hand shows -$2,140 with $749 owed. `description` is the payee, which
+            // is what carries the tags — a bill posted as "Rent" matches no preset, one posted as
+            // "AMLI - Rent" picks up `Housing` exactly as typing it would.
             await post('/api/tracking/schedules', {
               name: tgt.name, direction: 'out', amount: tgt.amount, bucket: kind, category: tgt.name,
+              description: tgt.payee || null, partnerSplitBps: tgt.partnerBps,
               accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
               anchorOn: (ACT.month || acNowMonth()) + '-01',
               // A budget line is a PLANNED figure, not a bill you have seen — electricity is
@@ -14717,6 +14809,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // so a row has no identity a schedule can point at.
       // TODO-270: the day picker inside the menu.
       if (d.recday2 != null) { return; }          // handled on `change`, not click
+      if (d.recpayee != null) { return; }         // ditto — a click here is just focusing the box
       // The door for a cadence this menu cannot express.
       if (d.recopen != null) {
         e.preventDefault();
@@ -19118,11 +19211,66 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '</span></div>').join('');
   }
 
+  // ── Collapsing the dated list (TODO-275) ──────────────────────────────────────────────────
+  // Sixteen occurrences is a normal September and it filled the screen, pushing everything below
+  // it out of reach. The list folds away; the SUMMARY LINE DOES NOT. Collapsing has to leave the
+  // section still answering its own question — "16 in September · 0 came through · 16 still to
+  // come", including the "⚠ N need you" clause — or it is just hiding.
+  //
+  // TWO THINGS A DISPLAY PREFERENCE MAY NOT HIDE, both of which live inside `#sch_dated` because
+  // `only()` writes them there:
+  //   · a `.warn-box` — "Could not reach your schedules for this month" is the one message that
+  //     must reach the reader, and a remembered checkbox from three weeks ago must not eat it.
+  //   · the empty state — there is nothing to save by folding one line of prose, and a section
+  //     that collapsed to a bare heading would read as broken.
+  // Hence `collapsible`: the preference is REMEMBERED in both cases but not APPLIED. It comes back
+  // on its own once the list has rows again, which is why this is not simply cleared.
+  //
+  // `#sch_problems` sits OUTSIDE this element on purpose (see its comment) and is untouched here.
+  const SCH_COLLAPSE_KEY = 'itc.schCollapsed.v1';
+  let schCollapsed = false;
+  try { schCollapsed = localStorage.getItem(SCH_COLLAPSE_KEY) === '1'; } catch (e) {}
+
+  function schCollapsible() {
+    const list = $('sch_dated');
+    return !!(list && list.querySelector('.sch-row') && !list.querySelector('.warn-box'));
+  }
+
+  function schApplyCollapse() {
+    const btn = $('sch_collapse'), list = $('sch_dated');
+    if (!btn || !list) return;
+    const chev = btn.querySelector('.subhead-chev');
+    const can = schCollapsible();
+    const collapsed = can && schCollapsed;
+    list.hidden = collapsed;
+    if (chev) { chev.hidden = !can; chev.innerHTML = collapsed ? '&#9656;' : '&#9662;'; }
+    if (can) {
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.removeAttribute('aria-disabled');
+      btn.title = collapsed ? 'show the dated list' : 'hide the dated list';
+    } else {
+      // Not a toggle right now, and it says so rather than offering a control that does nothing.
+      btn.removeAttribute('aria-expanded');
+      btn.setAttribute('aria-disabled', 'true');
+      btn.removeAttribute('title');
+    }
+  }
+
+  function schToggleCollapse() {
+    if (!schCollapsible()) return;
+    schCollapsed = !schCollapsed;
+    try { localStorage.setItem(SCH_COLLAPSE_KEY, schCollapsed ? '1' : '0'); } catch (e) {}
+    schApplyCollapse();
+  }
+
   function schRenderDated() {
     const list = $('sch_dated'), sumEl = $('sch_sum');
     if (!list) return;
     const ml = $('ac_rec_month'); if (ml) ml.textContent = acMonthLabel(ACT.month);
-    const only = h => { list.innerHTML = h; if (sumEl) sumEl.innerHTML = ''; };
+    // `only()` is the error/empty path. It must re-apply too: schCollapsible() turns false here,
+    // which is what un-hides a list a stale preference would otherwise have kept folded over a
+    // warning.
+    const only = h => { list.innerHTML = h; if (sumEl) sumEl.innerHTML = ''; schApplyCollapse(); };
 
     // Three transport states, not two. An unreachable endpoint is not an empty one, and saying so
     // is the difference between a report and an invention (the BUG-0056 rule).
@@ -19321,6 +19469,7 @@ document.addEventListener('DOMContentLoaded', async () => {
          + '<div id="sch_done" hidden>' + settled.map(rowHtml).join('') + '</div>';
     }
     list.innerHTML = h;
+    schApplyCollapse();
     schRenderRoster(off);
   }
 
@@ -20292,6 +20441,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function acWire() {
     if (ACT.wired) return; ACT.wired = true;
+    { const sc = $('sch_collapse'); if (sc) sc.onclick = schToggleCollapse; }
     $('ac_prev').onclick = () => { ACT.month = acMonthShift(ACT.month, -1); acRenderMonth(); acRefresh(); };
     $('ac_next').onclick = () => { if (ACT.month < acNowMonth()) { ACT.month = acMonthShift(ACT.month, 1); acRenderMonth(); acRefresh(); } };
     $('ac_tx_add').onclick = acAddTxn;

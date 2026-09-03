@@ -100,7 +100,7 @@ _BACKUP_TABLES: tuple = (
     # already restored earlier in this tuple. `recurring` above is KEPT even though nothing
     # writes to it any more -- an older backup still carries its rows, and _mig_add_schedule_tables
     # converts them on restore.
-    ("schedule",           ("id", "user_id", "name", "direction", "amount_cents", "amount_is_estimate", "account_id", "to_account_id", "bucket", "category", "description", "freq", "interval_n", "weekdays", "day_1", "day_2", "month_of_year", "anchor_on", "end_mode", "ends_on", "end_count", "weekend_shift", "auto_post", "active", "parent_id", "created_at")),
+    ("schedule",           ("id", "user_id", "name", "direction", "amount_cents", "amount_is_estimate", "account_id", "to_account_id", "bucket", "category", "description", "freq", "interval_n", "weekdays", "day_1", "day_2", "month_of_year", "anchor_on", "end_mode", "ends_on", "end_count", "weekend_shift", "auto_post", "active", "parent_id", "partner_split_bps", "created_at")),
     ("schedule_exception", ("id", "schedule_id", "occurrence_on", "action", "amount_cents", "moved_to", "description", "created_at")),
     ("schedule_txn",       ("schedule_id", "occurrence_on", "txn_id")),
     # FIRE progress log. Ordinary user data, plain verbatim restore. It matters MORE than most
@@ -579,6 +579,11 @@ CREATE TABLE IF NOT EXISTS schedule (
   -- ---- behaviour ----
   auto_post          INTEGER NOT NULL DEFAULT 0,   -- opt-in; posts as status='pending' on the day
   active             INTEGER NOT NULL DEFAULT 1,
+  -- Basis points of the PARTNER's share of this bill (3500 = they owe 35%); NULL = not shared.
+  -- The FALLBACK only: a live household_budget split line matching bucket+category wins at post
+  -- time, so changing a shared split takes effect on the next posting. This carries the case the
+  -- server cannot see any other way -- a LOCAL budget line, whose split lives in the client blob.
+  partner_split_bps  INTEGER CHECK (partner_split_bps IS NULL OR (partner_split_bps >= 0 AND partner_split_bps <= 10000)),
   -- "Change this one and all future" ends the current series and starts a successor; parent_id
   -- keeps the lineage visible rather than leaving two unrelated-looking schedules.
   parent_id          INTEGER REFERENCES schedule(id) ON DELETE SET NULL,
@@ -649,6 +654,25 @@ CREATE INDEX IF NOT EXISTS idx_schedtxn_txn ON schedule_txn(txn_id);
 # Future migrations append to this list; each takes a conn and upgrades by one step.
 # Idempotent (guard with PRAGMA table_info) so they're safe on fresh DBs that already
 # have the column from the CREATE TABLE above and on older DBs that don't.
+def _mig_add_schedule_partner_split(conn) -> None:
+    """TODO-276. A schedule could not say that its bill is shared, so `_post_occurrence` wrote
+    `partner_owed_cents = 0` for every occurrence it ever posted — a logged Rent looked like the
+    whole thing was yours.
+
+    This column is the FALLBACK, not the primary source. At post time a live household split line
+    matching bucket+category wins, so a split the owner changes takes effect on the next posting
+    without touching the schedule (their explicit requirement: "if in a few months the split
+    changes, I want the next time it's logged to use the new split"). This column carries the case
+    the server cannot otherwise see — a LOCAL budget line, whose `split` lives in the client's own
+    blob and is invisible here.
+
+    Basis points of the PARTNER's share, so 3500 means they owe 35%. NULL means "not shared",
+    which is different from 0 ("shared, but they owe nothing this month")."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(schedule)").fetchall()]
+    if "partner_split_bps" not in cols:
+        conn.execute("ALTER TABLE schedule ADD COLUMN partner_split_bps INTEGER")
+
+
 def _mig_add_partner_owed(conn) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(txn)").fetchall()]
     if "partner_owed_cents" not in cols:
@@ -1356,7 +1380,7 @@ def _mig_add_fire_progress(conn) -> None:
                               SCHEMA.index(");", SCHEMA.index("CREATE TABLE IF NOT EXISTS fire_progress (")) + 2])
 
 
-_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables, _mig_household_budget_autoincrement, _mig_add_fire_progress, _mig_retire_legacy_recurring_rows]
+_MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_txn_status_kind, _mig_add_invest_group, _mig_add_goal_table, _mig_add_venture_table, _mig_add_users_table, _mig_add_user_scoping, _mig_add_user_profile, _mig_add_fund_table, _mig_add_user_display_name, _mig_add_alias_tables, _mig_add_fund_recurrence, _mig_add_credit_limit, _mig_add_household_budget, _mig_add_schedule_tables, _mig_household_budget_autoincrement, _mig_add_fire_progress, _mig_retire_legacy_recurring_rows, _mig_add_schedule_partner_split]
 
 
 def _now() -> str:
@@ -4391,6 +4415,8 @@ def _schedule_dict(r) -> dict:
         "anchorOn": r["anchor_on"], "endMode": r["end_mode"], "endsOn": r["ends_on"],
         "endCount": r["end_count"], "weekendShift": r["weekend_shift"],
         "autoPost": bool(r["auto_post"]), "active": bool(r["active"]),
+        "partnerSplitBps": (r["partner_split_bps"]
+                            if "partner_split_bps" in r.keys() else None),
         "parentId": r["parent_id"], "createdAt": r["created_at"],
     }
 
@@ -4403,6 +4429,15 @@ def _schedule_row(conn, user_id, schedule_id):
 def _exceptions_for(conn, schedule_id) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM schedule_exception WHERE schedule_id = ?", (schedule_id,)).fetchall()]
+
+
+def _clamp_bps(v):
+    if v is None or v == "":
+        return None
+    try:
+        return max(0, min(10000, int(v)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _validate_schedule_fields(conn, user_id, f: dict) -> dict:
@@ -4461,6 +4496,11 @@ def _validate_schedule_fields(conn, user_id, f: dict) -> dict:
         "auto_post": 1 if f.get("auto_post") else 0,
         "active": 0 if f.get("active") is False else 1,
         "parent_id": f.get("parent_id"),
+        # Basis points of the PARTNER's share; NULL means "not shared", which is a different
+        # statement from 0 ("shared, they owe nothing"). Clamped rather than rejected: a split is
+        # a display-and-arithmetic concern, and refusing to save a whole schedule over one out-of
+        # -range percentage would lose the bill to protect the fraction.
+        "partner_split_bps": _clamp_bps(f.get("partner_split_bps")),
     }
 
 
@@ -4689,6 +4729,92 @@ def _due_for_row(conn, row, today: str, catchup_days=None) -> list[dict]:
     return [h for h in hits if h["on"].isoformat() not in posted]
 
 
+def _schedule_partner_owed_cents(conn, user_id, row, amount_cents: int) -> int:
+    """How much of this occurrence the partner owes.
+
+    RESOLUTION ORDER, and the order is the point:
+      1. A live `household_budget` split line matching this schedule's bucket + category. Read
+         fresh on every posting, so changing the split on the shared budget changes what the NEXT
+         posting records — the owner's stated requirement. This is the same match the manual entry
+         path makes (`acSharedLineFor` in index.html), so a bill logged by hand and the same bill
+         logged from its schedule agree by construction.
+      2. The schedule's own `partner_split_bps`. This covers a LOCAL budget line, whose split lives
+         in the client's blob and is invisible from here.
+      3. Nothing owed.
+
+    This is a fallback chain with a stated precedence, not two sources for one number: (1) is
+    always preferred when it exists, and (2) is only consulted for lines (1) cannot see.
+    """
+    if amount_cents <= 0 or row["direction"] == "in":
+        return 0
+    cat = (row["category"] or "").strip().lower()
+    if cat:
+        try:
+            for line in list_household_budget(conn, user_id, False):
+                if (line.get("type") != "split"
+                        or (line.get("name") or "").strip().lower() != cat):
+                    continue
+                shares = line.get("shares") or []
+                total = sum(int(sh.get("ratioBps") or 0) for sh in shares)
+                # A line whose shares do not total 100% has no honest denominator, so it is
+                # skipped rather than applied against the wrong base (rule 8, and the same guard
+                # `acSharedPartnerFraction` makes).
+                if total != 10000:
+                    continue
+                mine = sum(int(sh.get("ratioBps") or 0)
+                           for sh in shares if sh.get("userId") == user_id)
+                partner_bps = 10000 - mine
+                if partner_bps <= 0:
+                    return 0
+                return min(amount_cents, round(amount_cents * partner_bps / 10000))
+        except Exception:
+            # A household lookup that fails must not stop a bill being logged; fall through to the
+            # stored split, which is the whole reason there is one.
+            pass
+    bps = row["partner_split_bps"] if "partner_split_bps" in row.keys() else None
+    if bps is None:
+        return 0
+    bps = max(0, min(10000, int(bps)))
+    return min(amount_cents, round(amount_cents * bps / 10000))
+
+
+def _apply_payee_preset_tags(conn, user_id, txn_id: int, description) -> None:
+    """Tag a posted occurrence the way the owner tags that payee by hand.
+
+    A schedule stores its payee in `description`; the payee preset is keyed on
+    `LOWER(TRIM(description))` — the same `_preset_key` the manual path uses. So "AMLI - Rent"
+    picks up the `Housing` tag exactly as typing it would, and re-tagging the payee changes future
+    postings without touching the schedule.
+
+    Only TAGS are taken. The schedule's own bucket and category are the owner's explicit choice for
+    THIS bill and are not second-guessed by a preset built from history.
+    """
+    key = _preset_key(description)
+    if not key:
+        return
+    row = conn.execute("SELECT tags FROM payee_preset WHERE user_id = ? AND dkey = ?",
+                       (user_id, key)).fetchone()
+    if row is None:
+        return
+    try:
+        tags = json.loads(row["tags"] or "[]")
+    except Exception:
+        return
+    if not isinstance(tags, list):
+        return
+    for name in tags:
+        name = str(name or "").strip()
+        if not name:
+            continue
+        conn.execute("INSERT OR IGNORE INTO tag (user_id, name, created_at) VALUES (?,?,?)",
+                     (user_id, name, _now()))
+        t = conn.execute("SELECT id FROM tag WHERE user_id = ? AND name = ?",
+                         (user_id, name)).fetchone()
+        if t:
+            conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?,?)",
+                         (txn_id, t["id"]))
+
+
 def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, status: str) -> list[int]:
     """Write the transaction(s) for one occurrence and link the occurrence to them.
 
@@ -4705,6 +4831,16 @@ def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, 
     now = _now()
     ids: list[int] = []
 
+    # A transfer moves money between the owner's OWN accounts, so nobody owes anybody a share of
+    # it; only the single-leg in/out path can carry one.
+    #
+    # ⚠ TRIPWIRE (LESSON 29): `owed` stays 0 on the transfer path only because it is assigned
+    # INSIDE the else-branch below. That makes `0 if is_transfer else owed` in `_insert` an
+    # equivalent mutant today — deleting it breaks no test, correctly. If you ever hoist the
+    # `owed = _schedule_partner_owed_cents(...)` call above the branch, that ternary becomes the
+    # only thing stopping a transfer leg from recording a partner share. Move them together.
+    owed = 0
+
     def _insert(account_id, direction, is_transfer, bucket, external_id):
         cur = conn.execute(
             """INSERT INTO txn (user_id, account_id, posted_on, direction, amount_cents, bucket,
@@ -4713,7 +4849,7 @@ def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, 
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, account_id, occurrence_on, direction, int(amount_cents), bucket,
              row["category"], desc, 1 if is_transfer else 0, tg, "schedule", external_id,
-             0, status, "charge", now))
+             0 if is_transfer else owed, status, "charge", now))
         return cur.lastrowid
 
     if row["direction"] == "transfer":
@@ -4724,7 +4860,11 @@ def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, 
         ids.append(_insert(row["to_account_id"], "in", True, None, ext + ":2"))
     else:
         tg = None
+        owed = _schedule_partner_owed_cents(conn, user_id, row, int(amount_cents))
         ids.append(_insert(row["account_id"], row["direction"], False, row["bucket"], ext))
+        # The payee's usual tags, so a bill logged from its schedule is indistinguishable from the
+        # same bill typed in by hand — which is the whole complaint this fixes.
+        _apply_payee_preset_tags(conn, user_id, ids[0], desc)
 
     conn.execute("INSERT INTO schedule_txn (schedule_id, occurrence_on, txn_id) VALUES (?,?,?)",
                  (sid, occurrence_on, ids[0]))
