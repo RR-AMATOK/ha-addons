@@ -1420,6 +1420,13 @@
   #iv_plan_card .row > label,
   #jc_card .row > label { text-align:left; }
 
+  /* TODO-278. The Roth IRA block sits BELOW "What lands each payday" and must never read as one
+     of the payroll deductions above it — the whole point is that payroll does not touch it. A rule
+     above the row and a lighter ink do that without a second colour. */
+  .jc-ph-below > td { border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); }
+  .jc-ph-below .jc-ph-note { font-size: var(--fs-2xs); color: var(--muted); white-space: nowrap; }
+  .jc-ph-left > td { font-weight: var(--fw-semibold); }
+
   /* Job change's two compound controls. These shipped as class names with NO rule at all, so
      their children laid out by default inline flow: the eligibility hint sat 0px from the select
      it explains and 11px below the controls' centre line, because it was baseline-flowed rather
@@ -6295,6 +6302,13 @@ function render(r) {
   // before the first one lands. This is the only event that knows one has; the call no-ops once
   // the table exists, so a per-keystroke recompute costs nothing. See jcHealPhases.
   try { if (window.__jobChange && window.__jobChange.healPhases) window.__jobChange.healPhases(); } catch (e) {}
+  // BUG-0091. `healForward` has the SAME dependency as healPhases above — `jcRefreshForwardMonthly`
+  // returns without writing while `__taxResult` is absent — but it was only ever retried on a
+  // Budget-TAB-OPEN, which never happens if you are already on the Budget tab when you refresh.
+  // So the forward monthly stayed null for the whole page load and the base fell back to the old
+  // job's take-home. This is the one event that knows a tax result has landed; it no-ops once the
+  // figure exists, exactly as healPhases does.
+  try { if (window.__jobChange && window.__jobChange.healForward) window.__jobChange.healForward(); } catch (e) {}
   // The frameworks are computed from this result, so the recalculation IS their trigger now that
   // the six inputs (and the button that recalculated them) are gone.
   if (typeof calcBudget === 'function') { try { calcBudget(); } catch (e) {} }
@@ -15013,6 +15027,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function bgbResolveBase() {
+    // BUG-0091. An APPLIED job change whose forward monthly has not computed yet returns NULL, not
+    // a figure from the old job. This is a data-loss guard, not a cosmetic one: `bgbBaseAutoFill`
+    // takes whatever this returns and does `bgb.baseMonthly = mo; saveBgb()`, so answering "tax
+    // take-home" here does not merely mislabel the field — it OVERWRITES the stored base with the
+    // old job's number and syncs it to the profile. Reported as "when I apply the job change, upon
+    // a hard refresh of the browser, I lose the budget": $9,871 became $6,972 and a balanced plan
+    // read "Over by $2,838".
+    //
+    // Null is the honest answer while the real one is in flight. The field is
+    // `holdLockWithoutSource`, so a null keeps the stored value on screen instead of blanking it,
+    // and the async heal fills it in a beat later.
+    //
+    // No try/catch: `window.__jobChange` is assigned at parse time by a top-level IIFE and this
+    // runs long after, so a throw here would be a real fault I want to see rather than swallow.
+    const jc = window.__jobChange;
+    if (jc && jc.forwardPending && jc.forwardPending()) return null;
+    // TODO-279. The cheque you are actually getting, not an average of the year. `pp.phases` are
+    // the priced stretches from the Job change card — the same figures the table above prints, so
+    // the base and that table can never disagree. Past the last stretch (1 January onward) the
+    // catch-up is over and the level rate takes it.
+    const pp = window.__jcPhasePay;
+    if (pp && pp.perYear > 0) {
+      const today = isoLocalDate(new Date());
+      const here = (pp.phases || []).find(p => today >= p.from && today <= p.to);
+      if (here && here.net > 0) return Math.round(here.net * pp.perYear / 12);
+      // After the last stretch — the new year. Before the FIRST one we fall through instead: the
+      // job has not started, and `fwd.current` below is the right answer for the job you still
+      // have.
+      const last = (pp.phases || [])[pp.phases.length - 1];
+      if (last && today > last.to && pp.level > 0) return Math.round(pp.level * pp.perYear / 12);
+    }
     // A job change that has ALREADY STARTED is the live answer: the old salary is not coming back
     // and budgeting on it plans money that no longer arrives. Before the start date it is news,
     // not the base — see bgbRenderJobChangeBanner.
@@ -15077,6 +15122,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       // it is the new job's. Saying "from Tax take-home" over a number the Tax tab did not produce
       // is the same defect as showing an estimate in the voice of a count.
       noteText: () => {
+        // TODO-279: name the actual stretch. "your new job" over a figure that changes twice more
+        // before December tells the reader it is settled when it is not — the same class of defect
+        // as the one this label already carries a note about.
+        const pp = window.__jcPhasePay;
+        if (pp && pp.perYear > 0) {
+          const today = isoLocalDate(new Date());
+          const here = (pp.phases || []).find(p => today >= p.from && today <= p.to);
+          if (here && here.net > 0) return 'from Job change \u2014 this stretch of paychecks';
+          const last = (pp.phases || [])[pp.phases.length - 1];
+          if (last && today > last.to && pp.level > 0) return 'from Job change \u2014 the level rate';
+        }
         const fwd = bgbJobChangeForward();
         if (fwd && isoLocalDate(new Date()) >= fwd.from) return 'from Job change \u2014 your new job';
         if (fwd && fwd.current != null) return 'from Job change \u2014 your current job';
@@ -22962,11 +23018,76 @@ document.addEventListener('DOMContentLoaded', async () => {
          + '</tr>';
     });
 
+    // TODO-279. THE BUDGET BASE IS THE CHEQUE YOU ARE ACTUALLY GETTING. The owner: "I want what
+    // my paycheck will look like, so for the first month will look one way and so on, but in jan
+    // (new year) everything resets and we continue with the updated tax brackets."
+    //
+    // So the base steps with the phases and resets on 1 January to the level rate. These nets are
+    // priced HERE, one server round-trip per phase, and `bgbResolveBase` is synchronous — so they
+    // are stashed the same way and for the same reason `__jcPay` is: held in memory, re-derived on
+    // every boot, never persisted (a persisted copy was hydrated over by the profile sync and
+    // vanished a beat after it was written).
+    //
+    // `to` is INCLUSIVE — a phase that ends 29 Nov still governs the 29th.
+    window.__jcPhasePay = {
+      perYear: perYear,
+      phases: cols.filter(c => !c.steady && c.ph)
+                  .map((c, n) => ({ from: c.ph.from, to: c.ph.to, net: nets[n] })),
+      // The steady column is next year on this year's brackets — `buildPayload()` carries whatever
+      // `tax_data/<year>.json` is newest, and today that is 2026. When a 2027 file is dropped in,
+      // this figure updates on its own with no code change. Until then it is honest about being
+      // priced on the brackets the app actually has, rather than claiming next year's.
+      level: (function () { const i = cols.findIndex(c => c.steady); return i < 0 ? null : nets[i]; })(),
+    };
+    try { if (window.bgbBaseAutoFill) window.bgbBaseAutoFill(); } catch (e) {}
+
     h += '<tr class="jc-ph-net"><td>What lands each payday</td>'
        + nets.map(v => '<td class="num mono' + (v < 0 ? ' jc-ph-short' : '') + '">'
                      + fmt$(Math.round(v)) + '</td>').join('')
-       + '</tr>'
-       + '<tr class="jc-ph-sum"><td>Cash from this stretch</td>'
+       + '</tr>';
+
+    // ── BELOW THE LINE: the Roth IRA (TODO-278) ────────────────────────────────────────────
+    // The owner: "I don't see the Roth IRA on the Gross pay breakdown." It is not there because
+    // payroll never touches it — an IRA is funded from your own bank after the money lands, which
+    // is why `jcPhaseLines` has no row for it and why the prose above this table says so. Putting
+    // it among the deductions would be false: it would claim your employer withholds it.
+    //
+    // But the card plans one, and the reader was left to do the subtraction. So it goes BELOW the
+    // net line, after "What lands", where it reads as a claim on the money rather than a
+    // withholding from it. Same reasoning as `Cash from this stretch` sitting down here.
+    //
+    // The rates are the card's own, not a second derivation: total remaining ÷ the paychecks it is
+    // spread over, which is what `jcCadence` prints beside "Needed per month". The level column
+    // gets the FULL-YEAR rate for the same reason the 401(k) row does — from January the catch-up
+    // is over and the same cap spreads across every payday.
+    const iraTotal = (r.fIra && r.fIra.status !== 'ineligible')
+                     ? (+r.fIra.needPerPeriod || 0) * (+r.iraMonths || 0) : 0;
+    const iraPays  = (+r.iraMonths > 0 && perYear > 0) ? r.iraMonths / 12 * perYear : 0;
+    const iraPer   = iraPays > 0 ? iraTotal / iraPays : 0;
+    // The level rate is only honest when a cap is actually KNOWN. `iraCap` falls back to a
+    // constant when it is not, and printing that as next year's plan would be an invention.
+    const iraLevel = (r.iraCapKnown > 0 && perYear > 0) ? r.iraCapKnown / perYear : null;
+    if (iraPer > 0.5) {
+      h += '<tr class="jc-ph-below"><td>&minus; Roth IRA <span class="jc-ph-note">'
+         + '(from your bank, not payroll)</span></td>'
+         + cols.map(c => (c.steady
+              ? (iraLevel == null
+                  ? '<td class="num mono jc-ph-steady" aria-label="next year\u2019s cap is not known yet">&mdash;</td>'
+                  : '<td class="num mono jc-ph-steady">' + fmt$(-Math.round(iraLevel)) + '</td>')
+              : '<td class="num mono">' + fmt$(-Math.round(iraPer)) + '</td>')).join('')
+         + '</tr>'
+         + '<tr class="jc-ph-left"><td>Left after the Roth IRA</td>'
+         + cols.map((c, n) => {
+             const cut = c.steady ? (iraLevel == null ? null : iraLevel) : iraPer;
+             if (cut == null) return '<td class="num mono jc-ph-steady">&mdash;</td>';
+             const v = nets[n] - cut;
+             return '<td class="num mono' + (v < 0 ? ' jc-ph-short' : '')
+                  + (c.steady ? ' jc-ph-steady' : '') + '">' + fmt$(Math.round(v)) + '</td>';
+           }).join('')
+         + '</tr>';
+    }
+
+    h += '<tr class="jc-ph-sum"><td>Cash from this stretch</td>'
        + stretchCash.map((v, n) => (v == null
             // An em-dash, not a figure. The level-rate column is NEXT year; printing a number here
             // would invite it into a total that describes this one.
@@ -23142,6 +23263,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.__jobChange = { compute: jcCompute, render: jcRender, apply: jcApply,
                          eligibleDate: jcEligibleDate, heads: JC_HEAD, tones: JC_TONE,
                          healForward: jcHealForwardFromStore,
+                         // BUG-0091. "An applied job change exists, and its forward monthly has
+                         // not been computed yet." `jc_a_takehome` is written ONLY by jcApply, so
+                         // its presence is what distinguishes an APPLIED change from a half-typed
+                         // form — the same signal jcRefreshForwardMonthly gates on. The Budget tab
+                         // asks this before it lets a resolved base overwrite the stored one.
+                         forwardPending: () => !window.__jcPay && !!S('jc_start')
+                                               && rn(S('jc_a_takehome')) > 0,
                          // Exported so a CDP test can await the priced table instead of sleeping
                          // and hoping the debounce has fired.
                          refreshPhases: jcRefreshPhases, phaseLabel: jcPhaseLabel,

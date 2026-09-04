@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.9.0
+
+Your budget now follows the paycheck you are actually getting, and a job change no longer loses it
+on a refresh.
+
+**Fixed: applying a job change, then refreshing, quietly wrecked the budget**
+
+Your Monthly base reverted from **$9,871** to **$6,972** — the old job's figure — and a balanced
+plan started reading **Over by $2,838**. Worse, it did not just display the wrong number: it
+*saved* it, and synced it. The base is safe across a refresh now.
+
+**The base is the cheque you are actually getting**
+
+A job change does not change your pay once — it changes it in stages, as each deduction starts. The
+budget followed none of that; it used one blended figure that matched no payslip.
+
+Now it tracks the stretch you are in, and says which one:
+
+- **Sep 1 – Nov 29** · $5,086 a payday → **$10,172/mo**
+- **Nov 30 – Dec 31** · $4,650 a payday → **$9,300/mo**
+- **From 1 January** · the level rate, once the catch-up is over
+
+The label reads *"from Job change — this stretch of paychecks"* rather than claiming your new job
+is settled when it changes twice more before December. Before the new job's first payday it still
+uses your current job, because that is who is still paying you.
+
+**The Roth IRA appears on the paycheck table**
+
+It is not a payroll deduction — an IRA comes out of your bank after the money lands, so it can
+never be a withholding line. But your plan commits **$938 a payday** to it, and the table stopped
+before saying so. It now sits **below** "What lands each payday":
+
+    What lands each payday      $5,086
+    − Roth IRA (from your bank)   −$938
+    Left after the Roth IRA     $4,148
+
+**About this release:** Chrome was unavailable on the build machine, so the browser test suite
+could not run. It was verified by 2,235 other tests, by mutation testing, and by hand.
+
 ## 0.8.9
 
 **Fixed: “Other voluntary elections” appeared on every tax screen**
