@@ -368,12 +368,24 @@
      Deliberately NOT a table: five columns of which one is controls is a list wearing a
      table's clothes, and folding a table on a phone needs display:block, which strips the
      row and cell roles from the accessibility tree at exactly the width where they matter. */
+  /* BUG-0092. A CONTAINER, not a viewport breakpoint. The fixed tracks below sum to 574px
+     (52+132+132+196+62) plus five gaps — about 630px before the NAME track gets a single pixel.
+     The stacked layout only fired under 600px of VIEWPORT, so a window wider than 600px holding a
+     panel narrower than 630px squeezed `minmax(0, 1fr)` to zero and the name vanished entirely:
+     "15 Tue · $850.00 · due in 11 days" with nothing saying which bill that is. The panel's width
+     is what decides this, and it is not a function of the window's — the same lesson the budget
+     row learned. `#ac_presets` above is the existing precedent for the idiom. */
   .sch-list { --sch-c-date: 52px; --sch-c-amt: 132px; --sch-c-status: 132px;
               --sch-c-occ: 196px; --sch-c-rule: 62px;
+              container-type: inline-size; container-name: schlist;
               border-top: 1px solid var(--line-faint); }
   .sch-row { display: grid; align-items: center; column-gap: var(--space-3);
              padding: 9px 2px; border-bottom: 1px solid var(--line-faint);
-             grid-template-columns: var(--sch-c-date) minmax(0, 1fr) var(--sch-c-amt)
+             /* 8ch, not 0. A floor of zero makes the NAME the first thing to disappear, and it
+                is the only cell that says which bill the row is — every other cell is legible and
+                useless without it. With a floor the row overflows instead, which is visible and
+                recoverable; a vanished name is neither. */
+             grid-template-columns: var(--sch-c-date) minmax(8ch, 1fr) var(--sch-c-amt)
                                     var(--sch-c-status) var(--sch-c-occ) var(--sch-c-rule);
              grid-template-areas: "date name amt status occ rule"
                                   "date meta amt status occ rule"; }
@@ -630,6 +642,21 @@
      this gesture (an editor appearing where it was not). Reused rather than a second keyframe. */
   @media (prefers-reduced-motion: no-preference) {
     .pp-row.is-editing .pp-edit { animation: iv-open .16s ease-out; }
+  }
+  /* BUG-0092: the same stacked layout, keyed on the PANEL. 640px because the six-column grid
+     needs ~630px for its fixed tracks alone — switching at the width where the name would start
+     being squeezed, rather than after it has already gone. The viewport copy below stays as the
+     fallback for engines without container queries; both produce the identical layout, so an
+     engine that honours both simply applies it twice. */
+  @container schlist (max-width: 640px) {
+    .sch-row { grid-template-columns: var(--sch-c-date) minmax(0, 1fr) auto;
+               grid-template-areas: "date name rule" "date meta meta" "date amt status" "occ occ occ";
+               row-gap: 3px; padding: 11px 2px; }
+    .sch-acts-occ { justify-content: flex-start; margin-top: 4px; flex-wrap: nowrap; }
+    .sch-amt { text-align: left; }
+    .sch-plan { display: inline; margin-left: 6px; }
+    .sch-status { text-align: right; }
+    .sch-row .gl-act { min-height: 44px; min-width: 44px; }
   }
   @media (max-width: 600px) {
     .sch-row { grid-template-columns: var(--sch-c-date) minmax(0, 1fr) auto;
@@ -9299,7 +9326,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Import panes rendered empty until the user happened to visit Actuals first. Loading the
       // DATA was only half of it — see acOnSetupOpen: the handlers were still unbound.
       if (t === 'setup') { try { acOnSetupOpen(); } catch (e) {} }
-      if (t === 'actuals') { acOnOpen(); try { vnLoad(); } catch (e) {} }   // ventures moved here with its card
+      // BUG-0095. `hbFetch()` ran on the BUDGET tab only, so on Actuals `hb.loaded` was false,
+      // `acSharedLineFor` returned null for everything, and BUG-0094's share conversion silently
+      // fell back to "you pay all of it" — Rent read "$749.00 under plan" exactly as before the
+      // fix. The logic was right; its data was never loaded on the tab that runs it. Same shape as
+      // BUG-0091: a figure derived from a global that nothing populates on this path.
+      //
+      // Re-renders when it lands, because the fetch is async and the list has already painted by
+      // then — the paint that matters is the second one.
+      if (t === 'actuals') {
+        acOnOpen(); try { vnLoad(); } catch (e) {}
+        if (typeof hbFetch === 'function' && !hb.loaded) {
+          hbFetch().then(() => { try { schRenderDated(); } catch (e) {} });
+        }
+      }
     });
   });
   // Restore the last-viewed tab on reload (default stays Overview). Runs on `load`, after init + the
@@ -19436,23 +19476,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     });
 
+    // BUG-0094. LIKE FOR LIKE, and this list did not compare like with like the moment a shared
+    // bill started storing the WHOLE amount (TODO-276). `r.mine` is YOUR share of what was
+    // actually paid; `r.planned` is the schedule's figure, which for a shared line is now the
+    // entire bill. Comparing them made every shared bill permanently "off plan" by exactly the
+    // partner's share — Rent would have read "$749.00 under plan" every month forever, and no
+    // amount of paying it correctly would ever have settled it.
+    //
+    // The whole surface is share-first (the amount column shows your share, the meta line says
+    // "your share of $19.26"), so the PLAN is converted to your share rather than the actual being
+    // converted to the whole. Read live from the shared budget, the same lookup the manual entry
+    // path makes, so a renegotiated split moves this too.
+    const mineOf = sc => {
+      const line = (typeof acSharedLineFor === 'function') ? acSharedLineFor(sc.category || sc.name) : null;
+      const partner = (line && typeof acSharedPartnerFraction === 'function')
+                      ? acSharedPartnerFraction(line) : 0;
+      return partner > 0 && partner < 1 ? (1 - partner) : 1;
+    };
     rows.forEach(r => {
+      r.planMine = r.planned * mineOf(r.sc);
       if (r.n > 0) {
-        r.variance = r.mine - r.planned;
-        const tol = Math.max(Math.abs(r.planned) * SCH_ON_PLAN_PCT, SCH_ON_PLAN_MIN);
+        r.variance = r.mine - r.planMine;
+        const tol = Math.max(Math.abs(r.planMine) * SCH_ON_PLAN_PCT, SCH_ON_PLAN_MIN);
         r.state = Math.abs(r.variance) <= tol ? 'done' : 'off';
       } else r.state = r.on < todayIso ? 'need' : 'due';
     });
     rows.sort((a, b) => a.on < b.on ? -1 : a.on > b.on ? 1
                       : (a.sc.name < b.sc.name ? -1 : a.sc.name > b.sc.name ? 1 : 0));
 
-    const nCame = rows.filter(r => r.n > 0).length;
+    // BUG-0093. "Came through" meant TWO DIFFERENT THINGS three inches apart. This counted every
+    // row with a matching transaction (`r.n > 0`), while the fold below holds only `state ===
+    // 'done'` and calls itself "came through AS PLANNED". A bill found in the ledger but off plan
+    // — Trash logged at $12.52 against a $20.80 plan — was counted in the summary as having come
+    // through, and then correctly left in the open list for a decision. The reader is told seven
+    // came through and can only find five, with two sitting above claiming "In transactions".
+    //
+    // So the off-plan rows get their own term. They are neither settled nor still to come, and
+    // saying so is the whole of the fix: the three numbers now add up to the total AND each one
+    // means what the list does with it. `state === 'off'` is the same test the fold uses.
+    const nCame = rows.filter(r => r.state === 'done').length;
+    const nOff  = rows.filter(r => r.state === 'off').length;
     const nDue = rows.filter(r => r.state === 'due').length;
     const nNeed = rows.filter(r => r.state === 'need').length;
     if (sumEl) {
       sumEl.innerHTML = rows.length
         ? '<b>' + rows.length + '</b> in ' + esc(acMonthLabel(ACT.month))
           + ' · <span class="sch-muted">✓ ' + nCame + ' came through</span>'
+          + (nOff ? ' · <span class="sch-need">≠ ' + nOff + ' off plan</span>' : '')
           + ' · <span class="sch-muted">⌛ ' + nDue + ' still to come</span>'
           + (nNeed ? ' · <span class="sch-need">⚠ ' + nNeed + ' need you</span>' : '')
         : '';
@@ -19503,8 +19573,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       let amt;
       if (done) {
+        // The plan SHOWN is the plan JUDGED — `planMine`, your share. Printing the whole bill here
+        // beside your share of the actual is what made "$8.28 under plan" unverifiable by adding
+        // the two visible numbers together (rule 9: read the computed value).
         amt = acAmt(r.mine)
-            + (r.planned ? '<span class="sch-plan">plan ' + acAmt(r.planned) + '</span>' : '');
+            + (r.planMine ? '<span class="sch-plan">plan ' + acAmt(r.planMine) + '</span>' : '');
       } else if (canPost) {
         // The amount stays EDITABLE on a row that can post — confirming at the figure you typed is
         // a capability the tray carried and this list must not quietly drop.
@@ -19519,6 +19592,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (done) {
         occActs = '<button type="button" class="gl-act" data-schfind="' + esc(String(sc.id)) + '"'
                 + ' aria-label="Show ' + esc(sc.name) + ' in transactions">In transactions</button>';
+        // TODO-280. ACCEPT THE DIFFERENCE. The owner: "we should be able to accept the difference,
+        // is a variable amount sometimes it will be way under." A bill flagged `amount varies` is
+        // one whose figure is a guess by definition, and holding it open every month because the
+        // guess was wrong turns the one list that should say "these need you" into noise.
+        //
+        // Written as an `override` exception carrying what actually landed, which is not a new
+        // concept bolted on: an override means "for THIS occurrence the plan was X", and that is
+        // exactly what accepting says. The rule is untouched, next month is unaffected, the
+        // variance goes to zero so the row settles into the fold, and
+        // `clear_occurrence_exception` already exists to undo it.
+        if (r.state === 'off') {
+          occActs += '<button type="button" class="gl-act gl-act-primary" data-schaccept="'
+                   + esc(String(sc.id)) + '|' + esc(r.raw) + '|' + (Math.round(r.full * 100) / 100) + '"'
+                   + ' title="Record ' + esc(acAmt(r.full)) + ' as the plan for this one month"'
+                   + ' aria-label="Accept ' + esc(acAmt(r.full)) + ' as the plan for '
+                   + esc(sc.name) + ' this month">Accept</button>';
+        }
       } else {
         if (di >= 0 && sc.accountId == null) {
           occActs += '<button type="button" class="gl-act gl-act-primary" data-schfix="' + sc.id + '"'
@@ -19562,16 +19652,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       ? '<div class="warn-box">Could not reach the due list — the month below is accurate, but '
         + 'Confirm and Skip are unavailable until this loads.</div>'
       : '';
-    let dividerDone = false;
-    open.forEach(r => {
-      if (!dividerDone && r.on >= todayIso) {
-        h += '<div class="sch-today"><span>Today · ' + esc(schStamp(todayIso)) + '</span></div>';
-        dividerDone = true;
-      }
-      h += rowHtml(r);
-    });
+    // TODO-281. The upcoming ones fold away. The owner: "we need to be able to collapse the
+    // upcoming recurring transactions, otherwise is too much noise." Fifteen bills you cannot act
+    // on yet, above the ones you can, buries the only rows that want a decision today.
+    //
+    // The line is TODAY, not "still to come": a bill due today is actionable — Confirm and Log it
+    // are both live on it — so it belongs with the rows above the fold, not behind it. That is the
+    // same cut the `Today ·` divider already draws, so the fold replaces the divider rather than
+    // adding a second boundary a reader has to reconcile with it.
+    const nowRows = open.filter(r => r.on <= todayIso);
+    const later   = open.filter(r => r.on > todayIso);
+    nowRows.forEach(r => { h += rowHtml(r); });
     if (!open.length) {
       h += '<div class="mini muted" style="padding:10px 2px">Nothing waiting for a decision this month.</div>';
+    } else if (!nowRows.length) {
+      // Everything is in the future — say so, rather than showing a bare fold button under a
+      // heading and letting it read as an empty month.
+      h += '<div class="mini muted" style="padding:10px 2px">Nothing due yet — the next one is '
+         + esc(schStamp(later[0].on)) + '.</div>';
+    }
+    if (later.length) {
+      h += '<div class="sch-fold"><button type="button" class="gl-act gl-act-primary" id="sch_soon_btn"'
+         + ' aria-expanded="false" aria-controls="sch_soon">' + later.length
+         + (later.length === 1 ? ' still to come — show it' : ' still to come — show them')
+         + '</button></div>'
+         + '<div id="sch_soon" hidden>' + later.map(rowHtml).join('') + '</div>';
     }
     if (settled.length) {
       h += '<div class="sch-fold"><button type="button" class="gl-act gl-act-primary" id="sch_fold_btn"'
@@ -20730,6 +20835,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // ---- Scheduled money ----
       // The settled-and-on-plan fold. Nothing is deleted by folding and the arithmetic in the
       // summary line above still counts these rows, so the button says how many it is hiding.
+      // TODO-281: the upcoming fold, same shape as the settled one below it.
+      { const sb = ev.target.closest('#sch_soon_btn');
+        if (sb) {
+          ev.preventDefault();
+          const d = document.getElementById('sch_soon'); if (!d) return;
+          const opening = d.hidden;
+          d.hidden = !opening;
+          sb.setAttribute('aria-expanded', String(opening));
+          const n = d.children.length;
+          sb.textContent = n + ' still to come — '
+                         + (opening ? (n === 1 ? 'hide it' : 'hide them')
+                                    : (n === 1 ? 'show it' : 'show them'));
+          return;
+        } }
       { const fb = ev.target.closest('#sch_fold_btn');
         if (fb) {
           ev.preventDefault();
@@ -20777,7 +20896,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             // server's own reason, and only claim "already logged" when that is what it said.
             showToast(schConfirmError(e, d));
           }
-          await schRefresh(); acRefresh(); return;
+          // BUG-0096. ORDER MATTERS. `schRefresh()` re-renders the list by matching schedules
+          // against the transactions ALREADY in memory, and the one just posted is not among them
+          // until `acRefresh()` has fetched it. Refreshing the list first painted the pre-confirm
+          // answer, so a row stayed "due" until the reader left the tab and came back — which is
+          // exactly what was reported. Ledger first, then the list that reads it.
+          await acRefresh(); await schRefresh(); return;
+        } }
+      { const a = ev.target.closest('[data-schaccept]');
+        if (a) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          // schedule id | the RULE's date | cents. `raw`, not the landing date (BUG-0064): the
+          // store keys exceptions on the date the rule produced, so an occurrence accepted by its
+          // shifted date would write an exception nothing ever reads.
+          const [sid, raw, amount] = String(a.dataset.schaccept).split('|');
+          try {
+            // DOLLARS. The endpoint's model takes `amount` and converts with `_cents()`; sending
+            // `amountCents` would be silently ignored as an unknown field and the override would
+            // carry a null amount — an occurrence with no plan at all rather than an accepted one.
+            await patch('/api/tracking/schedules/' + sid + '/occurrence/' + raw,
+                        { action: 'override', amount: +amount });
+            showToast('Accepted — that is this month\u2019s plan now');
+          } catch (e) {
+            showToast('Could not accept that one — ' + (errDetail(e) || 'the server refused it'));
+          }
+          // BUG-0096. ORDER MATTERS. `schRefresh()` re-renders the list by matching schedules
+          // against the transactions ALREADY in memory, and the one just posted is not among them
+          // until `acRefresh()` has fetched it. Refreshing the list first painted the pre-confirm
+          // answer, so a row stayed "due" until the reader left the tab and came back — which is
+          // exactly what was reported. Ledger first, then the list that reads it.
+          await acRefresh(); await schRefresh(); return;
         } }
       { const k = ev.target.closest('[data-schskip]');
         if (k) {

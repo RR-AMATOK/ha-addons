@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.1
+
+Scheduled money reads properly on a narrow screen, its counts add up, and a variable bill can be
+accepted for what it actually was.
+
+**The bill's name no longer disappears**
+
+On a narrow panel the rows lost the one thing that says which bill they are — `15 Tue · $850.00 ·
+due in 11 days` and nothing else. The name always has room now, and the layout folds when the
+*panel* is narrow rather than only when the whole window is.
+
+**"Came through" now means one thing**
+
+The count said seven had come through while the list could only show five. A bill found in your
+ledger but well off its planned amount is neither settled nor still to come, so it has its own
+term now:
+
+    23 in September · ✓ 5 came through · ≠ 2 off plan · ⌛ 16 still to come
+
+**Accept the difference**
+
+Bills marked *amount varies* are a guess by definition. An off-plan row now has an **Accept**
+button: it records what actually landed as that month's plan, the row settles, and **next month is
+untouched**.
+
+**Fixed: shared bills read as wildly under plan**
+
+Rent showed *"$749.00 under plan"* every month — your share compared against the whole bill. Both
+numbers were right; they were answering different questions. The plan is now converted to your
+share before it is judged, read fresh from your shared budget so a renegotiated split moves it too.
+
+**Fixed: confirming a bill did nothing until you left the screen**
+
+Confirming refreshed the list before fetching the transaction it had just created, so the row kept
+its old state until you switched tabs and came back.
+
+**Upcoming bills fold away**
+
+Fifteen bills you cannot act on yet, sitting above the ones you can, buried the rows that wanted a
+decision. They collapse behind *"15 still to come — show them"*. Anything due **today** stays
+visible, because you can still act on it.
+
 ## 0.9.0
 
 Your budget now follows the paycheck you are actually getting, and a job change no longer loses it
