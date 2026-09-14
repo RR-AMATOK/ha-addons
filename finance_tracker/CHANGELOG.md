@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.9.2
+
+Repairs to the Job change card. Everything here was broken by 0.9.0 and is fixed now.
+
+**Fixed: a cleared Job change card filled itself back in**
+
+Clear the card, touch anything on the Tax tab, and it repopulated from storage a moment later.
+It stays cleared now.
+
+**Fixed: typing in the card moved your budget**
+
+The card's promise is that nothing leaves it until you press **Apply to my Tax inputs** — but a
+half-typed salary was already moving the Monthly base on the Budget tab. Only an applied change
+moves it now.
+
+**Fixed: a job change that arrived late showed no banner**
+
+If the data landed after the app had started — a first load on a new device, or a sync that
+resolved a moment late — the card stayed blank and the "your take-home becomes…" banner never
+appeared.
+
+**About this release:** Chrome is working again on the build machine, so the full browser suite ran
+for the first time since 0.8.9. It found all three of the above. They were shipped in 0.9.0 and
+0.9.1 without it.
+
 ## 0.9.1
 
 Scheduled money reads properly on a narrow screen, its counts add up, and a variable bill can be

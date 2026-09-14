@@ -6335,7 +6335,7 @@ function render(r) {
   // So the forward monthly stayed null for the whole page load and the base fell back to the old
   // job's take-home. This is the one event that knows a tax result has landed; it no-ops once the
   // figure exists, exactly as healPhases does.
-  try { if (window.__jobChange && window.__jobChange.healForward) window.__jobChange.healForward(); } catch (e) {}
+  try { if (window.__jobChange && window.__jobChange.healForward) window.__jobChange.healForward(true); } catch (e) {}
   // The frameworks are computed from this result, so the recalculation IS their trigger now that
   // the six inputs (and the button that recalculated them) are gone.
   if (typeof calcBudget === 'function') { try { calcBudget(); } catch (e) {} }
@@ -15087,7 +15087,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // the priced stretches from the Job change card — the same figures the table above prints, so
     // the base and that table can never disagree. Past the last stretch (1 January onward) the
     // catch-up is over and the level rate takes it.
-    const pp = window.__jcPhasePay;
+    // APPLIED ONLY. `jcRefreshPhases` prices the table on every keystroke in the card — that is
+    // what makes it a live preview — so reading its figures unconditionally let a HALF-TYPED job
+    // change move the budget base. "Nothing leaves this card until Apply" is the card's whole
+    // contract and its copy says so; `jc_a_takehome` is written only by jcApply, which is the same
+    // signal `jcRefreshForwardMonthly` and `forwardPending` already gate on.
+    const applied = (typeof S === 'function') && rn(S('jc_a_takehome')) > 0;
+    const pp = applied ? window.__jcPhasePay : null;
     if (pp && pp.perYear > 0) {
       const today = isoLocalDate(new Date());
       const here = (pp.phases || []).find(p => today >= p.from && today <= p.to);
@@ -15165,7 +15171,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // TODO-279: name the actual stretch. "your new job" over a figure that changes twice more
         // before December tells the reader it is settled when it is not — the same class of defect
         // as the one this label already carries a note about.
-        const pp = window.__jcPhasePay;
+        // Same gate as the resolver: an un-applied card must not relabel the base either.
+        const pp = ((typeof S === 'function') && rn(S('jc_a_takehome')) > 0)
+                   ? window.__jcPhasePay : null;
         if (pp && pp.perYear > 0) {
           const today = isoLocalDate(new Date());
           const here = (pp.phases || []).find(p => today >= p.from && today <= p.to);
@@ -22977,6 +22985,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const seq = ++_jcPhaseSeq;
     const r = jcCompute();
     if (!jcUsable(r)) {
+      // BUG-0097. CLEAR THE STASH. `__jcPhasePay` was written in one place and never cleared, so
+      // once a job change had been priced the figures outlived the form: emptying the card left a
+      // cold screen still resolving its budget base from stretches that no longer exist. Four
+      // job-change tests caught it the moment Chrome came back.
+      //
+      // Cleared HERE and not on the `__taxResult` path below, and the difference is the whole
+      // point: this branch means "there is no job change", which is durable; that one means "the
+      // tax tab has not answered yet", which is transient and clearing on it would wipe a good
+      // value during every cold boot — the exact shape of BUG-0091.
+      //
+      // ⚠ AND IT REPAINTS ON A MICROTASK, not inline. `bgbBaseAutoFill` re-enters `render()`, which
+      // calls `healForward(true)` — so calling it synchronously here re-entered this very function
+      // and took its early return, and the Budget tab's own restore-from-storage never ran. The
+      // late-arrival banner test caught that: the form came back blank (`jc_start` null) with the
+      // data sitting in storage. Two fixes of mine fighting each other, one release apart.
+      const had = window.__jcPhasePay;
+      window.__jcPhasePay = null;
+      if (had) Promise.resolve().then(() => {
+        try { if (window.bgbBaseAutoFill) window.bgbBaseAutoFill(); } catch (e) {}
+      });
       jcPhasesMessage('Fill in when the new job starts and what it pays, and this shows what each '
                     + 'remaining paycheck looks like.');
       return;
@@ -23350,7 +23378,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Heals the BLANK case ONLY. If the form already holds a start date, storage is not consulted at
   // all, because persist() is debounced: storage is legitimately a keystroke behind the form, and
   // restoring from it mid-edit would revert what the user just typed.
-  function jcHealForwardFromStore() {
+  // `formedOnly` — BUG-0098. `render()` calls this on EVERY tax recompute (BUG-0091's fix), and the
+  // storage-restore branch below REFILLS THE FORM. So clearing the card and touching anything on
+  // the Tax tab resurrected it from storage a beat later. BUG-0091 only ever needed the FIRST
+  // branch — "the form is fine, the figure is not"; the restore branch answers a different
+  // question (first load on a device, or a profile hydrate a moment late) and only the
+  // Budget-tab-open path should ask it, because that is a deliberate visit rather than a side
+  // effect of recalculating tax.
+  function jcHealForwardFromStore(formedOnly) {
     if (window.__jcPay) return;                      // already computed — nothing to heal
     if (S('jc_start')) {
       // THE FORM IS FINE, THE FIGURE IS NOT. This is the common case and the first version of
@@ -23369,6 +23404,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Storage is only consulted on this path. persist() is debounced, so storage runs a keystroke
     // behind the form, and restoring from it while the form holds anything would revert an edit in
     // progress — which is why the branch above never touches it.
+    if (formedOnly) return;                          // see the note on the parameter
     let o; try { o = JSON.parse(load(JC_KEY)); } catch (e) {}
     if (!o || !o.jc_start) return;                   // storage has nothing either
     jcRestore();
