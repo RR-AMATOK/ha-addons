@@ -1771,6 +1771,17 @@ def _carry_profile_on_promotion(conn: sqlite3.Connection, to_user_id: str) -> st
     # discarding the only copy of the one being displaced, which is precisely backwards for a
     # recovery copy. Caught by reading the fixture's output rather than by the test passing.
     parked = f"pre-promotion:{to_user_id}"
+    # A MARKER ROW, so a client arriving later can be told its scope changed for a legitimate
+    # reason. Without it the browser holds a `scopeId` from before the promotion, every flush
+    # looks like it displaced a lineage the server did not expect, and the "your plan replaced a
+    # newer server version" banner repeats forever with nothing converging. The owner cannot clear
+    # it by hand: inside the Home Assistant app there is no console, so a `localStorage.removeItem`
+    # workaround is not a remedy — it has to be answerable from here.
+    conn.execute(
+        "INSERT INTO user_profile (user_id, blob, state_version, updated_at, created_at) "
+        "VALUES (?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET updated_at = excluded.updated_at",
+        (f"promoted-from:{to_user_id}", "{}", 0, _now(), _now()),
+    )
     conn.execute("DELETE FROM user_profile WHERE user_id = ?", (parked,))
 
     if dst is not None and (dst["updated_at"] or "") >= (src["updated_at"] or ""):
@@ -5443,11 +5454,26 @@ def get_profile(conn: sqlite3.Connection, user_id: str) -> dict:
         (user_id,),
     ).fetchone()
     if r is None:
-        return {"hasState": False, "stateVersion": 0, "blob": None, "updatedAt": None}
+        return {"hasState": False, "stateVersion": 0, "blob": None, "updatedAt": None,
+                "promotedFrom": None}
+    # BUG-0101's second half, server-side. `promotedFrom` names the id whose scope was folded into
+    # this one, so a client whose stored `scopeId` matches it knows its mismatch is a PROMOTION and
+    # can re-point instead of treating local as a stranger's. The client cannot infer this on its
+    # own — a second household member on a shared browser is byte-identical (TM-13a) — which is why
+    # the first attempt at a client-side rule was reverted.
+    promoted_from = None
+    if user_id == _SENTINEL_OWNER_ID:
+        promoted_from = [
+            row["user_id"].split(":", 1)[1]
+            for row in conn.execute(
+                "SELECT user_id FROM user_profile WHERE user_id LIKE 'promoted-from:%'"
+            ).fetchall()
+        ]
     return {
         "hasState": True,
         "stateVersion": r["state_version"],
         "blob": json.loads(r["blob"]),
+        "promotedFrom": promoted_from or None,
         "updatedAt": r["updated_at"],
     }
 

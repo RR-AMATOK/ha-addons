@@ -517,6 +517,10 @@
             gap: var(--space-3); flex-wrap: wrap; margin: var(--space-4) 0 var(--space-2); }
   .pp-find { width: 240px; max-width: 100%; }
   .pp-none { padding: var(--space-4) 2px; color: var(--muted); font-size: var(--fs-sm); }
+  /* TODO-285. `.ac-filterbar` carries the whole look; this only settles where the row SITS —
+     under the orientation line, above the column heads, so it reads as belonging to the list it
+     narrows rather than to the lede above it. */
+  .pp-filterbar { margin: 0 0 var(--space-3); }
   /* Prose caps go on the PROSE, never on `#ac_presets` itself — a container wearing a measure cap
      passes it to whatever renders into it later. */
   .pp-lede { max-width: 64ch; }
@@ -823,6 +827,38 @@
      tag:" chip wall. .filter-popup is a marker class on top of .backup-popup (same pattern as
      .settings-popup) — surface/position/shadow are inherited, only anchor + inner layout differ. */
   .ac-filterbar { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  /* TODO-284: one dimension per menu. `position: relative` on the wrapper, not the bar, so each
+     popover anchors under ITS OWN button — six menus sharing the bar's origin would stack. */
+  .ac-facet { position: relative; display: inline-flex; }
+  .ac-filter-btn.is-on { border-color: var(--accent); background: var(--accent-soft, var(--chip)); }
+  .ac-facet-n { display: inline-block; margin-left: 5px; min-width: 16px; padding: 0 5px;
+                border-radius: 999px; background: var(--accent); color: #fff;
+                font-size: var(--fs-2xs); font-weight: var(--fw-bold);
+                font-variant-numeric: tabular-nums; }
+  /* A tickable row, not a button — the box is the affordance, and `space` on a focused checkbox
+     is the keyboard path the old single-select list never had. */
+  /* Dimmed, never hidden: a menu whose contents change as you tick elsewhere reads as broken, and
+     "this combination is empty" is the useful answer — before the click rather than after it. */
+  .filter-opt.is-nil { opacity: .45; }
+  .ac-amt-range { display: flex; align-items: center; gap: 8px; }
+  .ac-amt-range input { flex: 1 1 0; min-width: 0; font-variant-numeric: tabular-nums; }
+  .ac-amt-range span { color: var(--muted); font-size: var(--fs-xs); }
+  /* The chips say the sentence out loud — "(Housing or Golf) and Amex" — because a row of menus
+     with counts does not tell a reader how the pieces combine. */
+  .ac-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
+  .ac-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px 2px 9px;
+             border: 1px solid var(--line); border-radius: 999px; background: var(--chip);
+             color: var(--text); font-size: var(--fs-xs); }
+  .ac-chip b { font-weight: var(--fw-semibold); }
+  .ac-chip-or { color: var(--muted); opacity: .75; margin: 0 2px; }
+  .ac-chip-op { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase;
+                letter-spacing: var(--ls-caps); }
+  .ac-chip-x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 2px;
+               font-size: var(--fs-sm); line-height: 1; }
+  .ac-chip-x:hover { color: var(--bad); }
+  .ac-chip-clear { background: none; border: 0; color: var(--muted); cursor: pointer;
+                   font: inherit; font-size: var(--fs-xs); text-decoration: underline; }
+  .ac-chip-clear:hover { color: var(--bad); }
   .ac-filter-btn { padding: 4px 10px; }
   .ac-filter-caret { color: var(--muted); }
   .filter-popup { left: 0; right: auto; }
@@ -830,11 +866,32 @@
   .filter-popup .filter-crossnote { font-size: var(--fs-xs); color: var(--muted); margin: 0 0 8px; }
   .filter-search { width: 100%; box-sizing: border-box; margin-bottom: 8px; }
   .filter-list { max-height: 300px; overflow-y: auto; }
+  /* TODO-284 made these rows <label>s with a checkbox, a name and a count, so they lay out as a
+     FLEX ROW. `display: block` was right when every option was a single-line <button>.
+     A first attempt added the flex rules ~40 lines above this — same specificity, earlier in the
+     file, so `display: block` here silently won and `gap` did nothing. The checkbox sat against
+     its label and the count floated mid-row. Measured, then fixed HERE rather than by adding
+     specificity to the loser. */
   .filter-opt {
-    display: block; width: 100%; box-sizing: border-box; text-align: left; padding: 6px 8px;
+    display: flex; align-items: center; gap: var(--space-2);
+    width: 100%; box-sizing: border-box; text-align: left; padding: 6px 8px;
     min-height: 32px; font-size: var(--fs-sm); color: var(--text); background: transparent;
     border: none; border-radius: 6px; cursor: pointer;
   }
+  /* The UA gives a checkbox its own margin, which lands inside the flex gap and makes the rendered
+     spacing disagree with the declared one. Zero it and let `gap` be the only thing between. */
+  .filter-opt > input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+  /* `min-width: 0` or the ellipsis never fires — a flex item defaults to `min-width: auto` and
+     refuses to shrink below its content, so a long category name pushes the count off the row
+     instead of truncating. */
+  .filter-opt-lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; }
+  /* `margin-left: auto` pins the count to the RIGHT EDGE. Without it the label's `flex: 1 1 auto`
+     only grows to its content and the count sits wherever the text happens to end — adrift in the
+     middle of the row, which is what the screenshot showed. */
+  .filter-opt-n { flex: 0 0 auto; margin-left: auto; padding-left: var(--space-2);
+                  font-size: var(--fs-2xs); color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
   .filter-opt:hover { background: var(--chip); }
   .filter-opt.is-selected { background: var(--selected-bg); color: var(--selected-ink); }
   .filter-opt-all { border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 4px; padding-bottom: 8px; }
@@ -7496,7 +7553,17 @@ function deriveLocalProfileState(meta, scopeId, liveKeyFallback) {
   // fix is for the server to SAY a promotion happened (a flag on the profile response keyed to the
   // carried id) rather than for the client to infer it from a shape it shares with the case this
   // guard exists to stop.
-  if (meta && meta.scopeId != null && meta.scopeId !== scopeId) return 'empty';
+  // BUG-0101. A mismatch is 'empty' UNLESS the SERVER has told us this scope absorbed that id.
+  // `promotedFrom` comes from GET /profile and is populated only for the owner sentinel, so this
+  // is a fact rather than the inference that was tried and reverted: a second household member on
+  // a shared browser looks identical to a promotion from here (TM-13a), and guessing pushed one
+  // person's plan into another's profile. The owner cannot work around the wrong answer either —
+  // inside the Home Assistant app there is no console to clear stale meta from.
+  if (meta && meta.scopeId != null && meta.scopeId !== scopeId) {
+    const promotedIds = window.__profilePromotedFrom;
+    const wasPromoted = Array.isArray(promotedIds) && promotedIds.indexOf(meta.scopeId) !== -1;
+    if (!wasPromoted) return 'empty';
+  }
   if (!meta) return 'present-no-meta';
   return meta.dirty === true ? 'present-dirty' : 'present-clean';
 }
@@ -7760,6 +7827,14 @@ async function doProfileFlush(isMigration) {
 // (review fix, MUST-FIX: they were wrongly applied there in the first F1/F2 pass — see the
 // isCrashRecovery branches below and the crash-recovery call site's own comment for why "dirty
 // must be ignored" is that site's whole premise, not an oversight).
+// BUG-0101: what the server said about promotions, read by deriveLocalProfileState. Held in
+// memory and refreshed on every profile GET — persisting it would let a stale copy vouch for a
+// mismatch the server no longer reports, which is the failure this whole area is about.
+function noteProfilePromotions(server) {
+  window.__profilePromotedFrom = (server && Array.isArray(server.promotedFrom))
+    ? server.promotedFrom : null;
+}
+
 async function doHydrate(server, scopeId, isCrashRecovery) {
   // Fix F1 (2026-08-07 diagnosis): re-validate at the instant of the destructive write. Every
   // caller reaches here only after at least one `await` since the decision to hydrate was made
@@ -7942,6 +8017,7 @@ async function checkRestoreDisplacement() {
     const res = await fetch('/api/tracking/profile');
     if (!res.ok) throw new Error('bad status ' + res.status);
     server = await res.json();
+    noteProfilePromotions(server);          // BUG-0101
   } catch (e) {
     return {
       proceed: confirm(
@@ -8201,6 +8277,7 @@ async function runProfileSyncEngineImpl() {
     // settled — keep __profileMigrationPending set so profileFlushExecutor stays deferred
     // and a first-migration flush can never fire without the §5 snapshots having run.
     if (!res.ok) { window.__profileMigrationPending = true; return; }
+    try { noteProfilePromotions(await res.clone().json()); } catch (e) {}   // BUG-0101
     server = await res.json();
   } catch (e) { window.__profileMigrationPending = true; return; }
   if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
@@ -17611,7 +17688,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     else if (d < 14) short = d + 'd';
     else if (d < 60) short = Math.round(d / 7) + 'w';
     else short = Math.round(d / 30) + 'mo';
-    return { short: short, text: a.text, stale: d >= 548 };   // 548d ≈ 18 months
+    // `days` is exposed for TODO-285's "Last used" facet, which must not invent a second
+    // definition of stale: it reads THIS number and THIS 548-day line.
+    return { short: short, text: a.text, days: d, stale: d >= 548 };   // 548d ≈ 18 months
   }
 
   function acPresetsHead() {
@@ -17638,6 +17717,178 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '</div>').join('') + '</div>';
   }
 
+  // TODO-285. Setup ▸ Payees shipped with ONE control: a find box. That answers "where is Amli?"
+  // and nothing else — and the question this panel actually gets asked is a maintenance one:
+  // which payees still have no category, which have I not touched in eighteen months, which did
+  // I correct by hand. Those are set questions, so they get the ledger's facet idiom VERBATIM
+  // (TODO-284): OR inside a dimension, AND across dimensions, counts computed against every
+  // other dimension so a zero says "this combination is empty" before the click.
+  //
+  // The dimensions are NOT a copy of the ledger's. `missing` and `used` are derived, and they are
+  // the two that turn a forty-row list into a to-do list; bucket/category/tags are how you find
+  // the batch you meant to fix.
+  const PP_MISSING_NAME = { bucket: 'No bucket', cat: 'No category', tags: 'No tags',
+                            none: 'Nothing missing' };
+  const PP_USED_NAME = { recent: 'Last 3 months', quiet: '3–18 months ago',
+                         stale: 'Over 18 months', never: 'Never used' };
+
+  const PP_FACETS = {
+    bucket:  p => [p.bucket || ''],
+    cat:     p => [p.category || ''],
+    tags:    p => (p.tags || []),
+    // Multi-valued like tags, because a payee can be short of several things at once: a row with
+    // neither a category nor tags appears under EITHER option, which is what makes ticking both
+    // show more rather than less.
+    missing: p => {
+      const out = [];
+      if (!p.bucket) out.push('bucket');
+      if (!p.category) out.push('cat');
+      if (!(p.tags || []).length) out.push('tags');
+      return out.length ? out : ['none'];
+    },
+    source:  p => [p.corrected ? 'corrected' : 'learned'],
+    // Reads acPresetAge rather than inventing a second staleness rule. The row already wears an
+    // `is-stale` flag at 548 days; a menu that disagreed with the flag beside it would be worse
+    // than no menu at all.
+    used:    p => {
+      const a = acPresetAge(p.last);
+      if (!a) return ['never'];
+      if (a.stale) return ['stale'];
+      return (a.days != null && a.days >= 90) ? ['quiet'] : ['recent'];
+    },
+  };
+
+  function ppFacetSel(k) {
+    ACT.ppFacets = ACT.ppFacets || {};
+    if (!(ACT.ppFacets[k] instanceof Set)) ACT.ppFacets[k] = new Set();
+    return ACT.ppFacets[k];
+  }
+
+  // The find box is part of the PREDICATE, not a second pass over its result. Type "amli" and
+  // every menu counts among the Amli rows; a search the counts ignored would print "12" beside an
+  // option that yields two.
+  function ppMatchesFind(p) {
+    const find = (ACT.presetFind || '').trim().toLowerCase();
+    if (!find) return true;
+    return (p.description || p.key || '').toLowerCase().indexOf(find) >= 0;
+  }
+
+  function ppPassesFilters(p, skip) {
+    if (!ppMatchesFind(p)) return false;
+    for (const k of Object.keys(PP_FACETS)) {
+      if (k === skip) continue;
+      const sel = ppFacetSel(k);
+      if (!sel.size) continue;
+      if (!PP_FACETS[k](p).some(v => sel.has(v))) return false;
+    }
+    return true;
+  }
+
+  function ppAnyFacetActive() { return Object.keys(PP_FACETS).some(k => ppFacetSel(k).size); }
+
+  const PP_DIMS = [
+    { k: 'bucket',  label: 'Bucket',    search: false, name: v => (KINDS[v] && KINDS[v].label) || v || '—' },
+    { k: 'cat',     label: 'Category',  search: true,  name: v => v || '—' },
+    { k: 'tags',    label: 'Tags',      search: true,  name: v => v },
+    // Ordinal dimensions keep a FIXED order. Sorting "Last used" by count would put "Over 18
+    // months" above "Last 3 months" on a neglected list, and a scale that reorders itself is not
+    // a scale.
+    // `derived: true` marks the three that are COMPUTED from a payee rather than stored on it.
+    // Those are hidden when they have only one option, because a derived dimension with one value
+    // is not information — "everything is complete" is already said by the absence of the menu,
+    // and a control that cannot change the result is furniture. Bucket/Category/Tags keep a
+    // single-option menu: there the one option NAMES the only value, which is worth reading.
+    { k: 'missing', label: 'Missing',   search: false, derived: true,
+      order: ['cat', 'tags', 'bucket', 'none'], name: v => PP_MISSING_NAME[v] || v },
+    { k: 'source',  label: 'Source',    search: false, derived: true,
+      order: ['corrected', 'learned'],
+      name: v => v === 'corrected' ? 'Corrected by hand' : 'Learned from history' },
+    { k: 'used',    label: 'Last used', search: false, derived: true,
+      order: ['recent', 'quiet', 'stale', 'never'], name: v => PP_USED_NAME[v] || v },
+  ];
+
+  function ppFacetOptions(presets, k) {
+    const dim = PP_DIMS.find(d => d.k === k);
+    const counts = new Map();
+    presets.forEach(p => {
+      const hit = ppPassesFilters(p, k);
+      PP_FACETS[k](p).forEach(v => {
+        if (v === '' || v == null) return;
+        counts.set(v, (counts.get(v) || 0) + (hit ? 1 : 0));
+      });
+    });
+    const out = [...counts.entries()];
+    if (dim && dim.order) {
+      return out.sort((a, b) => dim.order.indexOf(a[0]) - dim.order.indexOf(b[0]));
+    }
+    return out.sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+  }
+
+  function ppFilterBarHtml() {
+    const presets = ACT.presets || [];
+    let h = '<div class="ac-filterbar pp-filterbar">';
+    PP_DIMS.forEach(d => {
+      const opts = ppFacetOptions(presets, d.k);
+      // A dimension nothing has is not offered. On a tidy list "Missing" simply does not appear,
+      // which is the panel telling you there is nothing to do.
+      if (!opts.length) return;
+      const sel = ppFacetSel(d.k);
+      // ...but never hide a menu the reader has already used, or their own choice vanishes along
+      // with the only control that could undo it.
+      if (opts.length === 1 && !sel.size && d.derived) return;
+      const open = ACT.ppOpenFacet === d.k;
+      h += '<span class="ac-facet">'
+         + '<button type="button" class="ac-filter-btn' + (sel.size ? ' is-on' : '') + '"'
+         + ' data-ppfacet-open="' + d.k + '" aria-haspopup="listbox" aria-expanded="' + open + '">'
+         + esc(d.label)
+         + (sel.size ? '<span class="ac-facet-n">' + sel.size + '</span>' : '')
+         + ' <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
+      if (open) {
+        const q = (ACT.ppFacetQuery || '').toLowerCase();
+        const list = d.search && q
+          ? opts.filter(([v]) => String(d.name(v)).toLowerCase().includes(q)) : opts;
+        h += '<div class="backup-popup filter-popup" data-ppfacet-pop="' + d.k + '">'
+           + '<div class="filter-title">' + esc(d.label) + '</div>'
+           + (d.search
+              ? '<input type="search" class="filter-search" data-ppfacet-q="1" value="' + esc(ACT.ppFacetQuery || '')
+                + '" placeholder="Search ' + esc(d.label.toLowerCase()) + '…" aria-label="Search ' + esc(d.label) + '" autocomplete="off">'
+              : '')
+           + '<div class="filter-list" role="listbox" aria-label="' + esc(d.label) + '">'
+           + (list.length ? list.map(([v, n]) => {
+               const on = sel.has(v);
+               // Dimmed, never hidden — same rule as the ledger. A menu whose contents change as
+               // you tick elsewhere reads as broken.
+               return '<label class="filter-opt' + (on ? ' is-selected' : '') + (n === 0 && !on ? ' is-nil' : '') + '">'
+                    + '<input type="checkbox" data-ppfacet-pick="' + esc(d.k) + '" data-ppfacet-val="' + esc(String(v)) + '"' + (on ? ' checked' : '') + '>'
+                    + '<span class="filter-opt-lbl">' + esc(String(d.name(v))) + '</span>'
+                    + '<span class="filter-opt-n">' + n + '</span></label>';
+             }).join('')
+             : '<div class="filter-opt is-nil">Nothing matches that search</div>')
+           + '</div></div>';
+      }
+      h += '</span>';
+    });
+
+    // The chips say the sentence out loud — "(No category or No tags) and Over 18 months" —
+    // because a row of menus does not tell a reader how the pieces combine.
+    const chips = [];
+    PP_DIMS.forEach(d => {
+      const sel = ppFacetSel(d.k);
+      if (!sel.size) return;
+      if (chips.length) chips.push('<span class="ac-chip-op">and</span>');
+      chips.push('<span class="ac-chip">' + esc(d.label) + ': '
+        + [...sel].map(v => '<b>' + esc(String(d.name(v))) + '</b>'
+            + '<button type="button" class="ac-chip-x" data-ppfacet-drop="' + esc(d.k) + '" data-ppfacet-val="' + esc(String(v)) + '"'
+            + ' aria-label="Remove ' + esc(String(d.name(v))) + '">✕</button>').join('<span class="ac-chip-or">or</span>')
+        + '</span>');
+    });
+    if (chips.length) {
+      h += '<span class="ac-chips">' + chips.join('')
+         + '<button type="button" class="ac-chip-clear" data-ppfacet-clear="1">Clear all</button></span>';
+    }
+    return h + '</div>';
+  }
+
   function acPresetsRender() {
     const el = $('ac_presets'); if (!el) return;
     if (ACT.presetsLoading) { el.innerHTML = acPresetsSkeleton(); return; }
@@ -17656,32 +17907,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     const find = (ACT.presetFind || '').trim().toLowerCase();
-    const shown = find
-      ? ACT.presets.filter(p => (p.description || p.key || '').toLowerCase().indexOf(find) >= 0)
-      : ACT.presets;
+    // TODO-285: one predicate for the find box AND the facets, so the two can never disagree
+    // about what is on screen — which is exactly how the ledger's three filters used to fight.
+    const shown = ACT.presets.filter(p => ppPassesFilters(p, null));
+    const narrowed = !!find || ppAnyFacetActive();
 
     // The find box appears only when the list is long enough to need it; below that it is one
     // more control between the reader and eight rows they can already see.
     const bar = '<div class="pp-bar"><span class="mini muted">'
-      + (find
+      + (narrowed
           ? esc(String(shown.length)) + ' of ' + ACT.presets.length + ' payees'
           : ACT.presets.length + (ACT.presets.length === 1 ? ' payee remembered' : ' payees remembered'))
       + ', most used first</span>'
       // Shown when the list is long enough to need it OR when a filter is already active — a
       // filter arriving from the composer with no box to clear it would look like a broken list.
-      + ((ACT.presets.length > 8 || find)
+      + ((ACT.presets.length > 8 || find || ppAnyFacetActive())
           ? '<span class="input-pair pp-find"><input type="text" id="ac_presets_find" '
             + 'placeholder="Find a payee…" aria-label="Find a payee" value="' + esc(ACT.presetFind || '') + '"></span>'
           : '')
       + '</div>';
 
     if (!shown.length) {
-      el.innerHTML = bar + '<div class="pp-none">No payee matches “' + esc(ACT.presetFind || '') + '”.</div>';
+      // The filter bar renders HERE too, or a filter that empties the list leaves no way back.
+      el.innerHTML = bar + ppFilterBarHtml()
+        + '<div class="pp-none">' + (find
+            ? 'No payee matches “' + esc(ACT.presetFind || '') + '”'
+                + (ppAnyFacetActive() ? ' with those filters.' : '.')
+            : 'No payee matches those filters.') + '</div>';
       acPresetsWireFind();
       return;
     }
 
-    let h = bar + acPresetsHead() + '<div class="pp-list">';
+    let h = bar + ppFilterBarHtml() + acPresetsHead() + '<div class="pp-list">';
     shown.forEach(p => {
       const bucket = p.bucket ? (KINDS[p.bucket] ? KINDS[p.bucket].label : p.bucket) : '—';
       const bits = [];
@@ -17766,6 +18023,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       ACT.presetFind = fi.value; ACT.presetFindFocus = true; acPresetsRender();
     });
     fi.addEventListener('blur', () => { ACT.presetFindFocus = false; });
+  }
+
+  // The menu is re-rendered on every tick and every keystroke, so the search box the user is
+  // typing into is a NEW element each time. Without this, the second character of a search drops
+  // you out of the field — the same failure acPresetsWireFind exists to prevent for the find box.
+  function ppRestoreFacetQuery() {
+    const q = document.querySelector('[data-ppfacet-pop="' + (ACT.ppOpenFacet || '') + '"] [data-ppfacet-q]');
+    if (!q) return;
+    q.focus();
+    try { q.setSelectionRange(q.value.length, q.value.length); } catch (e) {}
   }
 
   function acPresetFormValues(key) {
@@ -20506,6 +20773,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   // active-filter chip, whichever of the three is set. See docs/ledger-filter-redesign.md.
   // acFilterActive() is the single source of truth for "which of the three is on" so the chip,
   // the popover's cross-filter note, and the zero-match empty state all read the same state.
+  // ── TODO-284: the facets ──────────────────────────────────────────────────────────────────
+  // Each entry answers "what values does this transaction have for this dimension" and is matched
+  // against a Set of selected values. A dimension with an empty Set is inert, which is what makes
+  // AND-across-dimensions fall out with no special cases.
+  //
+  // `status` is deliberately absent. Every transaction in the owner's ledger is `settled`, so the
+  // control could only ever do nothing — a filter that cannot change the result is furniture.
+  const AC_FACETS = {
+    bucket: t => [t.bucket || ''],
+    cat:    t => [t.category || ''],
+    tags:   t => (t.tags || []),
+    acct:   t => [String(t.accountId)],
+    flow:   t => [t.direction],
+    shared: t => [(t.partnerOwed || 0) > 0 ? 'yes' : 'no'],
+  };
+
+  function acFacetSel(k) {
+    ACT.facets = ACT.facets || {};
+    if (!(ACT.facets[k] instanceof Set)) ACT.facets[k] = new Set();
+    return ACT.facets[k];
+  }
+
+  // Everything a transaction must satisfy, optionally IGNORING one dimension. The `skip` argument
+  // is what makes the live counts honest: a menu shows how many rows each option would give given
+  // every OTHER choice, so a zero means "this combination is empty" before the click rather than
+  // after it.
+  function acTxnPassesFilters(t, skip) {
+    for (const k of Object.keys(AC_FACETS)) {
+      if (k === skip) continue;
+      const sel = acFacetSel(k);
+      if (!sel.size) continue;
+      if (!AC_FACETS[k](t).some(v => sel.has(v))) return false;
+    }
+    if (skip !== 'amt') {
+      const lo = ACT.amtMin, hi = ACT.amtMax;
+      if (lo != null && t.amount < lo) return false;
+      if (hi != null && t.amount > hi) return false;
+    }
+    // The legacy single-value filters ride the same predicate rather than a second branch: the
+    // category drill-down (acTxnMatchesCat) and the card link both set these from other surfaces.
+    if (ACT.acctFilter != null && t.accountId !== ACT.acctFilter) return false;
+    if (ACT.catFilter && !acTxnMatchesCat(t, ACT.catFilter)) return false;
+    if (ACT.tagFilter && !(t.tags || []).some(x => x.toLowerCase() === ACT.tagFilter.toLowerCase())) return false;
+    return true;
+  }
+
+  function acAnyFacetActive() {
+    return Object.keys(AC_FACETS).some(k => acFacetSel(k).size)
+        || ACT.amtMin != null || ACT.amtMax != null;
+  }
+
   function acFilterActive() {
     if (ACT.acctFilter != null) { const v = acAcctName(ACT.acctFilter); return { type: 'acct', value: v, label: 'Card: ' + v, clearAttr: 'data-acctclear' }; }
     if (ACT.catFilter) {
@@ -20519,85 +20837,177 @@ document.addEventListener('DOMContentLoaded', async () => {
   // allTags is this MONTH's tag set (for the popover list); filterActive is driven by ACT.*Filter
   // (persisted state), not allTags — that split is what fixes the old silently-blank-ledger bug
   // (state 8: a persisted tag filter that has zero rows this month still renders its chip).
+  // TODO-284. Six menus, each its own dimension — "filter by categories, tags and other stuff
+  // separately". Replaces a single tag list whose three sibling filters silently overrode it.
+  //
+  // `allTags` is still taken (every caller passes it) but the options now come from the ledger
+  // itself, so a dimension can never offer a value no transaction has.
+  const AC_DIMS = [
+    { k: 'bucket', label: 'Bucket',   search: false, name: v => (KINDS[v] && KINDS[v].label) || v || '—' },
+    { k: 'cat',    label: 'Category', search: true,  name: v => v || '—' },
+    { k: 'tags',   label: 'Tags',     search: true,  name: v => v },
+    { k: 'acct',   label: 'Account',  search: true,  name: v => acAcctName(+v) || v },
+    { k: 'flow',   label: 'Flow',     search: false, name: v => v === 'out' ? 'Money out' : 'Money in' },
+    { k: 'shared', label: 'Shared',   search: false, name: v => v === 'yes' ? 'Split with partner' : 'All mine' },
+  ];
+
+  // Options for one dimension, counted against every OTHER dimension's choices. Sorted by count so
+  // the ones actually used come first — 53 categories and 43 tags alphabetised buries them.
+  function acFacetOptions(txns, k) {
+    const counts = new Map();
+    txns.forEach(t => {
+      const hit = acTxnPassesFilters(t, k);
+      AC_FACETS[k](t).forEach(v => {
+        if (v === '' || v == null) return;
+        const prev = counts.get(v) || 0;
+        counts.set(v, prev + (hit ? 1 : 0));
+      });
+    });
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+  }
+
   function acFilterZoneHtml(allTags, filterActive) {
-    const showControl = allTags.length > 0;
-    if (!showControl && !filterActive) return '';
+    const txns = ACT.txns || [];
     let h = '<div class="ac-filterbar">';
-    if (showControl) {
-      h += '<button type="button" class="ac-filter-btn" id="ac_filter_btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="ac_filter_popup" data-filter-open="1">Filter <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
+
+    AC_DIMS.forEach(d => {
+      const opts = acFacetOptions(txns, d.k);
+      if (!opts.length) return;                       // nothing in the ledger has this dimension
+      const sel = acFacetSel(d.k);
+      const open = ACT.openFacet === d.k;
+      h += '<span class="ac-facet">'
+         + '<button type="button" class="ac-filter-btn' + (sel.size ? ' is-on' : '') + '"'
+         + ' data-facet-open="' + d.k + '" aria-haspopup="listbox" aria-expanded="' + open + '">'
+         + esc(d.label)
+         + (sel.size ? '<span class="ac-facet-n">' + sel.size + '</span>' : '')
+         + ' <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
+      if (open) {
+        const q = (ACT.facetQuery || '').toLowerCase();
+        const list = d.search && q
+          ? opts.filter(([v]) => String(d.name(v)).toLowerCase().includes(q)) : opts;
+        h += '<div class="backup-popup filter-popup" data-facet-pop="' + d.k + '">'
+           + '<div class="filter-title">' + esc(d.label) + '</div>'
+           + (d.search
+              ? '<input type="search" class="filter-search" data-facet-q="1" value="' + esc(ACT.facetQuery || '')
+                + '" placeholder="Search ' + esc(d.label.toLowerCase()) + '…" aria-label="Search ' + esc(d.label) + '" autocomplete="off">'
+              : '')
+           + '<div class="filter-list" role="listbox" aria-label="' + esc(d.label) + '">'
+           + (list.length ? list.map(([v, n]) => {
+               const on = sel.has(v);
+               // A zero-count option is DIMMED, never hidden: a menu whose contents change as you
+               // tick elsewhere reads as broken, and "this combination is empty" is the useful
+               // answer — before the click rather than after it.
+               return '<label class="filter-opt' + (on ? ' is-selected' : '') + (n === 0 && !on ? ' is-nil' : '') + '">'
+                    + '<input type="checkbox" data-facet-pick="' + esc(d.k) + '" data-facet-val="' + esc(String(v)) + '"' + (on ? ' checked' : '') + '>'
+                    + '<span class="filter-opt-lbl">' + esc(String(d.name(v))) + '</span>'
+                    + '<span class="filter-opt-n">' + n + '</span></label>';
+             }).join('')
+             : '<div class="filter-opt is-nil">Nothing matches that search</div>')
+           + '</div></div>';
+      }
+      h += '</span>';
+    });
+
+    // Amount, which is a range rather than a set.
+    {
+      const on = ACT.amtMin != null || ACT.amtMax != null;
+      const open = ACT.openFacet === 'amt';
+      h += '<span class="ac-facet">'
+         + '<button type="button" class="ac-filter-btn' + (on ? ' is-on' : '') + '"'
+         + ' data-facet-open="amt" aria-haspopup="dialog" aria-expanded="' + open + '">Amount'
+         + (on ? '<span class="ac-facet-n">1</span>' : '')
+         + ' <span class="ac-filter-caret" aria-hidden="true">▾</span></button>';
+      if (open) {
+        h += '<div class="backup-popup filter-popup" data-facet-pop="amt">'
+           + '<div class="filter-title">Amount</div>'
+           + '<div class="ac-amt-range">'
+           + '<input type="text" inputmode="decimal" data-amt="min" value="' + (ACT.amtMin != null ? ACT.amtMin : '') + '" placeholder="min" aria-label="Minimum amount">'
+           + '<span>to</span>'
+           + '<input type="text" inputmode="decimal" data-amt="max" value="' + (ACT.amtMax != null ? ACT.amtMax : '') + '" placeholder="max" aria-label="Maximum amount">'
+           + '</div></div>';
+      }
+      h += '</span>';
     }
+
+    // The chips say the whole sentence out loud — "(Housing or Golf) and Amex" — because a row of
+    // menus with counts on them does not tell a reader how the pieces combine.
+    const chips = [];
+    AC_DIMS.forEach(d => {
+      const sel = acFacetSel(d.k);
+      if (!sel.size) return;
+      if (chips.length) chips.push('<span class="ac-chip-op">and</span>');
+      chips.push('<span class="ac-chip">' + esc(d.label) + ': '
+        + [...sel].map(v => '<b>' + esc(String(d.name(v))) + '</b>'
+            + '<button type="button" class="ac-chip-x" data-facet-drop="' + esc(d.k) + '" data-facet-val="' + esc(String(v)) + '"'
+            + ' aria-label="Remove ' + esc(String(d.name(v))) + '">✕</button>').join('<span class="ac-chip-or">or</span>')
+        + '</span>');
+    });
+    if (ACT.amtMin != null || ACT.amtMax != null) {
+      if (chips.length) chips.push('<span class="ac-chip-op">and</span>');
+      const t = ACT.amtMin != null && ACT.amtMax != null ? acAmt(ACT.amtMin) + '–' + acAmt(ACT.amtMax)
+              : ACT.amtMin != null ? 'over ' + acAmt(ACT.amtMin) : 'under ' + acAmt(ACT.amtMax);
+      chips.push('<span class="ac-chip"><b>' + esc(t) + '</b>'
+        + '<button type="button" class="ac-chip-x" data-facet-drop="amt" aria-label="Clear the amount range">✕</button></span>');
+    }
+    // The legacy single-value filters still render their own chip, so a drill-down from the budget
+    // or a card link stays visible and clearable exactly as before.
     if (filterActive) {
       const dot = filterActive.color ? '<span style="color:' + filterActive.color + '">●</span> ' : '';
-      h += '<a href="#" class="ac-tag is-active" ' + filterActive.clearAttr + '="1" aria-label="Clear filter: ' + esc(filterActive.value) + '">' + dot + esc(filterActive.label) + ' ✕</a>';
+      if (chips.length) chips.push('<span class="ac-chip-op">and</span>');
+      chips.push('<a href="#" class="ac-tag is-active" ' + filterActive.clearAttr + '="1" aria-label="Clear filter: '
+        + esc(filterActive.value) + '">' + dot + esc(filterActive.label) + ' ✕</a>');
     }
-    if (showControl) {
-      const showSearch = allTags.length >= 12;
-      const tagInList = ACT.tagFilter != null && allTags.includes(ACT.tagFilter);
-      const crossNote = (filterActive && filterActive.type !== 'tag')
-        ? '<div class="filter-crossnote">Currently filtered by <b>' + esc(filterActive.label) + '</b>. Picking a tag replaces it.</div>'
-        : '';
-      h += '<div class="backup-popup filter-popup" id="ac_filter_popup" hidden>'
-        + '<div class="filter-title">Filter by tag</div>'
-        + crossNote
-        + (showSearch ? '<input type="search" id="ac_filter_search" class="filter-search" placeholder="Search tags…" aria-label="Search tags" autocomplete="off">' : '')
-        + '<div class="filter-list" role="listbox" id="ac_filter_list" aria-label="Tags">'
-        + '<button type="button" class="filter-opt filter-opt-all' + (!ACT.tagFilter ? ' is-selected' : '') + '" role="option" aria-selected="' + (!ACT.tagFilter) + '" data-filter-all="1" tabindex="' + (!tagInList ? '0' : '-1') + '">All transactions</button>'
-        + allTags.map(tg => {
-            const sel = ACT.tagFilter === tg;
-            return '<button type="button" class="filter-opt' + (sel ? ' is-selected' : '') + '" role="option" aria-selected="' + sel + '" data-filter-pick="' + esc(tg) + '" data-filter-label="' + esc(tg.toLowerCase()) + '" tabindex="' + (sel ? '0' : '-1') + '">' + esc(tg) + '</button>';
-          }).join('')
-        + '</div></div>';
+    if (acAnyFacetActive()) {
+      chips.push('<button type="button" class="ac-chip-clear" data-facet-clear="1">Clear all</button>');
     }
+    if (chips.length) h += '<div class="ac-chips">' + chips.join('') + '</div>';
+
     h += '</div>';
     return h;
   }
-  // Single small function so a future multi-select "Apply" button (§5 of the spec) only has to
-  // change the caller, not this apply/close/refocus step.
-  async function acApplyFilterPick() {
-    await acRenderLedger();
-    const btn = $('ac_filter_btn'); if (btn) btn.focus();
-  }
-  function acToggleFilterPopup() {
-    const popup = $('ac_filter_popup'); if (!popup) return;
-    if (popup.hidden) acOpenFilterPopup(); else acCloseFilterPopup();
-  }
-  function acOpenFilterPopup() {
-    const popup = $('ac_filter_popup'), btn = $('ac_filter_btn'); if (!popup || !btn) return;
-    popup.hidden = false; btn.setAttribute('aria-expanded', 'true');
-    const search = $('ac_filter_search');
-    if (search) search.focus();
-    else { const first = popup.querySelector('.filter-opt'); if (first) first.focus(); }
-  }
-  function acCloseFilterPopup() {
-    const popup = $('ac_filter_popup'), btn = $('ac_filter_btn'); if (!popup || !btn) return;
-    popup.hidden = true; btn.setAttribute('aria-expanded', 'false');
-  }
-  function acFilterApplySearch(q) {
-    const list = $('ac_filter_list'); if (!list) return;
-    const needle = (q || '').trim().toLowerCase();
-    list.querySelectorAll('.filter-opt:not(.filter-opt-all)').forEach(o => {
-      o.hidden = needle.length > 0 && !(o.dataset.filterLabel || '').includes(needle);
-    });
-  }
+
+  // TODO-284 removed five functions that drove the single `#ac_filter_popup`: acApplyFilterPick,
+  // acToggleFilterPopup, acOpenFilterPopup, acCloseFilterPopup and acFilterApplySearch. The six
+  // facet menus render from state (`ACT.openFacet`, `ACT.facetQuery`) and re-render on every
+  // change, so there is no imperative open/close/refocus/hide-rows step left to own — each of
+  // those functions had become a lookup on an id that no longer exists, returning silently.
+  //
+  // The comment they carried was a good prediction and is worth keeping: "a future multi-select
+  // Apply button only has to change the caller". The multi-select arrived; the caller is now
+  // `acRenderLedger` and there is no Apply button, because a filter that needs confirming is one
+  // you cannot experiment with.
 
   async function acRenderLedger() {
     const el = $('ac_ledger'); if (!el) return;
     let txns; try { txns = (await getJSON('/api/tracking/transactions?month=' + ACT.month)).transactions; } catch (e) { return; }
     ACT.txns = txns;
-    if (!txns.length) { ACT.tagFilter = null; ACT.catFilter = null; ACT.acctFilter = null; el.innerHTML = '<span class="muted">No transactions logged for ' + acMonthLabel(ACT.month) + '.</span>'; return; }
+    if (!txns.length) {
+      // TODO-284: the FACETS have to be cleared here too. This line already cleared the three
+      // legacy filters and predates them; leaving a facet set would strand it in a month that
+      // renders no filter bar — invisible, unclearable, and still narrowing the moment you page
+      // back to a month that has rows.
+      ACT.tagFilter = null; ACT.catFilter = null; ACT.acctFilter = null;
+      Object.keys(AC_FACETS).forEach(k => acFacetSel(k).clear());
+      ACT.amtMin = null; ACT.amtMax = null; ACT.openFacet = null; ACT.facetQuery = '';
+      el.innerHTML = '<span class="muted">No transactions logged for ' + acMonthLabel(ACT.month) + '.</span>';
+      return;
+    }
     const allTags = [...new Set(txns.flatMap(t => t.tags || []))].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
     const filterActive = acFilterActive();
     const bar = acFilterZoneHtml(allTags, filterActive);
-    let shown;
-    if (ACT.acctFilter != null) {
-      shown = txns.filter(t => t.accountId === ACT.acctFilter);
-    } else if (ACT.catFilter) {
-      shown = txns.filter(t => acTxnMatchesCat(t, ACT.catFilter));
-    } else if (ACT.tagFilter) {
-      shown = txns.filter(t => (t.tags || []).some(x => x.toLowerCase() === ACT.tagFilter.toLowerCase()));
-    } else {
-      shown = txns;
-    }
+    // TODO-284 — FACETED FILTERING. The owner: "I want to be able to filter by categories, tags
+    // and other stuff separately."
+    //
+    // What was here was not a missing feature, it was a DEFECT: `if acct … else if cat … else if
+    // tag` made the three mutually exclusive, so picking a card silently DISCARDED a tag filter
+    // the chip above still claimed was active.
+    //
+    // OR within a dimension, AND across them — the owner's choice, and the standard faceted model:
+    // ticking a second tag shows MORE, ticking a card as well shows LESS. The legacy single-value
+    // fields are kept as the source of truth for one-value dimensions (the category drill-down and
+    // the card link both set them from elsewhere in the app) and read through the same predicate,
+    // so no caller had to change.
+    const shown = txns.filter(t => acTxnPassesFilters(t));
     let h = bar;
     if (filterActive && !shown.length) {
       // State 8 fix: a persisted filter with zero matches this month must explain itself
@@ -20755,6 +21165,45 @@ document.addEventListener('DOMContentLoaded', async () => {
   // control still rendered, every click reached nothing, and the only symptom was that ✎ did
   // nothing at all. Bound to both rather than moved, so a preset row rendered anywhere still works.
   async function acPresetDelegate(ev) {
+    // ---- TODO-285: the Payees filter bar, click half. The tick is `change` and the search box is
+    // `input`; both are wired on the Setup panel beside this. Placed FIRST because the
+    // outside-click close at the end of this block must not be reached by a click that one of
+    // these three handlers owns.
+    { const fo = ev.target.closest('[data-ppfacet-open]');
+      if (fo) {
+        ev.preventDefault(); ev.stopPropagation();
+        const k = fo.dataset.ppfacetOpen;
+        ACT.ppOpenFacet = ACT.ppOpenFacet === k ? null : k;   // one open at a time; they overlap
+        ACT.ppFacetQuery = '';
+        acPresetsRender();
+        const q = document.querySelector('[data-ppfacet-pop="' + (ACT.ppOpenFacet || '') + '"] [data-ppfacet-q]');
+        if (q) q.focus();
+        return true;
+      } }
+    { const fd = ev.target.closest('[data-ppfacet-drop]');
+      if (fd) {
+        ev.preventDefault();
+        ppFacetSel(fd.dataset.ppfacetDrop).delete(fd.dataset.ppfacetVal);
+        acPresetsRender(); return true;
+      } }
+    { const fc = ev.target.closest('[data-ppfacet-clear]');
+      if (fc) {
+        ev.preventDefault();
+        // The find box goes too. It is part of the same predicate, so leaving it set behind a
+        // chip row that just said "Clear all" would be a lie about what is on screen.
+        Object.keys(PP_FACETS).forEach(k => ppFacetSel(k).clear());
+        ACT.presetFind = ''; ACT.presetFindFocus = false;
+        acPresetsRender(); return true;
+      } }
+    // A click INSIDE an open menu must not close it — ticking two boxes in a row is the point.
+    if (ev.target.closest('[data-ppfacet-pop]')) return true;
+    if (ACT.ppOpenFacet != null && !ev.target.closest('.ac-facet')) {
+      ACT.ppOpenFacet = null; ACT.ppFacetQuery = '';
+      acPresetsRender();
+      // Deliberately NOT `return true`: the click was aimed at something else and that something
+      // still deserves to happen. Closing the menu is a side effect, not the handling of it.
+    }
+
     // ---- Learned payee presets (TODO-258) ----
     { const e = ev.target.closest('[data-ppedit]');
       if (e) { ev.preventDefault(); ACT.presetOffer = null;
@@ -20841,6 +21290,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     // tab uses these attributes, so this listener is inert for every other click.
     { const sp = document.getElementById('tab-setup');
       if (sp) sp.addEventListener('click', async ev => { await acPresetDelegate(ev); }); }
+
+    // TODO-285: the Payees facets need the other two event kinds the ledger's use. `change` for
+    // the tick, so space on a focused checkbox behaves exactly like a mouse click; `input` for
+    // the search box, so it filters as you type.
+    { const sp2 = document.getElementById('tab-setup');
+      if (sp2) {
+        sp2.addEventListener('change', ev => {
+          const fp = ev.target.closest('[data-ppfacet-pick]'); if (!fp) return;
+          const sel = ppFacetSel(fp.dataset.ppfacetPick);
+          fp.checked ? sel.add(fp.dataset.ppfacetVal) : sel.delete(fp.dataset.ppfacetVal);
+          acPresetsRender();
+          ppRestoreFacetQuery();
+        });
+        sp2.addEventListener('input', ev => {
+          const q = ev.target.closest('[data-ppfacet-q]'); if (!q) return;
+          ACT.ppFacetQuery = q.value;
+          acPresetsRender();
+          ppRestoreFacetQuery();
+        });
+      } }
+    // Escape closes whichever Payees menu is open and returns focus to its button. Document-level
+    // because focus may be inside the popover, which the render replaces.
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || ACT.ppOpenFacet == null) return;
+      const k = ACT.ppOpenFacet;
+      ACT.ppOpenFacet = null; ACT.ppFacetQuery = '';
+      acPresetsRender();
+      const btn = document.querySelector('[data-ppfacet-open="' + k + '"]');
+      if (btn) btn.focus();
+    });
 
   const panel = document.getElementById('tab-actuals');
     if (panel) panel.addEventListener('click', async ev => {
@@ -21043,9 +21522,43 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Ledger filter zone (TODO-242): the "Filter ▾" control + popover — open/toggle, the
       // "All transactions" reset row, a tag pick (both clear the other two filters, same
       // mutual-exclusivity rule the old chip wall used), and the unified chip's clear.
-      const fo = ev.target.closest('[data-filter-open]'); if (fo) { ev.preventDefault(); ev.stopPropagation(); acToggleFilterPopup(); return; }
-      const fa = ev.target.closest('[data-filter-all]'); if (fa) { ev.preventDefault(); ACT.catFilter = null; ACT.acctFilter = null; ACT.tagFilter = null; await acApplyFilterPick(); return; }
-      const fp = ev.target.closest('[data-filter-pick]'); if (fp) { ev.preventDefault(); ACT.catFilter = null; ACT.acctFilter = null; ACT.tagFilter = fp.dataset.filterPick; await acApplyFilterPick(); return; }
+      // TODO-284: the facet menus. A click on the button toggles ITS menu and closes any other —
+      // one open at a time, since they sit in a row and two open popovers overlap.
+      { const fo = ev.target.closest('[data-facet-open]');
+        if (fo) {
+          ev.preventDefault(); ev.stopPropagation();
+          const k = fo.dataset.facetOpen;
+          ACT.openFacet = ACT.openFacet === k ? null : k;
+          ACT.facetQuery = '';
+          await acRenderLedger();
+          // Focus the search box when there is one — 53 categories is a typing job, not a
+          // scrolling one.
+          const q = document.querySelector('[data-facet-pop="' + (ACT.openFacet || '') + '"] [data-facet-q]');
+          if (q) q.focus();
+          return;
+        } }
+      { const fd = ev.target.closest('[data-facet-drop]');
+        if (fd) {
+          ev.preventDefault();
+          const k = fd.dataset.facetDrop;
+          if (k === 'amt') { ACT.amtMin = null; ACT.amtMax = null; }
+          else acFacetSel(k).delete(fd.dataset.facetVal);
+          await acRenderLedger();
+          return;
+        } }
+      { const fc = ev.target.closest('[data-facet-clear]');
+        if (fc) {
+          ev.preventDefault();
+          Object.keys(AC_FACETS).forEach(k => acFacetSel(k).clear());
+          ACT.amtMin = null; ACT.amtMax = null;
+          await acRenderLedger();
+          return;
+        } }
+      // A click INSIDE an open menu must not close it — ticking two tags in a row is the point.
+      if (ev.target.closest('[data-facet-pop]')) return;
+      if (ACT.openFacet != null && !ev.target.closest('.ac-facet')) {
+        ACT.openFacet = null; ACT.facetQuery = ''; await acRenderLedger(); return;
+      }
       const tc = ev.target.closest('[data-tagclear]'); if (tc) { ev.preventDefault(); ACT.tagFilter = null; acRenderLedger(); return; }
       // Card detail → "show these N transactions": account filter, third of the filter family
       const cx2 = ev.target.closest('[data-card-txns]'); if (cx2) { ev.preventDefault(); ACT.acctFilter = +cx2.dataset.cardTxns; ACT.catFilter = null; ACT.tagFilter = null; await acRenderLedger(); const led = $('ac_ledger'); if (led) led.scrollIntoView({ behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'start' }); return; }
@@ -21137,8 +21650,39 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (cat.value) { chip.textContent = '→ applies to ' + cat.options[cat.selectedIndex].text; chip.classList.add('is-cat'); chip.classList.remove('is-whole'); }
       else { chip.textContent = '→ applies to whole card balance'; chip.classList.add('is-whole'); chip.classList.remove('is-cat'); }
     }
+    // TODO-284: typing in a facet's search box re-renders its list. `input`, not `change`, so it
+    // filters as you type — 53 categories is why the box exists.
+    if (panel) panel.addEventListener('input', async ev => {
+      const q = ev.target.closest('[data-facet-q]');
+      if (!q) return;
+      ACT.facetQuery = q.value;
+      await acRenderLedger();
+      const again = document.querySelector('[data-facet-pop="' + ACT.openFacet + '"] [data-facet-q]');
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
     // Recurring setup: toggle a budget line on/off as recurring, or change its due day (change events).
     if (panel) panel.addEventListener('change', async ev => {
+      // TODO-284: a facet checkbox. `change`, not `click`, so the keyboard path (space on a focused
+      // box) works identically to the mouse.
+      { const fp = ev.target.closest('[data-facet-pick]');
+        if (fp) {
+          const sel = acFacetSel(fp.dataset.facetPick);
+          fp.checked ? sel.add(fp.dataset.facetVal) : sel.delete(fp.dataset.facetVal);
+          await acRenderLedger();
+          // The menu re-rendered; put the cursor back where it was or ticking two in a row is
+          // impossible.
+          const q = document.querySelector('[data-facet-pop="' + ACT.openFacet + '"] [data-facet-q]');
+          if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+          return;
+        } }
+      { const am = ev.target.closest('[data-amt]');
+        if (am) {
+          const v = String(am.value).trim();
+          const n = v === '' ? null : rn(v);
+          if (am.dataset.amt === 'min') ACT.amtMin = n; else ACT.amtMax = n;
+          await acRenderLedger();
+          return;
+        } }
       const cc = ev.target.closest('[data-countcat]');
       if (cc) {
         const s = cc.dataset.countcat, i = s.indexOf('|');
@@ -21179,51 +21723,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     // Card payment form keyboard: Esc closes + restores focus; Enter in amount submits
     if (panel) panel.addEventListener('keydown', ev => {
-      // Ledger filter popover (TODO-242): roving-listbox Arrow ↑/↓ + Enter/Space select. Escape
-      // is handled by the document-level listener below (it must fire even when focus is on the
-      // "Filter ▾" control itself, which sits outside #ac_filter_popup).
-      const filterPopup = ev.target.closest('#ac_filter_popup');
-      if (filterPopup) {
-        const list = $('ac_filter_list');
-        if ((ev.key === 'ArrowDown' || ev.key === 'ArrowUp') && list) {
-          ev.preventDefault();
-          const opts = Array.from(list.querySelectorAll('.filter-opt')).filter(o => !o.hidden);
-          if (opts.length) {
-            const cur = ev.target.closest('.filter-opt');
-            let idx = cur ? opts.indexOf(cur) : -1;
-            idx = ev.key === 'ArrowDown' ? (idx + 1) % opts.length : (idx - 1 + opts.length) % opts.length;
-            opts.forEach(o => o.tabIndex = -1);
-            opts[idx].tabIndex = 0; opts[idx].focus();
-          }
-          return;
-        }
-        if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.classList.contains('filter-opt')) { ev.preventDefault(); ev.target.click(); return; }
-        return;
-      }
+      // TODO-284 replaced the single roving-listbox popover with six checkbox menus, so the old
+      // Arrow/Enter handler for `#ac_filter_popup` is gone with the element it drove. Checkboxes
+      // are natively keyboard-operable (Tab to reach, Space to tick) and the search box takes
+      // typing directly — there is no roving state left to manage.
       const form = ev.target.closest('.ac-pay-form');
       if (!form) return;
       if (ev.key === 'Escape') { ev.preventDefault(); const aid = form.id.replace('ac_pay_form_', ''); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) { trig.setAttribute('aria-expanded', 'false'); trig.focus(); } }
       else if (ev.key === 'Enter' && ev.target.matches('[data-pay="amt"]')) { ev.preventDefault(); const sub = form.querySelector('[data-pay-submit]'); if (sub) sub.click(); }
     });
-    // Ledger filter popover search: delegated (not per-render) so re-rendering #ac_ledger never
-    // orphans the listener (§8 of docs/ledger-filter-redesign.md).
-    if (panel) panel.addEventListener('input', ev => {
-      const si = ev.target.closest('#ac_filter_search');
-      if (si) acFilterApplySearch(si.value);
-    });
+    // (The old `#ac_filter_search` input listener lived here. TODO-284's per-facet search box is
+    // handled by the `[data-facet-q]` listener above, which re-renders from state instead of
+    // hiding rows in place — so this one was left calling a function that no longer exists.)
     // Ledger filter popover: Escape / outside-click — mirrors the backup/settings popup pattern
     // (closeBackupPopup/closeSettingsPopup above) exactly. Document-level and registered once
     // (guarded by ACT.wired at the top of acWire), so it survives every #ac_ledger re-render —
     // it looks up #ac_filter_popup/#ac_filter_btn fresh on each event rather than closing over a
     // stale reference.
-    document.addEventListener('click', e => {
-      const popup = $('ac_filter_popup'), btn = $('ac_filter_btn');
-      if (popup && !popup.hidden && !popup.contains(e.target) && !(btn && btn.contains(e.target))) acCloseFilterPopup();
-    });
-    document.addEventListener('keydown', e => {
-      if (e.key !== 'Escape') return;
-      const popup = $('ac_filter_popup'), btn = $('ac_filter_btn');
-      if (popup && !popup.hidden) { acCloseFilterPopup(); if (btn) btn.focus(); }
+    // TODO-284: Escape closes whichever facet menu is open and returns focus to its button.
+    // Outside-click is handled in the panel's own click listener (it needs to run AFTER the
+    // facet handlers, not race them); this is Escape only, document-level so it fires wherever
+    // focus happens to be.
+    document.addEventListener('keydown', async e => {
+      if (e.key !== 'Escape' || ACT.openFacet == null) return;
+      const k = ACT.openFacet;
+      ACT.openFacet = null; ACT.facetQuery = '';
+      await acRenderLedger();
+      const btn = document.querySelector('[data-facet-open="' + k + '"]');
+      if (btn) btn.focus();
     });
   }
 

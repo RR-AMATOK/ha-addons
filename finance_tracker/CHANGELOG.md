@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.4
+
+**Fixed: the "your plan replaced a newer server version" warning would not go away**
+
+0.9.3 made two linked logins share one plan, but left a stale pointer in each browser — and the
+only way to clear it was a console command, which is not available inside the Home Assistant app.
+So the warning kept appearing on every login even though the plans were already in sync.
+
+The app now sorts this out by itself. When an account is made the household owner, the server
+records it, and the browser is *told* rather than left to guess. A browser holding a pointer to
+the old scope recognises it as its own and re-points; one holding a pointer to somebody else's
+still refuses, which is the case that protects a second person on a shared browser from having
+their plan overwritten.
+
+**Nothing to run.** Update, open the app, and the warning stops.
+
+**New: filter the ledger by more than one thing at a time (Actuals)**
+
+Category, tags, account, bucket, flow and shared/solo are now six separate menus. Ticking two
+tags shows **more**; adding an account as well shows **less** — and a chip row spells the whole
+sentence out, "Tags: Golf or Travel and Account: Amex", so there is never a filter quietly
+applied that you cannot see. Each option carries a live count of what it would give you given
+everything else you have picked, so an empty combination announces itself before the click.
+
+Previously these were mutually exclusive by accident: picking a card silently discarded a tag
+filter whose chip was still on screen claiming to be active.
+
+**New: filter your remembered payees (Setup ▸ Payees)**
+
+The payee list had a search box, which answers "where is Amli?" and nothing else. It now has the
+same six-menu filter, built around the questions the list actually gets asked:
+
+- **Missing** — which payees still have no category, no tags, or no bucket. This is the one that
+  turns a long list into a short to-do list.
+- **Last used** — last 3 months, 3–18 months, over 18 months, never. The over-18-months band is
+  the same line the row's own "stale" mark uses, so the two can never disagree.
+- **Source** — corrected by hand, or learned from your history.
+- Plus bucket, category and tags, for finding the batch you meant to fix.
+
+The search box and the menus narrow the same list together, so the counts always match what is
+on screen.
+
 ## 0.9.3
 
 **Fixed: two linked logins were not sharing the same plan**
@@ -15,9 +57,10 @@ settled.
 Now the plan comes with the account. If both sides have one, **the more recently edited plan
 wins** — and the other is kept, never deleted, so nothing you typed is lost either way.
 
-**If you are already in this state:** after updating, run this in the browser console on the
-affected account and reload — `localStorage.removeItem('itc.profile.meta')`. That clears a stale
-pointer the browser is holding; your plan is on the server and comes straight back.
+**If you are already in this state:** ~~run `localStorage.removeItem('itc.profile.meta')` in the
+browser console and reload.~~ **Superseded by 0.9.4** — the app clears the stale pointer itself
+now, and there is nothing to run. (The console is not reachable inside the Home Assistant app,
+which is what made this instruction useless where it was most needed.)
 
 **Your transactions were never affected.** Anything logged from either login has always landed in
 the same ledger and both accounts see all of it — that half was working as designed, and there is
