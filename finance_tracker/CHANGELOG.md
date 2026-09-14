@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.9.3
+
+**Fixed: two linked logins were not sharing the same plan**
+
+You link a second login so both accounts are you — same budget, same transactions, either one can
+make edits. That worked for everything stored on the server, but not for the tax and budget plan.
+
+The cause: when an account is made the household owner, its scope changes — and its own saved plan
+was left behind under the old one. Nothing read it again. Meanwhile the app kept reporting *"your
+plan replaced a newer server version"* on every save, which was true and useless, and nothing ever
+settled.
+
+Now the plan comes with the account. If both sides have one, **the more recently edited plan
+wins** — and the other is kept, never deleted, so nothing you typed is lost either way.
+
+**If you are already in this state:** after updating, run this in the browser console on the
+affected account and reload — `localStorage.removeItem('itc.profile.meta')`. That clears a stale
+pointer the browser is holding; your plan is on the server and comes straight back.
+
+**Your transactions were never affected.** Anything logged from either login has always landed in
+the same ledger and both accounts see all of it — that half was working as designed, and there is
+now a test pinning it so it stays that way.
+
 ## 0.9.2
 
 Repairs to the Job change card. Everything here was broken by 0.9.0 and is fixed now.

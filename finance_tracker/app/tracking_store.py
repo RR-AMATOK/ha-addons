@@ -1731,6 +1731,89 @@ class OwnerTransferConflictError(RuntimeError):
     holds the seat (case a), or resolve the colliding share manually first (case b)."""
 
 
+def _carry_profile_on_promotion(conn: sqlite3.Connection, to_user_id: str) -> str:
+    """BUG-0101. Move the promoted account's OWN profile to the owner scope, newest wins.
+
+    `transfer_ownership`'s docstring states "ZERO DATA MOVEMENT for every EXCLUSIVELY-scoped
+    table (the entire point of this design)", and for a HANDOVER that is right: the outgoing
+    owner's rows stay under `'__owner__'` and the incoming owner inherits them by resolving to
+    that scope. Every such table works that way and none of them need touching.
+
+    `user_profile` is the one exception, and only when the promoted account ALREADY HAS A ROW.
+    Its scope flips from its raw id to `'__owner__'`, so its own blob — the client's tax inputs
+    and budget plan — is stranded under a key nothing reads again. Measured on the owner's
+    database: a 440-byte row under their id beside 9,227 bytes under `'__owner__'`. The docs
+    promise the opposite (API.md: linking one's second login "is how 'appoint an admin' falls out
+    of this design"), so a promotion silently losing that account's plan is a defect, not a
+    design choice.
+
+    NEWEST WINS, by the owner's own rule: *"We should be able to pull the data from the one that
+    did the latest change."* `updated_at` already exists on both rows, so this is decidable rather
+    than a coin-flip — and the loser is KEPT, renamed to a `pre-promotion:` key, never deleted.
+    Same instinct as unlink's "pre-link data is never deleted, only orphaned": a profile holds a
+    plan someone typed, and no automatic rule should be the last thing that ever touched it.
+
+    Returns what it did, for the caller's response and for tests: 'none', 'carried', or 'kept'.
+    """
+    src = conn.execute(
+        "SELECT blob, state_version, updated_at FROM user_profile WHERE user_id = ?",
+        (to_user_id,),
+    ).fetchone()
+    if src is None:
+        return "none"                                  # nothing of their own to carry
+    dst = conn.execute(
+        "SELECT state_version, updated_at FROM user_profile WHERE user_id = ?",
+        (_SENTINEL_OWNER_ID,),
+    ).fetchone()
+
+    # PARK THE LOSER, not "the promoted account's row". A first version parked before comparing
+    # and so preserved whichever row WON — keeping a copy of the blob that was already live and
+    # discarding the only copy of the one being displaced, which is precisely backwards for a
+    # recovery copy. Caught by reading the fixture's output rather than by the test passing.
+    parked = f"pre-promotion:{to_user_id}"
+    conn.execute("DELETE FROM user_profile WHERE user_id = ?", (parked,))
+
+    if dst is not None and (dst["updated_at"] or "") >= (src["updated_at"] or ""):
+        # The owner scope's row is newer and stays. The promoted account's own row is the loser:
+        # park it, so its plan is recoverable and it stops resolving under an id that now maps to
+        # the owner scope.
+        conn.execute("UPDATE user_profile SET user_id = ? WHERE user_id = ?", (parked, to_user_id))
+        return "kept"
+
+    # Carry it over. `state_version` MUST advance past whatever the owner scope was at, or a
+    # client holding the old version would be told it is already in sync with a blob it has
+    # never seen — the same class of silent no-op as BUG-0068.
+    next_version = max(int(src["state_version"] or 0),
+                       int(dst["state_version"] or 0) if dst is not None else 0) + 1
+    now = _now()
+    # The promoted row wins, so the OWNER SCOPE's row is the loser — copy it aside before it is
+    # overwritten. Nothing else holds it; `put_profile`'s own prev_blob is one write deep and this
+    # write would consume it.
+    if dst is not None:
+        old_row = conn.execute(
+            "SELECT blob, state_version, updated_at, created_at FROM user_profile "
+            "WHERE user_id = ?", (_SENTINEL_OWNER_ID,)).fetchone()
+        conn.execute(
+            "INSERT INTO user_profile (user_id, blob, state_version, updated_at, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (parked, old_row["blob"], old_row["state_version"], old_row["updated_at"],
+             old_row["created_at"]))
+    conn.execute("DELETE FROM user_profile WHERE user_id = ?", (to_user_id,))
+    if dst is None:
+        conn.execute(
+            "INSERT INTO user_profile (user_id, blob, state_version, updated_at, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (_SENTINEL_OWNER_ID, src["blob"], next_version, now, now),
+        )
+    else:
+        conn.execute(
+            "UPDATE user_profile SET blob = ?, state_version = ?, updated_at = ? "
+            "WHERE user_id = ?",
+            (src["blob"], next_version, now, _SENTINEL_OWNER_ID),
+        )
+    return "carried"
+
+
 def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_id: str) -> dict:
     """Move the household owner seat from *current_owner_id* to *to_user_id* -- the
     in-app owner reassignment SEV-004 explicitly deferred (0.2.1, addon/DOCS.md). Called
@@ -1889,6 +1972,7 @@ def transfer_ownership(conn: sqlite3.Connection, current_owner_id: str, to_user_
             "UPDATE users SET role = 'owner' WHERE user_id = ?",
             (to_user_id,),
         )
+        _carry_profile_on_promotion(conn, to_user_id)
         conn.commit()
     except sqlite3.IntegrityError as exc:
         # A losing concurrent/stale transfer collides with idx_users_one_owner on the

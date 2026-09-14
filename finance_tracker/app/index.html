@@ -7477,7 +7477,26 @@ function deriveLocalProfileState(meta, scopeId, liveKeyFallback) {
     catch (e) { anyKeyPresent = true; }
   }
   if (!anyKeyPresent) return 'empty';
-  if (meta && meta.scopeId != null && meta.scopeId !== scopeId) return 'empty';   // shared-browser guard
+  // SHARED-BROWSER GUARD. A scope mismatch means local belongs to a DIFFERENT PERSON, so it is
+  // treated as empty rather than pushed to the resolved scope. Non-negotiable: TM-13a, TM-40c and
+  // BUG-0012 all pin it, and the failure it prevents is one household member's plan landing in
+  // another's profile.
+  //
+  // BUG-0101 ATTEMPTED AN EXCEPTION HERE AND IT WAS WRONG. The reasoning: being promoted to owner
+  // moves the same person from their raw id to '__owner__', so `meta.scopeId` concrete + live
+  // scope sentinel "can only mean a promotion". It cannot. A second household member on a shared
+  // browser, with the OWNER then signing in, produces byte-identical state — TM-13a seeds exactly
+  // that (`scopeId="some-other-uuid"`) and caught it immediately. The client cannot tell the two
+  // apart, because the distinguishing fact is not on the client: it is whether the SERVER just
+  // carried that id's profile into the owner scope.
+  //
+  // The server half of BUG-0101 (transfer_ownership -> _carry_profile_on_promotion) already fixes
+  // the data loss; this guard's only remaining cost is that a promoted account's browser holds a
+  // stale meta until it re-hydrates, which it does on the next load. If that proves annoying, the
+  // fix is for the server to SAY a promotion happened (a flag on the profile response keyed to the
+  // carried id) rather than for the client to infer it from a shape it shares with the case this
+  // guard exists to stop.
+  if (meta && meta.scopeId != null && meta.scopeId !== scopeId) return 'empty';
   if (!meta) return 'present-no-meta';
   return meta.dirty === true ? 'present-dirty' : 'present-clean';
 }
