@@ -1384,7 +1384,24 @@ _MIGRATIONS: list = [_mig_add_partner_owed, _mig_drop_bucket_checks, _mig_add_tx
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """UTC, to the MILLISECOND. The precision is load-bearing, not cosmetic.
+
+    `timespec="seconds"` made any two writes inside the same second indistinguishable, and
+    `_carry_profile_on_promotion` decides newest-wins by STRING-comparing this value. A tie
+    therefore resolved to whichever side its `>=` happened to favour — the owner scope — so a
+    promotion could silently discard the promoted account's own plan while their browser went on
+    showing it. Found by `test_owner_transfer_cdp`, whose two writes land microseconds apart;
+    every test that passed did so only because it slept 1.1s first to dodge the tie.
+
+    ORDERING IS PRESERVED ACROSS THE TWO FORMATS, which matters because rows written before this
+    change still carry second precision. The fixed-width `YYYY-MM-DDTHH:MM:SS` prefix is
+    unchanged and the fraction only ever appends, so a comparison differs first at the character
+    after the seconds: `.` (46) sorts above `+` (43). A sub-second stamp therefore reads as LATER
+    than a second-precision one inside the same second, which is the correct answer — and any
+    difference in the seconds themselves still decides before the fraction is ever reached.
+    Pinned by test_timestamp_precision.py.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 # ---------- connection / init ----------

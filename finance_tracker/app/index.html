@@ -8282,7 +8282,32 @@ async function runProfileSyncEngineImpl() {
   } catch (e) { window.__profileMigrationPending = true; return; }
   if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
 
-  const meta = getProfileMeta();
+  let meta = getProfileMeta();
+
+  // BUG-0101, THE HALF THE SERVER CANNOT DO. A promotion moves this browser from its own scope
+  // to '__owner__', and the `stateVersion` it has cached counts the OLD scope's lineage — a
+  // number with no meaning against the new scope's counter. Left in place it can COINCIDE with
+  // it, and the table below then reads `L === S` as S1 "in sync" while the two blobs differ:
+  // silent divergence, each side sure it is right, and the next flush overwrites the other.
+  //
+  // NOT A TIE PROBLEM, though a tie is how it was found. `_carry_profile_on_promotion`'s "kept"
+  // branch leaves the owner scope's version UNTOUCHED, so the two counters can agree with no tie
+  // involved at all — giving the timestamps sub-second precision narrows when this happens and
+  // cannot remove it.
+  //
+  // So: re-point ONCE, and record no version. `stateVersion: 0` is not a guess, it is the truth —
+  // this device does not know this scope's lineage, and 0 makes the table treat the server as
+  // authoritative (L < S → hydrate) or, if there are unflushed edits, flush them and say so.
+  // Self-limiting: after this, `meta.scopeId === scopeId`, so the branch is never taken again.
+  // That also stops the banner repeating, which is what the owner actually reported — the
+  // `promoted-from:` marker is never deleted, so before this the mismatch was re-evaluated on
+  // every single boot, forever.
+  if (meta && meta.scopeId != null && meta.scopeId !== scopeId
+      && Array.isArray(window.__profilePromotedFrom)
+      && window.__profilePromotedFrom.indexOf(meta.scopeId) !== -1) {
+    setProfileMeta({ scopeId: scopeId, stateVersion: 0 });
+    meta = getProfileMeta();
+  }
 
   // §8 crash-mid-hydrate recovery: a non-null `hydrating` marker means a PRIOR boot was
   // interrupted between writeBackupClientKeys' clear and write-back steps. The pre-crash LOCAL
@@ -13171,6 +13196,104 @@ document.addEventListener('DOMContentLoaded', async () => {
   // family as a real .bgb-bucket (border-left accent, header, sum) so it reads as "one of the
   // buckets", not a separate section outside the fold -- just labeled unmapped/muted (raw key +
   // muted dot, exactly like every other DEC-010 fallback in this file).
+  // TODO-286. The owner: *"given that the Roth IRA is not automatically deducted (Tax tab) from
+  // the paycheck, if we have a Roth IRA we should automatically add it to the budget for the
+  // month"* -> and, asked how far to take it: *"I just want to see a Line on the Budget."*
+  //
+  // IT WAS ALREADY ON SCREEN, AND THAT IS WHY THIS EXISTS. TODO-261 gave every Tax-tab vehicle a
+  // labelled child row -- but in the BY BUCKET summary, a read-only table two cards above this
+  // one. The owner looks for a line where the lines are, and there was none.
+  //
+  // ONLY the Roth IRA gets one, and the owner's own sentence is the rule: it is the single
+  // Tax-tab vehicle that payroll does NOT deduct. 401(k), HSA, ESPP and after-tax 401(k) never
+  // reach checking, so there is nothing to move and a line would be a chore that does not exist.
+  // Roth IRA money lands in the account and somebody has to transfer it.
+  //
+  // RENDERED OUTSIDE THE `bgb` MODEL, which is the whole safety of it. `bgbTotals()` sums
+  // `bgb.buckets`; this bucket is appended to the HTML after that model is walked, so it cannot
+  // reach `allocated`. The money is already counted once, in `taxInvest` -- adding it to
+  // `allocated` as well is BUG-0066's double-count, and the only structural guarantee against
+  // that is for the row to have no model entry to be summed. Same reason hbOrphanBucketHtml's
+  // rows are safe, and the same decision TODO-261 made for the summary children.
+  // TODO-286 round two. The owner: *"we should be able to move the line to group it with other
+  // things."* Same request the shared lines got, and it gets the same answer: a PLACEMENT, not a
+  // model entry. Moving the row changes where it is DRAWN and nothing else — it still cannot
+  // reach `allocated`, because there is still no entry in `bgb.buckets` for the sum to find.
+  //
+  // Stored on `bgb` rather than in localStorage (where hbReadPlace keeps the shared-line
+  // placements) because this one is personal, not per-browser: the owner runs two linked logins
+  // and expects a budget to look the same from either. `bgbNormalize` mutates in place, so an
+  // extra key survives the round-trip.
+  function bgbTaxTabPlace() {
+    const p = bgb && bgb.taxTabPlace;
+    if (!p || !p.b) return null;
+    // A placement into a bucket or group that has since been deleted must FALL BACK, never
+    // vanish: the row returns to the standalone block at the end rather than being drawn into
+    // whatever bucket now happens to sit at that index. Same rule bgbNormalizeRoundUp follows
+    // for a deleted round-up bucket, and for the same reason.
+    const bi = (bgb.buckets || []).findIndex(b => hbBucketKey(b, -1) === p.b);
+    if (bi < 0) return null;
+    const b = bgb.buckets[bi];
+    if (p.g && p.g !== 'd') {
+      const gi = (b.groups || []).findIndex(g => hbGroupKey(g, -1) === p.g);
+      if (gi < 0) return null;
+      return { bi: bi, gi: String(gi), bid: p.b, gid: p.g };
+    }
+    return { bi: bi, gi: 'd', bid: p.b, gid: 'd' };
+  }
+
+  function bgbSetTaxTabPlace(bid, gid) {
+    bgb.taxTabPlace = bid ? { b: bid, g: gid == null ? 'd' : gid } : null;
+    saveBgb();
+  }
+
+  // The EMPTY slot. bgbRender decides WHERE it goes; bgbTotals fills it, for the reason recorded
+  // on bgbTaxTabBucketHtml — bgbRender runs before the tax engine has replaced the result, so
+  // anything it writes from `__taxResult` is a render behind.
+  function bgbTaxTabSlot(bi, g) {
+    const p = bgbTaxTabPlace();
+    if (!p || p.bi !== bi || String(p.gi) !== String(g)) return '';
+    return '<tr class="bgb-taxtab-slot"></tr>';
+  }
+
+  // The row's cells, for when it is sitting INSIDE a bucket. Six cells, matching the colgroup
+  // exactly — a short row in a `table-layout: fixed` table silently shifts every cell after it.
+  function bgbTaxTabRowCells(mo) {
+    return '<td class="bgb-grip tt-grip" draggable="true" title="drag to move — this line is not editable here">&#10287;</td>'
+      + '<td><span class="mng-name">Roth IRA</span>'
+      +   '<div class="mini muted">not payroll-deducted — you move this one</div></td>'
+      + '<td>' + f2(mo) + '</td>'
+      + '<td><span class="mng-flag" title="Already out of your take-home, so it is not part of what '
+      +   'you allocate — but payroll does not move it for you.">from Tax tab</span></td>'
+      + '<td class="num">' + f2(mo) + '</td>'
+      + '<td><a href="#" data-go="tax" class="gl-act">Change</a></td>';
+  }
+
+  function bgbTaxTabBucketHtml(cash) {
+    // Takes the cash object rather than reading the global: the caller already has the value, and
+    // a helper that re-reads `window.__taxResult` could disagree with the pass that called it.
+    const tc = cash || (window.__taxResult && window.__taxResult.cash) || {};
+    const mo = (tc.rothIra || 0) / 12;
+    if (!(mo > 0.005)) return '';          // nobody funds one -> no line, same rule as the summary
+    const col = categoryColor('investment');
+    return '<div class="bgb-bucket bgb-taxtab-bucket" style="border-left:3px solid ' + col + '">'
+      + '<div class="bgb-bhead">'
+      + '<span class="mng-name"><span style="color:' + col + '">&#9679;</span> Investments</span>'
+      + '<span class="mini muted" title="This is already out of your take-home, so it is not part '
+      + 'of what you allocate below — but payroll does not move it for you.">from Tax tab</span>'
+      + '<span class="bgb-bsum">' + f2(mo) + ' <span class="mini">/ ' + f2(mo * 12) + ' yr</span></span>'
+      + '</div>'
+      // The same table shell as every other bucket, for the reason hbOrphanBucketHtml records:
+      // `.bgb-items` is `table-layout: fixed`, so a table without this colgroup takes its widths
+      // from its own first row and stops lining up with the buckets above it.
+      + '<table class="res-table bgb-items">' + bgbItemsColgroup() + bgbItemsHead(true)
+      // THE SAME CELLS as the in-bucket slot, from one function. Two copies of this row is how
+      // it ends up draggable in one home and not the other -- which is exactly what happened on
+      // the first attempt, and the drag test caught it.
+      + '<tbody><tr class="bgb-taxtab-row">' + bgbTaxTabRowCells(mo) + '</tr></tbody></table>'
+      + '</div>';
+  }
+
   function hbOrphanBucketHtml(kind, lines) {
     const total = lines.reduce((s, l) => s + hbCentsToUsd(l.yourShareCents), 0);
     return '<div class="bgb-bucket hb-orphan-bucket" style="border-left:3px solid ' + categoryColor(kind) + '">'
@@ -14228,7 +14351,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // (first, so settled household obligations read before the working set -- spec §J1) rather
   // than in a separate list after it, which is the only way their columns can line up with the
   // local rows and the only way the existing row-based drag system can see them at all.
-  function itemsTable(bi, g, items, leadRows, headVisible) {
+  function itemsTable(bi, g, items, leadRows, headVisible, tailRows) {
     // TODO-267: declared tracks. Without them each bucket's table sized its own columns, so a
     // chip on three rows in one bucket widened that bucket's flags column and no other — the
     // ragged wall one level down, and the same root cause as BUG-0076. `table-layout:fixed`
@@ -14302,7 +14425,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         + '</td>'
         + '</tr>';
     });
-    return h + '</tbody></table>';
+    // TODO-286: derived rows go LAST. A "from Tax tab" row above the lines you typed reads as the
+    // most important thing in the bucket, and it is the least — it is the one you cannot edit.
+    return h + (tailRows || '') + '</tbody></table>';
   }
 
   function bgbRender() {
@@ -14332,7 +14457,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Shared lines are now rows of the SAME table as the local items (§5.1), not a separate
         // list appended after it -- so the columns align, the drag grip works, and the block
         // stops reading as a stranded band between the table and the groups below.
-        h += itemsTable(bi, 'd', b.items, hbLines.length ? hbLinesHtml(hbLines) : '', true)
+        h += itemsTable(bi, 'd', b.items, hbLines.length ? hbLinesHtml(hbLines) : '', true, bgbTaxTabSlot(bi, 'd'))
           + '<button class="seed-btn bgb-additem" data-add="' + bi + '_d">+ item</button>';
         // optional named sub-groups
         b.groups.forEach((g, gi) => {
@@ -14343,7 +14468,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Shared lines placed INSIDE this sub-group render here, with its items -- a
             // subscription shared out of `Basic Wants > SUBSCRIPTIONS` stays in SUBSCRIPTIONS
             // instead of being hoisted to the top of whichever bucket matched its kind first.
-            + (function () { const gl = hbLinesAt(hbAsg, hbBucketKey(b, bi), hbGroupKey(g, gi)); return itemsTable(bi, gi, g.items, gl.length ? hbLinesHtml(gl) : '', false); })()
+            + (function () { const gl = hbLinesAt(hbAsg, hbBucketKey(b, bi), hbGroupKey(g, gi)); return itemsTable(bi, gi, g.items, gl.length ? hbLinesHtml(gl) : '', false, bgbTaxTabSlot(bi, gi)); })()
             + '<button class="seed-btn bgb-additem" data-add="' + bi + '_' + gi + '">+ item</button></div>';
         });
         h += '<button class="seed-btn bgb-addgroup" data-addg="' + bi + '">+ group (optional)</button>';
@@ -14359,6 +14484,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // DEC-010 fallback: a shared bucket key with no matching local bucket -- still rendered
     // (nothing vanishes), as its own minimal read-mostly bucket appended after the real ones.
     Object.keys(hbAsg.orphanByKind).forEach(k => { h += hbOrphanBucketHtml(k, hbAsg.orphanByKind[k]); });
+    // TODO-286: an EMPTY container, filled by bgbTotals() below. Built here it rendered a render
+    // behind — bgbRender runs before the tax engine has replaced `window.__taxResult`, so changing
+    // the Roth IRA showed the PREVIOUS value and the line appeared one edit late. bgbTotals reads
+    // `tc.rothIra` for `taxInvest` in the same breath, so filling it there makes the line and the
+    // summary two readings of one number rather than two numbers that have to be kept equal.
+    // Only when it has not been placed into a bucket. Once it has, the slot above is its home and
+    // a second container here would draw it twice.
+    if (!bgbTaxTabPlace()) h += '<div id="bgb_taxtab"></div>';
     $('bgBuilder').innerHTML = h;
     formatUSDFields();   // comma-format the freshly-rendered item amount inputs
     // The round-up picker lists buckets, so it has to restack with them for the same reason the
@@ -14414,7 +14547,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       const sum = root.querySelector('.bgb-bsum[data-b="' + bi + '"]');
       if (sum) sum.innerHTML = bucketSumHtml(total);
       const note = root.querySelector('.bgb-runote[data-b="' + bi + '"]');
-      if (note) note.textContent = added > 0.005 ? 'incl. ' + f2(added) + ' rounded up' : '';
+      if (!note) return;
+      const bits = [];
+      if (added > 0.005) bits.push('incl. ' + f2(added) + ' rounded up');
+      // TODO-286. A bucket holding the tax-tab row shows a subtotal its own visible rows do not
+      // add up to, because that row is deliberately not allocated. Saying so is the difference
+      // between a reconciliation the reader can do and a number they decide is broken.
+      { const p = bgbTaxTabPlace();
+        if (p && p.bi === bi) {
+          const mo = ((((window.__taxResult || {}).cash) || {}).rothIra || 0) / 12;
+          if (mo > 0.005) bits.push('plus ' + f2(mo) + ' from Tax tab, not allocated');
+        } }
+      note.textContent = bits.join(' · ');
     };
     bgbNormalizeRoundUp();                 // a bucket may have been deleted since this was set
     const roundUpByBucket = {};            // bucket index -> the difference it absorbed
@@ -14529,6 +14673,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // (take-home + investments) so the 50/30/20-style percentages reconcile.
       const tc = (window.__taxResult && window.__taxResult.cash) || {};
       const taxInvest = ((tc.trad401k || 0) + (tc.roth401k || 0) + (tc.rothIra || 0) + (tc.hsa || 0) + (tc.eeStock || 0) + (tc.afterTax401k || 0)) / 12;
+      // TODO-286. Same `tc`, same pass, so the line under the buckets and the Investments row in
+      // this summary can never quote different figures for one contribution.
+      // Fills whichever home this render gave it: the slot inside a bucket, or the standalone
+      // block at the end. Clearing the other is not needed — bgbRender emits exactly one.
+      {
+        const mo = (tc.rothIra || 0) / 12;
+        const slot = root.querySelector('.bgb-taxtab-slot');
+        if (slot) {
+          slot.innerHTML = (mo > 0.005) ? bgbTaxTabRowCells(mo) : '';
+          slot.classList.toggle('bgb-taxtab-row', mo > 0.005);
+        }
+        const tt = $('bgb_taxtab');
+        if (tt) tt.innerHTML = bgbTaxTabBucketHtml(tc);
+      }
       const incomeBase = base + taxInvest;
       const pctOf = v => (incomeBase > 0 ? (v / incomeBase * 100).toFixed(1) : '0.0') + '%';
       const pf = payFreq();                          // paychecks per year (e.g. 24 = semi-monthly)
@@ -15050,6 +15208,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let dragSrc = null;
     let bucketDragSrc = null;
     let hbDragSrc = null;
+    let ttDragging = false;                 // TODO-286: the one tax-tab row -- no id to carry
     bgRoot.addEventListener('dragstart', e => {
       const bgrip = e.target.closest && e.target.closest('.bgb-bucket-grip');
       if (bgrip) {
@@ -15067,12 +15226,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', 'hb'); } catch (_) {}
         return;
       }
+      // TODO-286: the tax-tab row's grip, a FOURTH kind. Checked before the local-item grip for
+      // exactly the reason the shared one is — it carries `.bgb-grip` too (same column), and
+      // would otherwise be read as a local item with undefined b/g/i and spliced into somebody's
+      // bucket array.
+      const tgrip = e.target.closest && e.target.closest('.tt-grip');
+      if (tgrip) {
+        ttDragging = true;
+        e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', 'tt'); } catch (_) {}
+        return;
+      }
       const grip = e.target.closest && e.target.closest('.bgb-grip'); if (!grip) return;
       const r = grip.closest('tr'); dragSrc = { b: r.dataset.b, g: r.dataset.g, i: r.dataset.i };
       e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', 'x'); } catch (_) {}
     });
-    bgRoot.addEventListener('dragover', e => { if (dragSrc || bucketDragSrc != null || hbDragSrc != null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+    bgRoot.addEventListener('dragover', e => { if (dragSrc || bucketDragSrc != null || hbDragSrc != null || ttDragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
     bgRoot.addEventListener('drop', e => {
+      // TODO-286. Resolved from the drop target's own data-b/data-g rather than by geometry, so
+      // landing on a local row, a group header or a bucket header all mean the same thing --
+      // lifted verbatim from the shared-line flow below, which solved this first.
+      if (ttDragging) {
+        e.preventDefault();
+        ttDragging = false;
+        let bi = null, gi = null;
+        const anyRow = e.target.closest('tr[data-b]');
+        const ghead = e.target.closest('.bgb-ghead');
+        const bhead = e.target.closest('.bgb-bhead');
+        const grpEl = e.target.closest('.bgb-group');
+        if (anyRow) { bi = +anyRow.dataset.b; gi = anyRow.dataset.g; }
+        else if (ghead) { const gd = ghead.querySelector('.bgb-gname').dataset; bi = +gd.b; gi = gd.g; }
+        else if (grpEl) { const gn = grpEl.querySelector('.bgb-gname'); if (gn) { bi = +gn.dataset.b; gi = gn.dataset.g; } }
+        else if (bhead) { bi = +bhead.querySelector('.bgb-bname').dataset.b; gi = 'd'; }
+        const bucket = bi != null ? bgb.buckets[bi] : null;
+        if (bucket) {
+          const grp = (gi == null || gi === 'd') ? null : (bucket.groups || [])[+gi];
+          bgbSetTaxTabPlace(hbBucketKey(bucket, bi), grp ? hbGroupKey(grp, +gi) : 'd');
+          bgbRender();
+        } else if (!e.target.closest('.bgb-bucket') && e.target === bgRoot) {
+          // Dropped in the empty space below the last bucket: back to standing on its own. The
+          // row must have a way OUT of a bucket, or placing it once is permanent.
+          bgbSetTaxTabPlace(null);
+          bgbRender();
+        }
+        return;
+      }
       if (hbDragSrc != null) {
         e.preventDefault();
         // Onto another shared row: reorder within the slot they share.

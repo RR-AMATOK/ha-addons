@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.9.5
+
+**New: a Roth IRA line on the Budget, and you can put it where you want**
+
+A Roth IRA is the one contribution on the Tax tab that payroll does **not** deduct — the money
+lands in your account and you have to move it yourself. It showed up only in the read-only "by
+bucket" summary, never in the list where your actual lines live, so there was nothing to remind
+you.
+
+There is now a **Roth IRA** line in the budget list, marked *not payroll-deducted — you move this
+one*. Drag it by its handle into any bucket or group to file it with related things; drop it in
+the empty space below the last bucket to send it back to standing on its own.
+
+**It changes no number.** The contribution is already counted once, and the line is deliberately
+outside the totals — a bucket holding it says so in its header ("plus $625.00 from Tax tab, not
+allocated") so its subtotal still reconciles with the rows you can see.
+
+**Fixed: a promotion could silently discard the promoted account's plan**
+
+When one of your linked logins is made the household owner, whichever plan was edited most
+recently wins — that was the intent in 0.9.3, and it worked whenever the two plans were saved more
+than a second apart. Saved within the **same second**, the comparison could not tell them apart
+and quietly kept the wrong one, while the promoted account's browser carried on showing the other.
+Two devices, each certain it was right, and the next save overwrote one of them.
+
+Timestamps are now recorded to the millisecond, so "most recently edited" is always decidable.
+Separately, a promoted browser no longer carries its old version number into the new account — it
+asks the server instead of assuming the two agree. **The displaced plan is still kept**, never
+deleted.
+
+This also ends the *"your plan replaced a newer server version"* message repeating on every login.
+
 ## 0.9.4
 
 **Fixed: the "your plan replaced a newer server version" warning would not go away**
