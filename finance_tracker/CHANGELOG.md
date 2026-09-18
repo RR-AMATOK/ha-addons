@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.6
+
+**Fixed: your bonus was missing from AGI and MAGI**
+
+This is the important one. A bonus is ordinary W-2 wages, but it was left out of both AGI and your
+Roth IRA MAGI — so a $150,000 salary with a $30,000 bonus reported a MAGI of **$150,000** and told
+you that you could put **$7,500** into a Roth. Your real MAGI is $180,000, above the $168,000
+phase-out, and the correct answer is **$0**. Contributing on that advice costs 6% a year in IRS
+excise until it is unwound.
+
+The same omission also **undercharged NIIT** whenever there was a bonus.
+
+**New: expected bonus, and the bonus you actually received.** A bonus is a guess until it is paid,
+and the number that decides Roth eligibility should not stay a guess. Enter what actually landed
+and your MAGI settles on it; leave it blank and your estimate keeps driving the figure, and the
+page says which of the two it is using. Blank means *not yet* — a bonus that was cancelled is
+entered as **0**, and that correctly gives your full contribution room back.
+
+**The bonus now sits inside Summary** rather than in a card of its own, with a rule between each
+section. It moves your MAGI, so it belongs beside it — its tax is still shown separately, because
+it is still taxed separately and is still not part of take-home.
+
+**Fixed: scheduled paycheques claimed each other's money**
+
+Three paycheques that share a category — say $850 to one account, $1,130 to another, $200 to a
+third — each counted **all three** arrivals. Every one of them reported $2,180 arriving against
+its own smaller plan, and accepting that figure stored $2,180 as the plan for each.
+
+Each schedule now recognises only its own payments. Where several schedules share a category, the
+account tells them apart; a payment you typed in by hand still counts, as before.
+
+**New: Undo on an accepted amount.** Accepting a figure was permanent — there was no way back from
+inside the app. Any occurrence you have accepted now has an **Undo** beside it that puts the
+scheduled amount back. If your paycheques are showing a plan of $2,180, that is the button.
+
+**Fixed: two budget lines with the same name shared one bill**
+
+Two lines both called "Savings" — one to Fidelity, one to Ally — became a single recurring bill,
+and there was no way to give them different payees because the payee box only appeared *after* a
+bill existed. The payee now belongs to the line and can be named first, so lines that share a name
+stay separate bills.
+
 ## 0.9.5
 
 **New: a Roth IRA line on the Budget, and you can put it where you want**

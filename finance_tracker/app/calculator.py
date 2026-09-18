@@ -145,6 +145,15 @@ class Inputs:
     # Bonus / supplemental income.  Taxed at marginal rates stacked on top of
     # regular wages.  Never changes take-home, total comp, or any wage base.
     bonus: float = 0.0
+    # BUG-0104. The bonus you EXPECT (above) and the bonus that ACTUALLY LANDED. Both exist
+    # because a bonus is a guess until it is paid, and the number that decides Roth eligibility
+    # must not stay a guess: an ineligible contribution costs 6% a year until it is unwound.
+    #
+    # ACTUAL REPLACES PROJECTED — the owner's choice, made explicitly. `None` means "not yet",
+    # not "zero"; a paid-out bonus of exactly $0 is expressible and different from an unpaid one.
+    # Resolved ONCE at the top of calculate(), so every `i.bonus` below is already the figure in
+    # force and no call site has to remember which of the two it wanted.
+    bonus_actual: float | None = None
 
     # Mega-backdoor Roth source (after-tax 401k).  Post-tax payroll deduction:
     # reduces take-home (like roth_401k) but does NOT reduce any wage base.
@@ -288,6 +297,13 @@ def find_marginal(income: float, brackets: list[Bracket]) -> float:
 # ---------- Core ----------
 
 def calculate(i: Inputs) -> dict:
+    # BUG-0104, resolved before anything reads it. One substitution here beats twenty call sites
+    # each deciding for themselves which bonus they meant — the shape that lets two of them
+    # disagree. `bonus_projected` is kept only to report it back.
+    bonus_projected = i.bonus
+    if i.bonus_actual is not None:
+        i = replace(i, bonus=i.bonus_actual)
+
     taxable_additions = i.er_stock + i.gtli
 
     # §125 medical/dental/vision premiums: reduce all three wage bases.
@@ -638,7 +654,17 @@ def calculate(i: Inputs) -> dict:
     ltcg_tax = ltcg_at_15 * 0.15 + ltcg_at_20 * 0.20
     # NIIT (§1411): 3.8% on the LESSER of net investment income or (MAGI − threshold).
     net_investment_income = ltcg + stcg + i.ordinary_dividends + interest + disp_nii
-    magi_niit = fed_wages + net_investment_income + disp_ordinary   # ESPP comp raises MAGI but not NII
+    # BUG-0104. THE BONUS BELONGS HERE AND NOT IN `fed_wages`, and the distinction is the whole
+    # subtlety. `fed_wages` is a WITHHOLDING base: the bonus is deliberately excluded from it so
+    # that `bonus_fed` can stack it marginally on top (`apply_brackets(fed_taxable + i.bonus) -
+    # fed_tax`). Adding it to `fed_wages` would tax it twice.
+    #
+    # AGI and MAGI are not wage bases. They are annual income, and a bonus is ordinary W-2 Box 1
+    # wages — so leaving it out understated both. Measured before the fix: salary $150,000 with a
+    # $30,000 bonus reported MAGI $150,000 and a Roth cap of $7,500, when the true MAGI is
+    # $180,000, above the $168,000 phase-out, and the correct cap is $0. The app was telling
+    # someone they could make a contribution the IRS charges 6% a year to unwind.
+    magi_niit = fed_wages + i.bonus + net_investment_income + disp_ordinary   # ESPP comp raises MAGI but not NII
     niit = max(0.0, min(net_investment_income, max(0.0, magi_niit - i.niit_threshold)) * i.niit_rate)
     # WA capital-gains excise (filing-time, like the rest of this section): LONG-TERM
     # gains only — STCG, dividends, interest, and W-2 stock comp are out of scope.
@@ -658,7 +684,7 @@ def calculate(i: Inputs) -> dict:
     # see disp_ordinary/disp_st_gain/disp_lt_gain, above). Equals magi_niit for the
     # modeled inputs (no foreign-income addbacks). AGI DIFFERS from the canonical Roth
     # MAGI below exactly when the explorer holds a sale — see that block's rationale.
-    agi = fed_wages + total_investment_income
+    agi = fed_wages + i.bonus + total_investment_income   # BUG-0104: Box 1 includes the bonus
 
     # ----- Roth IRA MAGI + phase-out (Single) -----
     # Canonical definition (docs/magi-canonicalization-plan.md §1, 2026-07-26, TODO-244):
@@ -681,7 +707,7 @@ def calculate(i: Inputs) -> dict:
     # used `magi = fed_wages` only (D1 defect, TODO-244) — moved here because the
     # recurring-income terms (interest, ltcg, stcg) aren't computed until above.
     # roth_ira_max is first consumed in the return dict, well below — safe to move.
-    roth_magi = fed_wages + interest + i.ordinary_dividends + ltcg + stcg
+    roth_magi = fed_wages + i.bonus + interest + i.ordinary_dividends + ltcg + stcg   # BUG-0104
     if roth_magi <= i.roth_ira_phase_in:
         roth_ira_max = i.roth_ira_limit
     elif roth_magi >= i.roth_ira_phase_out:

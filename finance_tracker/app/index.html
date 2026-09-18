@@ -2079,6 +2079,17 @@
   .hb-share-foot .seed-btn:disabled { opacity:.55; cursor:not-allowed; }
   .hb-orphan-bucket .bgb-bhead { flex-wrap:wrap; }
   .subhead { font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); font-weight:var(--fw-semibold); color:var(--muted); margin:10px 0 4px; }
+  /* A RULE BETWEEN SECTIONS, added when the bonus card was folded into Summary (2026-09-18).
+     Five stacked tile groups under five small grey headings read as one long list — the headings
+     alone were carrying the whole burden of separation and they are the quietest type on the
+     card. The line does that work instead, so the headings can stay quiet.
+     `~ .subhead` skips the FIRST heading in a card: a rule above the first section draws a line
+     directly under the <h2>, which separates the card from its own title.
+     Scoped to `.card` so no other surface using `.subhead` inherits a border it did not ask for,
+     and `[hidden]` is honoured explicitly — a hidden bonus section must not leave its rule
+     behind as a stray line above "What's taken out". */
+  .card .subhead ~ .subhead { border-top:1px solid var(--line-faint); padding-top:10px; margin-top:14px; }
+  .card .subhead[hidden] { display:none !important; }
   /* A section header that discloses. Same ▾/▸ vocabulary as the budget bucket's collapse so the
      two read as one gesture; a <button> rather than the div itself, because the whole header is
      the target and a div cannot be tabbed to or activated with a key. Inherits the subhead's type
@@ -2852,9 +2863,19 @@
       </div>
 
       <div class="row">
-        <label>Annual bonus <span class="hint">(one-time; taxed separately, not in take-home)</span></label>
+        <label>Annual bonus <span class="hint">(expected; taxed separately, not in take-home)</span></label>
         <span class="input-pair"><input id="bonus" type="text" inputmode="decimal" data-fmt="usd" min="0" step="1000" value="0" /><span class="unit" data-toggle="bonus" title="Click to toggle $ / % of base salary">$</span></span>
       </div>
+
+      <!-- BUG-0104. A bonus is a guess until it is paid, and the figure that decides Roth
+           eligibility must not stay a guess: an ineligible contribution costs 6% a year until it
+           is unwound. Blank means NOT YET, which is deliberately different from zero — a bonus
+           that was cancelled is entered as 0 and correctly restores the full Roth cap. -->
+      <div class="row">
+        <label>Bonus actually received <span class="hint">(leave blank until it lands)</span></label>
+        <span class="input-pair"><input id="bonusActual" type="text" inputmode="decimal" data-fmt="usd" data-fmt-blank="keep" min="0" step="1000" value="" placeholder="not yet" /><span class="unit">$</span></span>
+      </div>
+      <div class="muted" id="bonusMagiNote" style="margin:-4px 0 8px;font-size:var(--fs-sm);line-height:var(--lh-base)"></div>
 
       <div class="row">
         <label>Filing status</label>
@@ -3157,6 +3178,18 @@
         <div class="tile"><div class="k">Total earnings</div><div class="v mono" id="t_earn">—</div><div class="s">incl. employer HSA</div></div>
         <div class="tile"><div class="k">Total gross</div><div class="v mono" id="t_gross">—</div><div class="s">salary + taxable add'l</div></div>
       </div>
+      <!-- The bonus was its own card until 2026-09-18. It is income, so it belongs in the story
+           the Summary tells — and since BUG-0104 it moves AGI, MAGI and the Roth cap, which made
+           a separate card actively misleading: the two numbers that depend on each other were on
+           different surfaces. Kept as its OWN SECTION rather than merged into the tiles above,
+           because its tax really is separate and folding it in would blur that. -->
+      <div class="subhead" id="t_bonus_head">Your bonus <span class="is-plain">— taxed separately, not in take-home</span></div>
+      <div class="tiles" id="t_bonus_tiles">
+        <div class="tile"><div class="k">Gross bonus</div><div class="v mono" id="b_gross">—</div><div class="s" id="b_gross_sub"></div></div>
+        <div class="tile bad"><div class="k">Bonus tax</div><div class="v mono" id="b_tax">—</div><div class="s" id="b_rate"></div></div>
+        <div class="tile good"><div class="k">Net bonus</div><div class="v mono" id="b_net">—</div><div class="s">one-time payment</div></div>
+      </div>
+
       <div class="subhead">What's taken out</div>
       <div class="tiles">
         <div class="tile bad"><div class="k">Total deductions</div><div class="v mono" id="t_ded">—</div><div class="s">pre- + post-tax</div></div>
@@ -3210,16 +3243,6 @@
     </section>
 
     <!-- Bonus (one-time, taxed separately) -->
-    <section class="card" id="bonusCard" style="display:none">
-      <h2>Bonus — one-time, taxed separately</h2>
-      <p class="muted" style="font-size:var(--fs-xs);margin-top:0">A supplemental payment taxed at your marginal rate on top of regular wages. <b>Not</b> part of take-home or per-paycheck pay.</p>
-      <div class="tiles">
-        <div class="tile"><div class="k">Gross bonus</div><div class="v mono" id="b_gross">—</div></div>
-        <div class="tile bad"><div class="k">Bonus tax</div><div class="v mono" id="b_tax">—</div><div class="s" id="b_rate"></div></div>
-        <div class="tile good"><div class="k">Net bonus</div><div class="v mono" id="b_net">—</div><div class="s">one-time payment</div></div>
-      </div>
-    </section>
-
     <!-- Owed at filing: investment tax + supplemental under-withholding + §415(c) -->
     <section class="card" id="filingCard" style="display:none">
       <h2>Owed at filing <span class="mini" style="text-transform:none;font-weight:var(--fw-normal)">(not withheld from your paycheck)</span></h2>
@@ -4690,7 +4713,7 @@ const TAB_SCREENS = {
         // elections card on Max out, WA vs TX, Tax tables AND Job change. Listed beside the other
         // two paycheck-deduction cards, which is where it belongs by meaning.
         'tax_pretax_card', 'tax_posttax_card', 'tax_other_elections_card', 'tax_additions_card',
-        'tax_summary_card', 'bonusCard', 'filingCard',
+        'tax_summary_card', 'filingCard',
         'tax_wagebase_card', 'tax_breakdown_card', 'tax_cashflow_card'] },
     { key: 'maxout', label: 'Max out',    sections: ['maxoutCard'],     solo: true },
     { key: 'wavtx',  label: 'WA vs TX',   sections: ['sx_card'],        solo: true },
@@ -6320,6 +6343,13 @@ function buildPayload() {
     vision:  resolveAnnual('vision'),
     afterTax401k: resolveAnnual('afterTax401k'),
     bonus: resolveAnnual('bonus'),
+    // BUG-0104: blank stays NULL, never 0. `rn('')` is 0, and sending that would say "the bonus
+    // was cancelled" on every load — silently restoring a Roth cap the user may not be entitled to.
+    bonusActual: (function () {
+      const e = $('bonusActual');
+      const raw = e ? String(e.value || '').trim() : '';
+      return raw === '' ? null : rn(raw);
+    })(),
     employer401kMatch: (function () { const e = $('emp_match'); return e ? rn(e.value) : 0; })(),
     longTermGains: (function () { const e = $('inv_ltg'); return e ? rn(e.value) : 0; })(),
     shortTermGains: (function () { const e = $('inv_stg'); return e ? rn(e.value) : 0; })(),
@@ -6455,16 +6485,42 @@ function render(r) {
   $('t_earn').textContent = fmt$(r.cash.totalEarnings);
   $('t_ded').textContent = fmt$(r.cash.totalDeductions);
 
+  // BUG-0104. WHICH FIGURE IS DRIVING THE NUMBERS, said out loud. The bonus now moves AGI, MAGI
+  // and the Roth cap, so "is this an estimate or what actually landed?" stops being a detail —
+  // it is the difference between a contribution you may make and one the IRS charges 6% a year
+  // to unwind. Silence here would leave the most consequential input on the tab unlabelled.
+  {
+    const note = $('bonusMagiNote');
+    if (note) {
+      const el = $('bonusActual');
+      const raw = el ? String(el.value || '').trim() : '';
+      const proj = resolveAnnual('bonus');
+      if (raw === '') {
+        note.textContent = proj > 0
+          ? 'Your MAGI uses the expected ' + fmt$(proj) + ' — an estimate until the bonus lands. '
+            + 'Enter what you actually received to settle your Roth eligibility.'
+          : '';
+      } else {
+        const act = rn(raw);
+        const diff = act - proj;
+        note.textContent = 'Your MAGI uses the ' + fmt$(act) + ' you actually received'
+          + (Math.abs(diff) < 0.005 ? ' — exactly what you expected.'
+             : (diff < 0 ? ' — ' + fmt$(-diff) + ' below the ' + fmt$(proj) + ' you expected.'
+                         : ' — ' + fmt$(diff) + ' above the ' + fmt$(proj) + ' you expected.'));
+      }
+    }
+  }
+
   // Bonus (one-time, taxed separately) — only shown when a bonus is entered
   const bn = r.bonus;
   if (bn && bn.gross > 0) {
-    $('bonusCard').style.display = '';
+    $('t_bonus_head').hidden = false; $('t_bonus_tiles').hidden = false;
     $('b_gross').textContent = fmt$(bn.gross);
     $('b_tax').textContent = fmt$(bn.totalTax);
     $('b_rate').textContent = fmtPct(bn.effectiveRate) + ' effective';
     $('b_net').textContent = fmt$(bn.net);
   } else {
-    $('bonusCard').style.display = 'none';
+    $('t_bonus_head').hidden = true; $('t_bonus_tiles').hidden = true;
   }
 
   // Owed at filing: investment tax (cap gains / dividends / NIIT) + bonus supplemental
@@ -7000,7 +7056,7 @@ function paintTaxTablesScent() {
 function collectState() {
   const ids = ['salary_yr','salary_mo','salary_pp','spouseSalary',
                'trad401k','roth401k','rothIra','hsa','employerHsa','eeStock','erStock','gtli',
-               'medical','dental','vision','bonus','afterTax401k',
+               'medical','dental','vision','bonus','bonusActual','afterTax401k',
                'payFreq',
                'fedStd','ssBase','ssRate','medRate','addlMedThresh','addlMedRate'];
   const values = {};
@@ -14104,7 +14160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('[data-recchip]').forEach(chip => {
       const row = chip.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
       const tgt = bgbRecTargetFor(row); if (!tgt) return;
-      const sc = known ? bgbScheduleFor(tgt.kind, tgt.name) : null;
+      const sc = known ? bgbScheduleFor(tgt) : null;
       chip.innerHTML = sc
         ? '<span class="mng-flag" title="' + esc(schCadenceText(sc)) + '">due '
           + esc(schDayLabel(bgbScheduleIsSimple(sc) ? sc.day1 : sc.day1)) + '</span>'
@@ -14118,7 +14174,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       tick.checked = !!sc;
       tick.disabled = !known;
       val.textContent = !known ? '—' : (sc ? ('due ' + schDayLabel(sc.day1)) : 'no');
-      if (!sc) { body.hidden = true; body.innerHTML = ''; return; }
+      // BUG-0102. The payee used to live here ONLY once a schedule existed, which is what made
+      // two payees unsayable: the second line bound to the first's schedule, and one schedule has
+      // one payee slot. The payee is a property of the LINE now, so the box renders either way —
+      // you name the payee, THEN tick the bill, and the two lines separate because their
+      // identities already differ.
+      if (!sc) {
+        // WHERE IT EARNS ITS SPACE, and nowhere else. The chicken-and-egg this fixes only bites
+        // when two lines SHARE A NAME — that is the only time a payee must be nameable before a
+        // bill exists, because it is the only time ticking would bind the second line to the
+        // first's schedule. On an ordinary line you can still tick first and name the payee
+        // after, exactly as before.
+        //
+        // Rendering it on every row instead cost ~90px on EVERY budget row's menu, for forty rows
+        // that are not bills. Measured, not guessed: test_budget_row_menu_cdp reported the menu
+        // at 368px against 327px of room below its trigger, and failed on its own setup
+        // assumption rather than on the behaviour it exists to check.
+        if (tgt.nameShared > 1 || tgt.payee) {
+          body.hidden = false;
+          body.innerHTML = bgbRecPayeeFieldHtml(key, tgt)
+            // The warning is payee-aware, because that is what decides whether they REALLY
+            // collide. Two lines called "Savings" with different payees are fine and get told so
+            // by silence; two with the same payee are one bill and get told out loud.
+            + (tgt.shared > 1
+                ? '<span class="bgb-rec-note">Another line here is called “' + esc(tgt.name)
+                  + '” with the same payee, so ticking both would make them one bill. Give them '
+                  + 'different payees to keep them apart.</span>'
+                : '');
+        } else {
+          body.hidden = true; body.innerHTML = '';
+        }
+        return;
+      }
       body.hidden = false;
       if (!bgbScheduleIsSimple(sc)) {
         // Described, never flattened: this menu cannot express a twice-monthly rule or a weekend
@@ -14128,30 +14215,24 @@ document.addEventListener('DOMContentLoaded', async () => {
           + 'Edit in Scheduled money…</button>';
       } else {
         const shared = tgt.shared;
-        // THE PAYEE. `payee_preset` is keyed on `LOWER(TRIM(description))`, so this box is the
-        // difference between a posted bill that carries your tags and one that carries none. It
-        // is prefilled from what you have actually logged for this category, and it is an input
-        // rather than a fixed label because history is a good guess, not an authority.
-        const payee = sc.description || '';
-        const guess = tgt.payee || '';
         body.innerHTML = '<select data-recday2="' + esc(key) + '" aria-label="Day of the month it posts">'
           + bgbDayOptions(sc.day1) + '</select>'
           + (+sc.day1 >= 29 && +sc.day1 <= 31
               ? '<span class="bgb-rec-note">Short months fall back to their last day.</span>' : '')
-          + '<label class="bgb-rec-payee"><span>Payee</span>'
-          +   '<input type="text" data-recpayee="' + esc(key) + '" value="' + esc(payee)
-          +   '" placeholder="' + esc(guess || tgt.name) + '"'
-          +   ' aria-label="Payee this bill is logged under"></label>'
-          + (!payee && guess
-              ? '<span class="bgb-rec-note">Suggested from what you have logged: <b>' + esc(guess)
+          + bgbRecPayeeFieldHtml(key, tgt, sc)
+          + (!(tgt.payee || (sc && sc.description)) && tgt.payeeGuess
+              ? '<span class="bgb-rec-note">Suggested from what you have logged: <b>' + esc(tgt.payeeGuess)
                 + '</b>. Saving it is what carries your tags across.</span>'
-              : (payee
+              : ((tgt.payee || (sc && sc.description))
                   ? '<span class="bgb-rec-note">Logged under this name, so it picks up its usual tags.</span>'
                   : '<span class="bgb-rec-note">Logs under “' + esc(tgt.name)
                     + '”, which matches none of your saved payees — so no tags carry across.</span>'))
+          // Only when they REALLY share one. Same name + different payees is two bills now, and
+          // warning about it would be scolding the owner for the setup this fix exists to allow.
           + (shared > 1
               ? '<span class="bgb-rec-warn">' + shared + ' budget lines are called “' + esc(tgt.name)
-                + '” here, and they share this one bill.</span>' : '');
+                + '” here with the same payee, and they share this one bill. Give them different '
+                + 'payees to split them apart.</span>' : '');
       }
     });
   }
@@ -14262,8 +14343,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                // budget on every posting, so storing a copy here would be a second source that
                // goes stale the moment the split is renegotiated.
                partnerBps: null,
-               payee: bgbPayeeFor(name),
-               shared: bgbLinesSharingKey(kind, name) };
+               // BUG-0102: `payee` is what this LINE has been told to use and is part of its
+               // identity; `payeeGuess` is history's suggestion, which two lines with one name
+               // necessarily share and so can never separate them.
+               payee: bgbStoredPayee('hb:' + line.id),
+               payeeGuess: bgbPayeeFor(name),
+               shared: bgbLinesSharingKey(kind, name, bgbStoredPayee('hb:' + line.id)),
+               nameShared: bgbLinesWithName(kind, name) };
     }
     if (row.dataset.b == null) return null;
     const it = (itemsArr(row.dataset.b, row.dataset.g) || [])[+row.dataset.i];
@@ -14276,21 +14362,138 @@ document.addEventListener('DOMContentLoaded', async () => {
              // A LOCAL line's split lives in this browser's blob and the server cannot see it, so
              // here it IS carried on the schedule — the one case the stored fallback exists for.
              partnerBps: sp >= 100 ? null : Math.round((100 - sp) * 100),
-             payee: bgbPayeeFor(it.name),
-             shared: bgbLinesSharingKey(kind, it.name) };
+             payee: bgbStoredPayee(it.iid ? String(it.iid) : ''),
+             payeeGuess: bgbPayeeFor(it.name),
+             shared: bgbLinesSharingKey(kind, it.name, bgbStoredPayee(it.iid ? String(it.iid) : '')),
+             nameShared: bgbLinesWithName(kind, it.name) };
   }
 
-  function bgbScheduleFor(kind, name) {
-    const want = String(name || '').trim().toLowerCase();
-    if (!want) return null;
-    return (SCH_STATE.schedules || []).find(x =>
-      x.direction === 'out' && (x.bucket || '') === kind
-      && (x.category || '').trim().toLowerCase() === want) || null;
+  // ── BUG-0102: a payee belongs to the LINE, not to the schedule ────────────────────────────
+  // The owner: *"the schedule payments kept 2180 (Prod) instead of separating the payment by the
+  // Payee"* — two budget lines both called "Savings", $1,200 to Fidelity and $980 to Ally, stood
+  // for by ONE $2,180 bill.
+  //
+  // THIS WAS NOT A MATCHING BUG. It was a chicken-and-egg that made the setup impossible to say:
+  // a schedule was identified by (bucket, category=line name), the payee lived on the SCHEDULE,
+  // and the payee input only rendered once a schedule existed. So the second line bound to the
+  // first's schedule, one schedule has one payee slot, and no sequence of clicks produced two
+  // payees. `bgbPayeeFor()` could not break the tie either — it suggests from history keyed on
+  // the line NAME, so both lines get the same suggestion.
+  //
+  // So the payee moves onto the line, where it can be set BEFORE any schedule exists. Stored in
+  // the `bgb` blob (it syncs, and the owner runs two linked logins), keyed by a stable line id
+  // rather than by name — renaming a line must not silently hand its payee to a different one.
+  function bgbLineKey(tgt) {
+    if (!tgt) return '';
+    if (tgt.hb) return 'hb:' + tgt.hb.id;            // a shared line is identified by the server
+    return tgt.it && tgt.it.iid ? String(tgt.it.iid) : '';
+  }
+  function bgbStoredPayee(key) {
+    if (!key) return '';
+    const m = (bgb && bgb.linePayees) || {};
+    return String(m[key] || '').trim();
+  }
+  function bgbSetStoredPayee(key, val) {
+    if (!key) return;
+    if (!bgb.linePayees || typeof bgb.linePayees !== 'object') bgb.linePayees = {};
+    const v = String(val || '').trim();
+    if (v) bgb.linePayees[key] = v; else delete bgb.linePayees[key];
+    saveBgb();
   }
 
-  // How many budget lines share this key. Two lines in one kind with one name ARE one bill — true
-  // before this control existed and true after; the difference is that it is now said out loud.
-  function bgbLinesSharingKey(kind, name) {
+  // Every line's schedule, resolved in ONE pass so that two lines can never bind to one bill.
+  //
+  // TWO PASSES, and the order is the whole correctness of it. A line that has SAID which payee it
+  // is claims its own schedule first; only then may a line with no payee yet claim a leftover.
+  // Run the other way round, a payee-less line would take the schedule belonging to a named one
+  // and the merge would come straight back under a new name.
+  //
+  // The second pass is what keeps the owner's LIVE data working. Their $2,180 schedule predates
+  // per-line payees, so neither line matches it exactly; the first line in document order adopts
+  // it, the second finds nothing and simply reads as not-yet-a-bill — which it is. Nothing is
+  // orphaned and nothing is deleted.
+  function bgbScheduleBindings() {
+    const out = new Map();
+    const used = new Set();
+    const list = (SCH_STATE.schedules || []).filter(x => x.direction === 'out');
+    if (!list.length) return out;
+    const lines = bgbAllRecLines();
+    const sameLine = (sc, kind, name) =>
+      (sc.bucket || '') === kind
+      && (sc.category || '').trim().toLowerCase() === String(name || '').trim().toLowerCase();
+
+    lines.forEach(L => {
+      if (!L.payee) return;
+      const want = L.payee.toLowerCase();
+      const sc = list.find(x => !used.has(x.id) && sameLine(x, L.kind, L.name)
+        && String(x.description || '').trim().toLowerCase() === want);
+      if (sc) { out.set(L.key, sc); used.add(sc.id); }
+    });
+    lines.forEach(L => {
+      if (out.has(L.key)) return;
+      const sc = list.find(x => !used.has(x.id) && sameLine(x, L.kind, L.name));
+      if (sc) { out.set(L.key, sc); used.add(sc.id); }
+    });
+    return out;
+  }
+
+  // Every budget line that can carry a bill, in a DETERMINISTIC order — document order, so the
+  // "first line adopts the legacy schedule" rule above always names the same line. Local items
+  // first (bucket by bucket, direct items then groups, exactly as they render), then shared.
+  function bgbAllRecLines() {
+    const out = [];
+    (bgb.buckets || []).forEach(b => {
+      const kind = b.kind || 'other';
+      const push = it => {
+        if (!it || !it.iid) return;
+        const key = String(it.iid);
+        out.push({ key: key, kind: kind, name: it.name || '', payee: bgbStoredPayee(key) });
+      };
+      (b.items || []).forEach(push);
+      (b.groups || []).forEach(g => (g.items || []).forEach(push));
+    });
+    (hb.lines || []).forEach(l => {
+      const key = 'hb:' + l.id;
+      out.push({ key: key, kind: l.bucket || 'other', name: l.name || '', payee: bgbStoredPayee(key) });
+    });
+    return out;
+  }
+
+  // Takes the TARGET, not (kind, name). BUG-0102: a name is not an identity — two lines can share
+  // one, and under the old signature they shared a bill along with it.
+  // ONE payee field, used with or without a schedule. Two copies is how the no-schedule one
+  // drifts — the same mistake the Roth IRA row made, caught there by a drag test.
+  //
+  // `payee_preset` is keyed on `LOWER(TRIM(description))`, so this box is the difference between
+  // a posted bill that carries your tags and one that carries none. An input rather than a fixed
+  // label, because history is a good guess and not an authority.
+  function bgbRecPayeeFieldHtml(key, tgt, sc) {
+    const stored = tgt.payee || (sc ? (sc.description || '') : '');
+    return '<label class="bgb-rec-payee"><span>Payee</span>'
+      + '<input type="text" data-recpayee="' + esc(key) + '" value="' + esc(stored)
+      + '" placeholder="' + esc(tgt.payeeGuess || tgt.name) + '"'
+      + ' aria-label="Payee this bill is logged under"></label>';
+  }
+
+  function bgbScheduleFor(tgt) {
+    if (!tgt) return null;
+    const key = bgbLineKey(tgt);
+    if (!key) return null;
+    return bgbScheduleBindings().get(key) || null;
+  }
+
+  // How many budget lines share this bill. BUG-0102 changed what that means: a name alone no
+  // longer makes two lines one bill — the PAYEE is part of the identity now, so "Savings →
+  // Fidelity" and "Savings → Ally" are two bills that happen to be called the same thing, and
+  // warning about them would be telling the owner off for the setup this fix exists to allow.
+  // Two lines with one name and one payee (or neither having said one yet) genuinely are one
+  // bill, and that is still worth saying out loud.
+  // How many lines carry this name AT ALL, whatever their payees. Distinct from
+  // bgbLinesSharingKey, which is payee-aware and answers "are these one bill?". This one answers
+  // "could these be taken for one?", and that is the question that decides whether the payee box
+  // has to exist yet — it must STAY once a payee is set, or the moment you name the first line
+  // its own box disappears and you cannot fix a typo, while the second line never gets one.
+  function bgbLinesWithName(kind, name) {
     const want = String(name || '').trim().toLowerCase();
     if (!want) return 0;
     let n = 0;
@@ -14300,12 +14503,37 @@ document.addEventListener('DOMContentLoaded', async () => {
       (b.items || []).forEach(scan);
       (b.groups || []).forEach(g => (g.items || []).forEach(scan));
     });
+    (hb.lines || []).forEach(l => {
+      if ((l.bucket || 'other') !== kind) return;
+      if (String(l.name || '').trim().toLowerCase() === want) n++;
+    });
+    return n;
+  }
+
+  function bgbLinesSharingKey(kind, name, payee) {
+    const want = String(name || '').trim().toLowerCase();
+    if (!want) return 0;
+    const wantPayee = String(payee || '').trim().toLowerCase();
+    let n = 0;
+    const samePayee = key => bgbStoredPayee(key).toLowerCase() === wantPayee;
+    (bgb.buckets || []).forEach(b => {
+      if ((b.kind || 'other') !== kind) return;
+      const scan = it => {
+        if ((it.name || '').trim().toLowerCase() !== want) return;
+        if (!samePayee(it.iid ? String(it.iid) : '')) return;
+        n++;
+      };
+      (b.items || []).forEach(scan);
+      (b.groups || []).forEach(g => (g.items || []).forEach(scan));
+    });
     // Shared lines land on the same key and therefore collide the same way -- a local "Rent" in a
     // need bucket and a SHARED "Rent" are one bill to the join, and the warning has to say so or
     // it under-reports exactly the case a household is most likely to create.
     (hb.lines || []).forEach(l => {
       if ((l.bucket || 'other') !== kind) return;
-      if (String(l.name || '').trim().toLowerCase() === want) n++;
+      if (String(l.name || '').trim().toLowerCase() !== want) return;
+      if (bgbStoredPayee('hb:' + l.id).toLowerCase() !== wantPayee) return;
+      n++;
     });
     return n;
   }
@@ -14961,12 +15189,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (acWriteGuard()) return;
         const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
         const tgt = bgbRecTargetFor(row); if (!tgt) return;
-        const sc = bgbScheduleFor(tgt.kind, tgt.name);
-        if (!sc) return;
         // Empty CLEARS it (null), rather than storing "" — an empty string is a payee key that
         // matches nothing, and the store's patch treats null as "clear this nullable field".
         const v = String(t.value || '').trim();
+        // THE LINE FIRST, and it is written even when there is no schedule — that is the whole
+        // point of BUG-0102. Naming the payee is how you tell two same-named lines apart, and you
+        // have to be able to do it BEFORE either has become a bill.
+        bgbSetStoredPayee(bgbLineKey(tgt), v);
+        const sc = bgbScheduleFor(tgt);
+        if (!sc) { bgbSyncRecurringUI(); return; }
         try {
+          // The schedule's `description` is what actually tags the posted transaction, so the two
+          // are kept in step. The LINE is the identity; the schedule is the copy that posts.
           await patch('/api/tracking/schedules/' + sc.id, { description: v || null });
           if (window.__recurringSetup) await window.__recurringSetup.ensure();
         } catch (er) {
@@ -14979,7 +15213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (acWriteGuard()) return;
         const row = t.closest('tr[data-b], tr[data-hbline]'); if (!row) return;
         const tgt = bgbRecTargetFor(row); if (!tgt) return;
-        const sc = bgbScheduleFor(tgt.kind, tgt.name);
+        const sc = bgbScheduleFor(tgt);
         if (!sc) return;
         try {
           await patch('/api/tracking/schedules/' + sc.id, { day1: +t.value });
@@ -14998,7 +15232,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const it = tgt.hb || tgt.it;
         const kind = tgt.kind;
         if (!(tgt.name || '').trim()) { t.checked = false; showToast('Name the line first'); return; }
-        const sc = bgbScheduleFor(kind, tgt.name);
+        const sc = bgbScheduleFor(tgt);
         try {
           if (t.checked && !sc) {
             // THE WHOLE BILL, and the split recorded alongside it. 0.8.6 booked your share here
@@ -15008,6 +15242,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // "AMLI - Rent" picks up `Housing` exactly as typing it would.
             await post('/api/tracking/schedules', {
               name: tgt.name, direction: 'out', amount: tgt.amount, bucket: kind, category: tgt.name,
+              // THE LINE'S OWN PAYEE, never `payeeGuess`. The guess is keyed on the line NAME, so
+              // two lines called "Savings" would be created with one description and re-merge on
+              // the next binding pass — the exact defect BUG-0102 is.
               description: tgt.payee || null, partnerSplitBps: tgt.partnerBps,
               accountId: acDefaultAccountId(), freq: 'monthly', interval: 1, day1: 1,
               anchorOn: (ACT.month || acNowMonth()) + '-01',
@@ -19605,6 +19842,29 @@ document.addEventListener('DOMContentLoaded', async () => {
   // one person's budget.
   function acMatchRecurring(r) {
     const cat = (r.category || '').toLowerCase();
+    // BUG-0103. The owner: *"the schedule payments kept 2180 (Prod) instead of separating the
+    // payment by the Payee."* Three schedules — Paycheck - Car $850, Paycheck - Joint - R $1,130,
+    // Paycheck - Main $200, to three different accounts — share the category "Paycheck - R".
+    // Matching on category alone, EACH of them claimed ALL of the others' postings, so all three
+    // reported $3,160.79 against plans of $850, $1,130 and $200. It also swept up a hand-logged
+    // "Paycheck - Cash" that belongs to no schedule at all.
+    //
+    // The exact link was there the whole time: a posted occurrence carries
+    // `externalId = "sched:<id>:<date>"`. Two rules, and the first is the one that matters.
+    const mineExt = 'sched:' + r.id + ':';
+    const linkedToAnother = t => {
+      const x = String(t.externalId || '');
+      return x.indexOf('sched:') === 0 && x.indexOf(mineExt) !== 0;
+    };
+    // RULE 2 applies ONLY where the ambiguity actually exists. A hand-logged transaction has no
+    // link, and the loose category match is exactly what lets it still count as "came through" —
+    // removing that everywhere would break every bill anyone types in by hand. But when several
+    // schedules share one category, "category" has stopped identifying anything, and the account
+    // is what the owner used to tell them apart in the first place.
+    const rivals = (SCH_STATE.schedules || []).filter(x =>
+      x.id !== r.id && x.direction === r.direction
+      && (x.category || '').toLowerCase() === cat).length;
+    const accountDecides = rivals > 0 && r.accountId != null;
     let actual = 0, mine = 0, count = 0, lastDate = null;
     // TODO-260 needs the hits INDIVIDUALLY, not just the totals: rows are per OCCURRENCE now, and
     // a schedule with two occurrences in one month (a semimonthly paycheck — the first example the
@@ -19618,6 +19878,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     (ACT.txns || []).forEach(t => {
       if (t.direction !== r.direction) return;
+      // RULE 1: a posting that names another schedule is that schedule's, whatever its category
+      // says. This alone separates the three paycheques.
+      if (linkedToAnother(t)) return;
+      // RULE 2: in an ambiguous category, an UNLINKED transaction must land in this schedule's
+      // own account to count as its arrival.
+      if (accountDecides && String(t.externalId || '').indexOf(mineExt) !== 0
+          && t.accountId !== r.accountId) return;
       // partnerOwed lives on the PARENT transaction, never on a leg — same as acActualByCat.
       const pOwed = acSignedPartnerOwed(t);
       if (t.splits && t.splits.length) {
@@ -19959,6 +20226,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         rows.push({
           sc: sc, on: o.on, raw: o.raw || o.on,
           planned: (o.amount || sc.amount || 0),
+          // BUG-0103: an accepted occurrence has to be undoable, so the row has to know it IS one.
+          overridden: !!o.overridden,
           n: got.length,
           mine: got.reduce((a, h) => a + h.mine, 0),
           full: got.reduce((a, h) => a + h.amount, 0),
@@ -20080,9 +20349,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       let occActs = '';
+      // BUG-0103. ACCEPT HAD NO UNDO, and that is how a wrong plan becomes permanent. The owner's
+      // three paycheques were accepted at $2,180 each — the matcher's bug, fixed above — and
+      // `clear_occurrence_exception` existed server-side the whole time with nothing calling it.
+      // A control the user cannot reach is not a remedy; that is BUG-0101's lesson, arriving here
+      // in a different costume. Shown on ANY overridden occurrence, settled or not, because an
+      // accepted-at-the-wrong-figure row is exactly the one that looks settled and is not.
+      const undoAct = r.overridden
+        ? '<button type="button" class="gl-act" data-schundo="' + esc(String(sc.id)) + '|' + esc(r.raw) + '"'
+          + ' title="Put this back to the scheduled ' + esc(acAmt(sc.amount || 0)) + '"'
+          + ' aria-label="Undo the accepted amount for ' + esc(sc.name) + ' on ' + esc(r.on)
+          + ', back to ' + esc(acAmt(sc.amount || 0)) + '">Undo</button>'
+        : '';
       if (done) {
         occActs = '<button type="button" class="gl-act" data-schfind="' + esc(String(sc.id)) + '"'
-                + ' aria-label="Show ' + esc(sc.name) + ' in transactions">In transactions</button>';
+                + ' aria-label="Show ' + esc(sc.name) + ' in transactions">In transactions</button>'
+                + undoAct;
         // TODO-280. ACCEPT THE DIFFERENCE. The owner: "we should be able to accept the difference,
         // is a variable amount sometimes it will be way under." A bill flagged `amount varies` is
         // one whose figure is a guess by definition, and holding it open every month because the
@@ -20109,7 +20391,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                    + ' aria-label="Confirm ' + esc(sc.name) + ' for ' + esc(r.on) + '">Confirm</button>';
         }
         occActs += '<button type="button" class="gl-act" data-reclog="' + esc(String(sc.id)) + '"'
-                 + ' aria-label="Log it: ' + esc(sc.name) + '">Log&nbsp;it</button>';
+                 + ' aria-label="Log it: ' + esc(sc.name) + '">Log&nbsp;it</button>' + undoAct;
         if (di >= 0) {
           occActs += '<button type="button" class="gl-act" data-schskip="' + di + '"'
                    + ' title="This one did not happen. It changes no transaction."'
@@ -21605,6 +21887,23 @@ document.addEventListener('DOMContentLoaded', async () => {
           // answer, so a row stayed "due" until the reader left the tab and came back — which is
           // exactly what was reported. Ledger first, then the list that reads it.
           await acRefresh(); await schRefresh(); return;
+        } }
+      { const u = ev.target.closest('[data-schundo]');
+        if (u) {
+          ev.preventDefault();
+          if (acWriteGuard()) return;
+          // `raw`, not the landing date — the store keys exceptions on the date the RULE produced,
+          // the same reason Accept sends it (BUG-0064).
+          const [sid, raw] = String(u.dataset.schundo).split('|');
+          try {
+            await del('/api/tracking/schedules/' + sid + '/occurrence/' + raw);
+            showToast('Put back to the scheduled amount');
+          } catch (e) {
+            showToast('Could not undo that one — ' + (errDetail(e) || 'the server refused it'));
+          }
+          await schRefresh();
+          acRefresh();
+          return;
         } }
       { const a = ev.target.closest('[data-schaccept]');
         if (a) {

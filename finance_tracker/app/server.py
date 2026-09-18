@@ -382,6 +382,10 @@ class InputModel(BaseModel):
     # Backdoor / mega-backdoor Roth and bonus
     backdoor_roth: bool = Field(False, alias="backdoorRoth")
     bonus: float = 0
+    # BUG-0104. `None` is NOT ZERO here and the distinction is load-bearing: None means the bonus
+    # has not been paid yet, so the expected figure still drives AGI/MAGI; an explicit 0 means it
+    # was cancelled, and the Roth cap correctly returns. A `float = 0` default would erase that.
+    bonus_actual: float | None = Field(None, alias="bonusActual")
     after_tax_401k: float = Field(0, alias="afterTax401k")
     # §415(c) annual-additions limit
     employer_401k_match: float = Field(0, alias="employer401kMatch")
@@ -1333,6 +1337,7 @@ def calculate_endpoint(inp: InputModel) -> dict:
         roth_ira_phase_out=_fs(inp.roth_ira_phase_out, 'roth_ira_phase_out'),
         backdoor_roth=inp.backdoor_roth,
         bonus=inp.bonus,
+        bonus_actual=inp.bonus_actual,
         after_tax_401k=inp.after_tax_401k,
         employer_401k_match=inp.employer_401k_match,
         sec415c_limit=inp.sec415c_limit,
