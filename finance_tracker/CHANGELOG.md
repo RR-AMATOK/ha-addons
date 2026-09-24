@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.7
+
+**Fixed: your budget stopped syncing between devices — and one device could overwrite the other**
+
+This is the important one, and it was losing work.
+
+When a device fell behind, it was stopped by a dialog asking whether you wanted to download a
+safety copy before "moving to server-backed storage" — a move that device had made long ago. Until
+somebody answered it, **that device neither received changes nor sent its own**. Two of the
+dialog's three answers then abandoned the update entirely, including the recommended one whenever
+the download did not start, which is what happens inside the Home Assistant app. So clicking it did
+not help.
+
+What followed is how the work was lost: the device showed a budget missing whatever you had added
+elsewhere, you re-added it by hand, and that made this device the one with unsaved changes — which
+the app always sends rather than replacing. Your older copy won, and the other device's line was
+gone.
+
+A device that is simply out of date now just catches up, with nothing to answer. The safety-copy
+offer still appears where it belongs: the first time a device moves your plan to the server.
+
+**Sinking funds kept working throughout** because they are stored differently — which is exactly
+why the budget looked like the broken part when it never was.
+
+**Fixed: the Actuals account went back to the top of the list on every refresh**
+
+It now remembers the account you last logged from. And when there is nothing to remember it picks
+a spending account rather than whichever name happens to sort first — which for most people was a
+credit card.
+
+**Clearer: adding an account on the Invest tab**
+
+"Add an account, or include one from your Actuals" was one heading over two opposite actions. They
+are now named separately — creating an account this app has never seen, or including one you
+already track — and each says what actually happens. Including an account creates nothing; it just
+starts counting toward your net worth.
+
 ## 0.9.6
 
 **Fixed: your bonus was missing from AGI and MAGI**

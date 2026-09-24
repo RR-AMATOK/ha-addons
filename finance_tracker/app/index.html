@@ -2090,6 +2090,10 @@
      behind as a stray line above "What's taken out". */
   .card .subhead ~ .subhead { border-top:1px solid var(--line-faint); padding-top:10px; margin-top:14px; }
   .card .subhead[hidden] { display:none !important; }
+  /* Never a rule directly under a rule. An <hr> already separates, so a .subhead following one
+     must not add its own line 10px below it — two stacked hairlines read as a rendering fault,
+     which is exactly what the section rule above accidentally produced in the Invest panel. */
+  .card hr + .subhead { border-top:0; padding-top:0; }
   /* A section header that discloses. Same ▾/▸ vocabulary as the budget bucket's collapse so the
      two read as one gesture; a <button> rather than the div itself, because the whole header is
      the target and a div cannot be tabbed to or activated with a key. Inherits the subhead's type
@@ -3730,8 +3734,16 @@
        (.ac-field/.ac-lbl composer) inside a single <details>, rather than two differently-shaped
        strips. `.body`, not bare children: `details .body { padding: 12px 16px 14px }` is what
        gives every other lid in the app its inset. -->
-  <details id="iv_include_wrap" class="iv-foot"><summary>Add an account, or include one from your Actuals</summary>
+  <!-- TODO-289. The owner: "the ADD AN ACCOUNT, OR INCLUDE ONE FROM YOUR ACTUALS, should be more
+       clear into adding a new account or adding an existing one."
+       Two OPPOSITE actions lived here under one comma-joined summary: one invents an account, the
+       other adopts one you already track. The only place the difference was stated was the button
+       at the end of each row — the last thing you read. The <hr> below shows the author already
+       felt the seam; this names both sides of it, with the app's own `.subhead` idiom. -->
+  <details id="iv_include_wrap" class="iv-foot"><summary>Add an account &mdash; a new one, or one you already track</summary>
     <div class="body">
+      <div class="subhead" id="iv_new_head">Create a new account</div>
+      <p class="mini muted" style="margin:-2px 0 8px">Something this app does not know about yet &mdash; an old employer&rsquo;s 401(k), a brokerage you have never logged against.</p>
       <div class="ac-row">
         <label class="ac-field" style="flex:2 1 220px"><span class="ac-lbl">Account name</span><input id="iv_acct_name" type="text" placeholder="e.g. Rollover IRA (Acme)"></label>
         <label class="ac-field"><span class="ac-lbl">Type</span><select id="iv_acct_type"><option value="retirement">Retirement (401k/IRA)</option><option value="savings">Savings</option><option value="brokerage">Brokerage</option><option value="hsa">HSA</option><option value="other">Other</option></select></label>
@@ -3740,12 +3752,13 @@
         <label class="ac-field" style="flex:0 1 150px"><span class="ac-lbl">Balance today</span><span class="input-pair"><input id="iv_acct_bal" type="text" inputmode="decimal" data-fmt="usd" placeholder="0"><span class="unit">$</span></span></label>
         <button class="primary" id="iv_acct_add" type="button">Add account</button>
       </div>
-      <hr class="iv-foot-sep">
+      <div class="subhead" id="iv_existing_head">Or include one you already track</div>
+      <p class="mini muted" style="margin:-2px 0 8px">An account already in your Actuals. Nothing is created &mdash; it just starts counting toward your net worth and projection.</p>
       <div class="ac-row">
         <label class="ac-field" style="flex:2 1 260px"><span class="ac-lbl">Account already in your Actuals</span><select id="iv_acct_existing"></select></label>
         <label class="ac-field"><span class="ac-lbl">Add it to group</span><select id="iv_acct_exgroup"></select></label>
         <label class="ac-field" id="iv_acct_exgroup_new_wrap" style="display:none"><span class="ac-lbl">New group name</span><input id="iv_acct_exgroup_new" type="text"></label>
-        <button id="iv_acct_exadd" type="button">Include</button>
+        <button id="iv_acct_exadd" type="button">Include it</button>
       </div>
       <div class="mini muted" style="margin-top:4px">Only accounts you include here appear in this registry and the projection — your day-to-day Actuals accounts stay out until you opt them in.</div>
     </div>
@@ -8447,10 +8460,31 @@ async function runProfileSyncEngineImpl() {
   }
   if (L === S) return;                                  // S1 — NO-OP, in sync
   if (L < S) {                                           // S2 — another device advanced; safe to hydrate
-    const ok = await runPreMigrationSnapshot();
-    if (WhatIf.active || WhatIf.suppress) { __wiAbortSync(); return; }
-    if (!ok) { window.__profileMigrationPending = true; return; }
-    if (await doHydrate(server, scopeId)) await repaintAfterHydrate();   // Fix A: repaint in place
+    // BUG-0106. THE SNAPSHOT OFFER USED TO GATE THIS, AND IT COST THE OWNER A BUDGET LINE.
+    //
+    // `runPreMigrationSnapshot()` opens a modal and AWAITS it, so a device that had merely fallen
+    // behind stopped syncing until somebody answered a dialog about "moving to server-backed
+    // storage" — a migration that, for this device, happened long ago. Worse, two of the dialog's
+    // three answers return false, and `if (!ok) return` skipped the hydrate entirely:
+    //   · Cancel, and
+    //   · "Download a backup file first (recommended)" WHEN THE DOWNLOAD DOES NOT TRIGGER — which
+    //     is the normal case inside the Home Assistant companion webview, where downloads are
+    //     blocked. The recommended button therefore failed every time, permanently.
+    // The owner's report: *"clicking it did not unstick it, I was missing the budget line, had to
+    // re-add it, and re-sort it."* Re-adding it made local DIRTY, and D1/D2/D3 flush dirty local
+    // without ever hydrating — so the stale copy was pushed over the newer one and the other
+    // device's line was gone.
+    //
+    // THE OFFER DOES NOT BELONG ON THIS PATH. Its purpose is to take a safety copy before local
+    // data is pushed or replaced by something unrelated — M1/M2/M3 (first migration) and X1 (the
+    // ambiguous no-meta case). Reaching HERE means local is `present-clean` at a LOWER version of
+    // the SAME lineage: a strictly older copy of what the server already holds. There is nothing
+    // here to protect that the server's own one-level `prev_blob` does not already cover.
+    //
+    // The two branches immediately above prove the point — `missingClean` (local is missing keys
+    // the server has) and H1 (local empty) both hydrate with NO snapshot, and both overwrite more
+    // than this one does. S2 was the least destructive of the three and the only one gated.
+    if (await doHydrate(server, scopeId)) await repaintAfterHydrate();
     return;
   }
   // L > S — S3: anomaly (server rolled back/restored older). REFUSE to hydrate → FLUSH, re-assert local.
@@ -18828,7 +18862,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const memo = ($('ac_tx_memo') && $('ac_tx_memo').value || '').trim() || null;
     try {
       await post('/api/tracking/transactions', { accountId: +acct, postedOn: $('ac_tx_date').value || acToday(), direction: 'out', amount: ACT.splitTotal, category: ($('ac_tx_cat').value || '').trim() || null, description: memo, tags: ACT.tagState.slice(), splits: legs });
-      ACT.sticky.acct = acct;
+      ACT.sticky.acct = acct; acWriteLastAcct(acct);
       $('ac_tx_amt').value = ''; $('ac_tx_cat').value = ''; if ($('ac_tx_memo')) $('ac_tx_memo').value = ''; ACT.tagState = []; acRenderTagChips();
       $('ac_split').style.display = 'none';
       showToast('Split saved · ' + acAmt(ACT.splitTotal) + ' across ' + legs.length + ' buckets');
@@ -18949,11 +18983,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (limitWrap) limitWrap.style.display = (type === 'credit') ? '' : 'none';
   }
 
+  // BUG-0105. The composer's account was remembered only IN MEMORY, so every refresh dropped it
+  // and the select fell back to the first <option>. Accounts come back `ORDER BY name`, so "first"
+  // means first ALPHABETICALLY — for this owner, a credit card. Logging a debit from checking
+  // meant re-picking the account every single time the page reloaded.
+  //
+  // A per-DEVICE convenience, so localStorage rather than the synced profile: which account this
+  // browser last logged from says nothing another device needs to know, and syncing it would let
+  // a phone's choice silently move a laptop's default. Same reasoning, and the same key shape, as
+  // the scheduled-list collapse preference.
+  const AC_LAST_ACCT_KEY = 'itc.ac.lastAcct.v1';
+  function acReadLastAcct() {
+    try { return localStorage.getItem(AC_LAST_ACCT_KEY) || null; } catch (e) { return null; }
+  }
+  function acWriteLastAcct(id) {
+    try {
+      if (id == null || id === '') localStorage.removeItem(AC_LAST_ACCT_KEY);
+      else localStorage.setItem(AC_LAST_ACCT_KEY, String(id));
+    } catch (e) {}
+  }
+
   async function acLoadAccounts() {
     try { ACT.accounts = (await getJSON('/api/tracking/accounts')).accounts || []; } catch (e) { ACT.accounts = []; }
     const opts = ACT.accounts.map(a => '<option value="' + a.id + '">' + esc(a.name) + '</option>').join('');
     ['ac_tx_acct', 'ac_snap_acct'].forEach(id => { const s = $(id); if (s) { const cur = s.value; s.innerHTML = opts || '<option value="">— add an account —</option>'; if (cur) s.value = cur; } });
-    if (ACT.sticky.acct && $('ac_tx_acct')) $('ac_tx_acct').value = ACT.sticky.acct;
+    // BUG-0105. In-session memory first, then this device's last-used account from a previous
+    // visit, and only then a default. The default is `acDefaultAccountId()` — which already
+    // refuses to land on a credit card — rather than whichever account happens to sort first.
+    if (ACT.sticky.acct == null) {
+      const last = acReadLastAcct();
+      // Only if it still exists: an account can be deleted or archived between visits, and
+      // selecting a value with no matching <option> silently leaves the select on item one.
+      if (last != null && ACT.accounts.some(a => String(a.id) === String(last))) ACT.sticky.acct = last;
+    }
+    const sel = $('ac_tx_acct');
+    if (sel) {
+      const want = ACT.sticky.acct != null ? ACT.sticky.acct : acDefaultAccountId();
+      if (want != null && ACT.accounts.some(a => String(a.id) === String(want))) sel.value = String(want);
+    }
     acRenderAcctList();     // draw immediately from whatever ACT.balances already has (may be empty/stale)
     acLoadBalances();       // then refresh the flow-aware readout and redraw
   }
@@ -19450,7 +19517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const txKind = (ACT.dir === 'out' && ACT.isRefund) ? 'refund' : 'charge';
     try {
       await post('/api/tracking/transactions', { accountId: +acct, postedOn: $('ac_tx_date').value || acToday(), direction: ACT.dir, amount: amt, bucket: bucket, category: ($('ac_tx_cat').value || '').trim() || null, description: memo, tags: ACT.tagState.slice(), partnerOwed: partnerOwed, kind: txKind });
-      ACT.sticky.bucket = $('ac_tx_bucket').value; ACT.sticky.acct = acct;
+      ACT.sticky.bucket = $('ac_tx_bucket').value; ACT.sticky.acct = acct; acWriteLastAcct(acct);
       $('ac_tx_amt').value = ''; $('ac_tx_cat').value = ''; if ($('ac_tx_memo')) $('ac_tx_memo').value = '';
       acPartnerCollapse();                          // reset the split toggle back to off after each add
       // Reset refund toggle after each successful add
