@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.9.9
+
+**New: archive a budget line instead of deleting it**
+
+A budget line you stop paying had only one exit — **Remove this line** — and it took everything
+with it: the amount, the sales-tax setting, your share of a split, and no way back. It also
+quietly rewrote your past. Because every month's plan-vs-actual reads your *current* budget,
+deleting a line meant last August's spending on it suddenly had no plan to compare against and
+dropped into **Unplanned**, as though you had never budgeted for it at all.
+
+The row's ⋮ menu now offers **Archive this line**. An archived line:
+
+- leaves your budget and every total, so what you plan to spend is what you actually plan to spend
+- **stays in every month before you archived it** — last August still shows the line, still counts
+  your spending against it, and still keeps those transactions out of Unplanned
+- sits in an **Archived lines** list at the bottom of the Budget tab, showing which bucket it came
+  from, what it was, and when you retired it — with **Restore** to put it back exactly as it was
+
+If the line was set up as a recurring bill, archiving stops the bill, because a line you have
+retired should not keep arriving in your ledger. A rule you shaped by hand — twice-monthly, a
+weekend shift, an end date — is named before it goes, and saying no there cancels the whole thing
+rather than leaving a line out of your budget that is still taking money from your account.
+Restoring a line does **not** switch the bill back on; that is yours to decide.
+
+**Remove this line** is still there, now called **Remove permanently**, and still does exactly
+what it says.
+
+Shared household lines cannot be archived yet — those are agreed with someone else, so retiring
+one is a conversation, not a click.
+
+## 0.9.8
+
+**Fixed: money you had logged was missing from your account balance**
+
+A paycheque logged as *pending* — money that has landed in your records but has not cleared the
+bank yet — was left out of the balance on **Setup ▸ Accounts**, and nothing on the row said so.
+The balance simply read low. From the outside that is indistinguishable from the app having lost
+the transaction.
+
+Pending money genuinely should not be counted as cash you hold, so the balance itself has not
+changed. What changed is that the app now **shows you what it is holding back**: the row reads
+`$1,722  +$710 pending`, so the number and the reason for it are in the same place. Accounts with
+nothing pending look exactly as before.
+
+**Fixed: the date beside a balance described the wrong thing**
+
+A balance read "(as of 09-14)" when it already included everything you had logged since — so the
+app was telling you the number was older than it was, on the very screen you would check to find
+out. It now reads "(last set 09-14)", which is what that date has always meant: the day you last
+confirmed the balance against your bank.
+
+**Fixed: some spending could not be moved out of Unplanned**
+
+If a category was being counted as another name — a spelling alias, like *Miscellaneous* counted
+as *Other* — and no budget line had that other name, the charge sat in Unplanned and **would not
+leave**. Choosing a budget line for it appeared to work and changed nothing, with no error.
+
+Picking a line now works for these too. The row also tells you when an alias is what put it
+there, since that case looked identical to "no budget line exists yet" while needing a different
+fix. And assigning spending back to a line of its own name clears the alias instead of leaving a
+pointless one behind.
+
 ## 0.9.7
 
 **Fixed: your budget stopped syncing between devices — and one device could overwrite the other**

@@ -691,6 +691,10 @@
   .mng-flag   { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
                 border-radius: 999px; background: var(--chip); color: var(--muted);
                 font-size: var(--fs-2xs); white-space: nowrap; }
+  /* BUG-0108 -- pending money sits beside the balance, not inside it. It reads as information
+     rather than alarm (it is not an error), so it borrows the warn HUE at chip weight instead
+     of the full warn treatment. */
+  .mng-pend   { background: var(--warn-tint); color: var(--warn-text); }
   /* Setup ▸ Categories — the five zones become real COLUMNS instead of inline flow.
      `.mng-main` is a flex row, so every zone was sized by ITS OWN row's content: the built-in
      chip and the counts-toward select started at a different x on every line (measured on the
@@ -1013,6 +1017,33 @@
   .pcat-upname  { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pcat-upamt   { color:var(--muted); font-variant-numeric:tabular-nums; }
   .pcat-countsel{ max-width:180px; }
+  /* BUG-0107 — the "why is this row here" note is PROSE, not a control. Left as an ordinary flex
+     item it competes with .pcat-upname (flex:1 1 auto) for width, and a long sentence ellipsises
+     the very category name the sentence is about. It takes the whole next line instead. */
+  .pcat-upvia   { flex:0 0 100%; }
+
+  /* TODO-291 — the archived-lines section. Deliberately QUIETER than a bucket: it is a reference
+     list, not a working surface, and it sits below every bucket so it never competes with the
+     budget you are actually editing. */
+  .bgb-arch          { margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  .bgb-arch > summary{ cursor:pointer; }
+  .bgb-arch-note     { margin:6px 0 8px; max-width:62ch; }
+  .bgb-arch-list     { display:flex; flex-direction:column; gap:2px; }
+  .bgb-arch-row      { display:grid; grid-template-columns:minmax(0,1fr) auto auto auto auto;
+                       align-items:center; gap:10px; padding:4px 2px; }
+  .bgb-arch-name     { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bgb-arch-amt      { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .bgb-arch-restore  { background:transparent; color:var(--good); border:1px solid var(--line);
+                       border-radius:999px; padding:2px 9px; cursor:pointer; font-size:var(--fs-xs); }
+  .bgb-arch-restore:hover { border-color:var(--good); }
+  /* Five columns of small text is a wall on a phone. The row folds to name + amount on one line,
+     with the provenance and the control below it. */
+  @media (max-width:560px) {
+    .bgb-arch-row    { grid-template-columns:minmax(0,1fr) auto; }
+    .bgb-arch-where,
+    .bgb-arch-when   { grid-column:1; }
+    .bgb-arch-restore{ grid-column:2; justify-self:end; }
+  }
   .bgb-alias-accept       { background:transparent; color:var(--good); border:1px solid var(--line); border-radius:999px; padding:2px 9px; cursor:pointer; font-size:var(--fs-xs); }
   .bgb-alias-accept:hover { border-color:var(--good); }
   /* Scenario planner (TODO-219): what-if comp + catch-up ledger, Budget tab */
@@ -12618,6 +12649,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     bgbIidSeq += 1;
     return 'i' + Date.now().toString(36) + bgbIidSeq.toString(36) + Math.random().toString(36).slice(2, 6);
   }
+  // TODO-291 — ARCHIVING A BUDGET LINE. "Remove this line" splices the item out of the array and
+  // it is gone: name, amount, sales-tax tick, split, iid, and every past month's plan for it. The
+  // owner asked to keep that history, and the honest reading is not just "let me restore it" but
+  // "August should still show what I was planning in August".
+  //
+  // The flag lives ON the item, in the profile blob — so archiving needs NO migration and cannot
+  // collide with the batched account/schedule one. The item also stays exactly where it is in its
+  // bucket/group array, which is what makes restoring free: the iid, the position and the group
+  // membership were never disturbed.
+  //
+  // `archivedOn` is a MONTH, not a timestamp, because the question it answers is per-month: "was
+  // this line part of the plan in August?". Stored as the month it was archived; the line counts
+  // for every month STRICTLY BEFORE it. Archive in September and September is already without it
+  // — you decided during September that you are not paying it.
+  function bgbIsArchived(it) { return !!(it && it.archived); }
+  function bgbArchivedOn(it) { return (it && it.archivedOn) || ''; }
+  // THE RULE, in one place: an archived line still counts toward `month` when it was archived in a
+  // STRICTLY LATER month. Archive in September and September is already without it — September is
+  // when you decided you were not paying it.
+  //
+  // One definition because there are two callers (the per-line lens and the bucket lock) that must
+  // agree: the plan-vs-actual screen draws one on top of the other, and two inline copies of a
+  // comparison are exactly what drift apart (LESSON 32). String compare is correct and deliberate
+  // — ISO months sort lexically, and no Date is constructed, so there is no UTC-vs-local month to
+  // get wrong (BUG-0075's family).
+  function bgbArchivedAfter(archivedOn, month) {
+    return !!(archivedOn && month && String(month) < String(archivedOn));
+  }
+
   function bgbEnsureIid(it) {
     if (it && typeof it === 'object' && !it.iid) it.iid = bgbNewIid();
     return it;
@@ -14609,6 +14669,110 @@ document.addEventListener('DOMContentLoaded', async () => {
     return '<select class="bgb-ipreset" data-b="' + bi + '" data-g="' + g + '" data-i="' + ii + '">' + opts + '</select>';
   }
 
+  // TODO-291 — archive a line, and stop it being a bill, as ONE decision.
+  //
+  // A retired line must not keep arriving in your ledger. Deleting the schedule is exactly what
+  // unticking "Recurring bill" does — but an archive is a bigger gesture than an untick, so a rule
+  // somebody shaped by hand (twice-monthly, a weekend shift, an end date) is NAMED before it goes,
+  // mirroring the untick path's own wording. Saying no there cancels the archive too, so the line
+  // and its bill can never end up disagreeing about whether you are still paying it.
+  async function bgbArchiveWithBill(it, bucketIdx) {
+    if (!it) return;
+    const sc = bgbScheduleFor({ it: it });
+    if (sc && !bgbScheduleIsSimple(sc)) {
+      const ok = confirm('Archive “' + (it.name || 'this line') + '” and stop its bill?\n\n'
+        + schCadenceText(sc) + '\n\nThat rule is deleted. Transactions already logged stay in '
+        + 'your ledger, and every month before this one still counts the line.');
+      if (!ok) return;
+    }
+    if (sc) {
+      // The bill goes FIRST. If the server refuses, nothing has been archived yet and the budget
+      // is exactly as it was — rather than a line quietly out of the plan and still billing.
+      try {
+        await del('/api/tracking/schedules/' + sc.id);
+        if (window.__recurringSetup) await window.__recurringSetup.ensure();
+      } catch (er) {
+        showToast('Could not stop that bill — ' + (errDetail(er) || 'the server refused it')
+          + '. The line was left in your budget.');
+        return;
+      }
+    }
+    it.archived = true;
+    // TODAY'S month, deliberately — NOT `ACT.month`.
+    //
+    // The first version read `ACT.month` on the theory that you archive "as of the month you are
+    // looking at". It is wrong, and a live probe caught it: this control lives on the BUDGET tab,
+    // which has no month at all, so `ACT.month` is whatever the Actuals tab was last left on —
+    // invisible from here. Archiving in September while Actuals sat on August stamped the line
+    // `2026-08`, which pushed August's own transactions into Unplanned: the exact history loss
+    // this feature exists to prevent, caused by the feature.
+    //
+    // The gesture means "I am stopping this now", and now is today. The line counts for every
+    // month strictly before it, so the current month is already without it.
+    it.archivedOn = acNowMonth();
+    saveBgb(); bgbRender();
+    showToast('“' + (it.name || 'The line') + '” archived — earlier months still count it');
+  }
+
+  // TODO-291 — every archived line, from every bucket, in one collapsed list.
+  //
+  // ONE list rather than a per-bucket section: five buckets would mean five "Archived (0)" stubs
+  // for the common case of nothing archived, and the question a reader actually has ("what did I
+  // used to budget for?") is not bucket-shaped. The bucket is shown ON each row instead.
+  //
+  // Returns '' when nothing is archived: a permanently visible "Archived lines (0)" is a control
+  // that answers a question nobody asked, on the densest surface in the app.
+  function bgbArchivedRows() {
+    const out = [];
+    (bgb.buckets || []).forEach((b, bi) => {
+      (b.items || []).forEach((it, ii) => { if (bgbIsArchived(it)) out.push({ it, bi, g: 'd', ii, bucket: b, group: null }); });
+      (b.groups || []).forEach((g, gi) => (g.items || []).forEach((it, ii) => {
+        if (bgbIsArchived(it)) out.push({ it, bi, g: gi, ii, bucket: b, group: g });
+      }));
+    });
+    // Most recently archived first — the one you just retired, and the one most likely to be
+    // restored by mistake-correction, is the one at the top.
+    return out.sort((a, c) => String(bgbArchivedOn(c.it)).localeCompare(String(bgbArchivedOn(a.it))));
+  }
+
+  function bgbArchivedSectionHtml() {
+    const rows = bgbArchivedRows();
+    if (!rows.length) return '';
+    const body = rows.map(r => {
+      const key = r.bi + '_' + r.g + '_' + r.ii;
+      const where = esc((r.bucket && (r.bucket.name || KINDS[r.bucket.kind] && KINDS[r.bucket.kind].label)) || 'budget')
+        + (r.group ? ' &rsaquo; ' + esc(r.group.name || 'group') : '');
+      const on = bgbArchivedOn(r.it);
+      // `.measure-wide` rather than a max-width of its own: this row binds a name at one end to a
+      // Restore at the other, and index.html:1507 already names the failure — past ~1060px the two
+      // ends stop reading as one control. Cap the ROW, not the card, per that rule.
+      return '<div class="bgb-arch-row measure-wide">'
+        + '<span class="bgb-arch-name">' + esc(r.it.name || 'untitled') + '</span>'
+        + '<span class="bgb-arch-where mini muted">' + where + '</span>'
+        + '<span class="bgb-arch-amt mono">' + f2(+r.it.amount || 0) + '</span>'
+        + '<span class="bgb-arch-when mini muted">' + (on ? 'archived ' + esc(bgbMonthLabel(on)) : '') + '</span>'
+        + '<button type="button" class="bgb-arch-restore" data-unarchiveitem="' + key + '"'
+        + ' title="put it back in ' + where.replace(/"/g, '&quot;') + '">Restore</button>'
+        + '</div>';
+    }).join('');
+    return '<details class="bgb-arch">'
+      + '<summary class="mini muted">Archived lines (' + rows.length + ')</summary>'
+      + '<p class="mini muted bgb-arch-note">These are out of your budget and its totals. Months '
+      + 'before they were archived still count them, so your past plan-vs-actual is unchanged.</p>'
+      + '<div class="bgb-arch-list">' + body + '</div></details>';
+  }
+
+  // "2026-09" -> "Sep 2026". Local-calendar safe: built from the parts, never `new Date(iso)`,
+  // which parses a bare YYYY-MM as UTC and can render the previous month west of Greenwich
+  // (BUG-0075's family).
+  function bgbMonthLabel(ym) {
+    const p = String(ym || '').split('-');
+    if (p.length < 2) return String(ym || '');
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const mi = +p[1] - 1;
+    return (MONTHS[mi] || p[1]) + ' ' + p[0];
+  }
+
   // `leadRows` are shared-line <tr>s that belong to this bucket. They render INSIDE this table
   // (first, so settled household obligations read before the working set -- spec §J1) rather
   // than in a separate list after it, which is the only way their columns can line up with the
@@ -14630,6 +14794,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           + bgbItemsHead(!!headVisible && !!((leadRows || '').length || (items || []).length))
           + '<tbody>' + (leadRows || '');
     items.forEach((it, ii) => {
+      // TODO-291: an archived line keeps its slot in the array (that is what makes restoring free)
+      // but leaves the table. It is listed, with a Restore, in the "Archived lines" section below
+      // the buckets — one place for all of them, rather than an "Archived (0)" stub in all five.
+      if (bgbIsArchived(it)) return;
       // Promote-from-local (§12 Slice B row): this ONE local row swaps for the promotion panel
       // when it's the active hbPromoteTarget -- same view/edit-row swap idiom as the shared
       // editor and acAcctEditRowHtml, so a promotion in progress reads as a distinct mode, not
@@ -14681,8 +14849,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         +       '<div class="bgb-rec-body" data-recbody="' + key + '" hidden></div>'
         +     '</div>'
         +     '<hr>'
+        +     '<button type="button" class="filter-opt" data-archiveitem="' + key + '"'
+        +     ' title="keep it, and keep every past month that had it">Archive this line</button>'
         +     '<button type="button" class="filter-opt" data-delitem="' + key + '"'
-        +     ' style="color:var(--bad)">Remove this line</button>'
+        +     ' style="color:var(--bad)">Remove permanently</button>'
         +   '</div>'
         + '</td>'
         + '</tr>';
@@ -14754,6 +14924,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Only when it has not been placed into a bucket. Once it has, the slot above is its home and
     // a second container here would draw it twice.
     if (!bgbTaxTabPlace()) h += '<div id="bgb_taxtab"></div>';
+    h += bgbArchivedSectionHtml();          // TODO-291 — retired lines, restorable, at the very bottom
     $('bgBuilder').innerHTML = h;
     formatUSDFields();   // comma-format the freshly-rendered item amount inputs
     // The round-up picker lists buckets, so it has to restack with them for the same reason the
@@ -14827,9 +14998,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Per-line-item plan, grouped by bucket kind, so the Actuals tab can check spend per category and
     // seed recurring bills. Items are matched to actuals by (kind + name); same-name lines merge.
     const linesByKind = {}; getCategories().forEach(c => { linesByKind[c.key] = {}; });
+    // TODO-291: archived lines ride in a SEPARATE map, never merged into `linesByKind`. Keeping
+    // them apart is what lets `window.__budgetPlan.lines` stay byte-identical to what it was —
+    // FIRE's planned savings, the category datalist, the alias picker and every bucket total go on
+    // reading exactly the active plan they always read. The month-scoped Actuals lens is the only
+    // caller that unions the two, and it does so per month.
+    //
+    // It also avoids a real collision: archive "Gym" and create a new "Gym" and both key on
+    // `gym` — merged, the archived line's amount would silently inflate the live one's plan.
+    const archivedByKind = {}; getCategories().forEach(c => { archivedByKind[c.key] = {}; });
     const addLine = (kind, it) => {
       const nm = (it.name || '').trim(); if (!nm) return;
       const k = kind || 'other', key = nm.toLowerCase();
+      if (bgbIsArchived(it)) {
+        const am = (archivedByKind[k] || (archivedByKind[k] = {}));
+        // Same-name archived lines keep the LATEST archive month, so the union below offers the
+        // line to every month either of them was live in.
+        if (!am[key]) am[key] = { name: nm, planned: 0, archivedOn: bgbArchivedOn(it) };
+        am[key].planned += myShare(it);
+        const on = bgbArchivedOn(it);
+        if (on > am[key].archivedOn) am[key].archivedOn = on;
+        return;
+      }
       const m = (linesByKind[k] || (linesByKind[k] = {}));
       if (!m[key]) m[key] = { name: nm, planned: 0 };
       m[key].planned += myShare(it);
@@ -14840,10 +15030,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const hbAsg = hbAssignShared(bgb.buckets, hb.lines);
     bgb.buckets.forEach((b, bi) => {
       let btotal = 0;
-      b.items.forEach((it, ii) => { household += itemTotal(it); btotal += myShare(it); addLine(b.kind, it); setCell(it, '.bgb-itotal[data-b="' + bi + '"][data-g="d"][data-i="' + ii + '"]'); });
+      // TODO-291: `addLine` is called for archived items too (it routes them to archivedByKind),
+      // but NO money is added — an archived line is not part of what you plan to spend.
+      b.items.forEach((it, ii) => { if (!bgbIsArchived(it)) { household += itemTotal(it); btotal += myShare(it); } addLine(b.kind, it); setCell(it, '.bgb-itotal[data-b="' + bi + '"][data-g="d"][data-i="' + ii + '"]'); });
       b.groups.forEach((g, gi) => {
         let gt = 0;
-        g.items.forEach((it, ii) => { household += itemTotal(it); gt += myShare(it); addLine(b.kind, it); setCell(it, '.bgb-itotal[data-b="' + bi + '"][data-g="' + gi + '"][data-i="' + ii + '"]'); });
+        g.items.forEach((it, ii) => { if (!bgbIsArchived(it)) { household += itemTotal(it); gt += myShare(it); } addLine(b.kind, it); setCell(it, '.bgb-itotal[data-b="' + bi + '"][data-g="' + gi + '"][data-i="' + ii + '"]'); });
         btotal += gt;
         // The group's own SHARED lines (§5.1), for the subtotal only. Without this a group whose
         // every line is shared reported $0.00 while listing six lines adding to $882.70 above it,
@@ -14972,12 +15164,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Expose the derived monthly plan baseline so the Actuals tab can lock it for plan-vs-actual.
       const planLines = {};
       Object.keys(linesByKind).forEach(k => { planLines[k] = Object.values(linesByKind[k]).map(o => ({ name: o.name, planned: Math.round(o.planned * 100) / 100 })); });
+      // TODO-291: ADDITIVE sibling, never folded into `lines` (DEC-009 #1's discipline). Carries
+      // `archivedOn` so a reader can answer "was this in the plan that month" without the blob.
+      const planArchived = {};
+      Object.keys(archivedByKind).forEach(k => { planArchived[k] = Object.values(archivedByKind[k]).map(o => ({ name: o.name, planned: Math.round(o.planned * 100) / 100, archivedOn: o.archivedOn })); });
       // taxInvestMonthly rides SEPARATELY from kindMonthly: kindMonthly must stay raw budget-line
       // totals (the Actuals PVA baseline reads it, and payroll contributions never appear as
       // logged transactions), while FIRE's planned-savings needs budget lines + the tax-tab
       // rollup. 2026-07-26 fix: FIRE was reading kindMonthly.investment alone and undercounting
       // annual savings by the entire 401k/HSA/Roth rollup.
-      window.__budgetPlan = { kindMonthly: { ...kindT }, taxInvestMonthly: taxInvest, lines: planLines, aliases: bgb.catAliases || {}, incomeBase: incomeBase, savingsTarget: _invTgt, strategy: bgb.strategy,
+      window.__budgetPlan = { kindMonthly: { ...kindT }, taxInvestMonthly: taxInvest, lines: planLines, archivedLines: planArchived, aliases: bgb.catAliases || {}, incomeBase: incomeBase, savingsTarget: _invTgt, strategy: bgb.strategy,
         partnerSplits: { household: Math.round(household * 100) / 100, yourShare: Math.round(allocated * 100) / 100, partner: Math.round(Math.max(0, partner) * 100) / 100 } };
       bgbRenderAliasGroups(); bgbFillAliasTargets();
       // Grades the MONTH, not the person. This line used to read "Investing 29% of after-tax
@@ -15454,6 +15650,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       if (d.add != null) { p = d.add.split('_'); itemsArr(p[0], p[1]).push({ name: 'New item', amount: 0, taxable: false }); saveBgb(); bgbRender(); }
       else if (d.delitem != null) { p = d.delitem.split('_'); itemsArr(p[0], p[1]).splice(+p[2], 1); saveBgb(); bgbRender(); }
+      // TODO-291 — ARCHIVE. Async because a line that is a bill has to stop BEING a bill, and that
+      // is a server round-trip. Everything else here is synchronous blob-editing.
+      else if (d.archiveitem != null) {
+        e.preventDefault();
+        bgbCloseRowMenus(null);
+        if (acWriteGuard()) return;          // never archive from inside a What-If (DEC-007)
+        p = d.archiveitem.split('_');
+        const arr = itemsArr(p[0], p[1]), it = arr && arr[+p[2]];
+        if (!it) return;
+        // THE BILL IS DECIDED FIRST, and this ordering is the point. Archiving and then asking
+        // about the bill means a cancelled prompt leaves a line that is out of your budget and
+        // still taking money out of your account every month — the two halves disagreeing, which
+        // is worse than either outcome. Cancel here cancels the whole gesture.
+        bgbArchiveWithBill(it, p[0]).catch(() => {});
+      }
+      else if (d.unarchiveitem != null) {
+        e.preventDefault();
+        if (acWriteGuard()) return;
+        p = d.unarchiveitem.split('_');
+        const arr = itemsArr(p[0], p[1]), it = arr && arr[+p[2]];
+        if (!it) return;
+        delete it.archived; delete it.archivedOn;
+        // The bill is NOT recreated. Restoring puts the line back in your plan; whether it is also
+        // a bill again is a separate decision, and silently re-creating a schedule would start
+        // posting money against a line you have only just un-retired.
+        saveBgb(); bgbRender();
+        showToast('“' + (it.name || 'The line') + '” is back in your budget');
+      }
       else if (d.delg != null) { p = d.delg.split('_'); bgb.buckets[+p[0]].groups.splice(+p[1], 1); saveBgb(); bgbRender(); }
       else if (d.addg != null) { bgb.buckets[+d.addg].groups.push({ name: 'New group', items: [] }); saveBgb(); bgbRender(); }
       else if (d.delb != null) { bgb.buckets.splice(+d.delb, 1); saveBgb(); bgbRender(); }
@@ -18541,6 +18765,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     return (bp && bp.lines && bp.lines[kind]) || [];
   }
 
+  // TODO-291 — the plan AS IT STOOD IN `month`: the live lines plus any archived line that was
+  // still live then. This is the whole point of archiving rather than deleting, and it is a
+  // SEPARATE function from `acBudgetLines` on purpose.
+  //
+  // Only the plan-vs-actual lens calls it. The three other readers of `acBudgetLines` must keep
+  // seeing the ACTIVE plan and would be wrong with this one: the alias picker and the alias
+  // suggester would offer to point a category at a line you have retired, and the logging
+  // datalist would suggest spending on it again. Retiring a line should not make it easier to
+  // start using it.
+  //
+  // Defaults to the month Actuals is showing, which is exactly the month every caller means.
+  function acBudgetLinesAsOf(kind, month) {
+    const live = acBudgetLines(kind);
+    const bp = acPlan();
+    const arch = (bp && bp.archivedLines && bp.archivedLines[kind]) || [];
+    if (!arch.length) return live;
+    const m = month || ACT.month || acNowMonth();
+    const keep = arch.filter(o => bgbArchivedAfter(o.archivedOn, m));
+    if (!keep.length) return live;
+    // A live line of the same name wins — it is the one you are budgeting now, and showing both
+    // would put two rows with one name in the same bucket.
+    const seen = new Set(live.map(o => (o.name || '').toLowerCase()));
+    return live.concat(keep.filter(o => !seen.has((o.name || '').toLowerCase())));
+  }
+
   // Category datalist: the current bucket's budget lines first, then every OTHER bucket's budget lines
   // (so you can pick any category — and the bucket follows), then past-transaction memory.
   function acFillCatList() {
@@ -19165,6 +19414,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   // (a signed `account-balances.balance` for a liability is a POSITIVE owed amount, shape-
   // identical to an asset's balance without this qualifier).
   const acDateShort = iso => (iso || '').slice(5);   // 'YYYY-MM-DD' -> 'MM-DD', matches the card-payments list idiom
+  // BUG-0108. `/account-balances` has ALWAYS returned `pendingDelta` -- the settled/pending
+  // split that mirrors card_rollup_running (tracking.py §3) -- and nothing in this file has
+  // ever rendered it. So a logged-but-not-yet-cleared paycheck was money the ledger knew
+  // about and this row silently withheld: $710.00 into Savings - Joint read here as a balance
+  // that simply had not moved, with no mark anywhere saying why, on the one screen a reader
+  // opens to ask "is my money all here".
+  //
+  // It is deliberately NOT folded into `balance`, on both sides of the wire: pending means the
+  // money has not cleared, so adding it in would overstate the cash actually in the account.
+  // Showing it BESIDE the balance is the fix; burying it inside would be a second bug.
+  //
+  // `pendingDelta` arrives nw-signed and is NOT display-flipped by the server (only
+  // `lastReconcileDelta` is, see its comment in tracking.py), so a liability's pending charge
+  // -- nw-negative -- must be flipped here to read as "more owed".
+  function acPendingChipHtml(a, ab) {
+    if (!ab || ab.pendingDelta == null) return '';
+    const d = (a.isLiability ? -1 : 1) * ab.pendingDelta;
+    if (Math.abs(d) < 0.005) return '';          // nothing pending -- say nothing, per the 0%-utilization rule above
+    // The SIGN already carries the direction, so the word only has to disambiguate the one case
+    // the sign cannot: on a liability a negative delta is a PAYMENT landing, which is good news,
+    // and reading "\u2212$60 pending" beside "$400 owed" without that word invites the opposite.
+    const more = d > 0;
+    const word = (a.isLiability && !more) ? 'pending payment' : 'pending';
+    return ' <span class="mng-flag mng-pend">' + (more ? '+' : '\u2212') + fmt$(Math.abs(d)) + ' ' + word
+      + '</span>';
+  }
   function acAcctMetaHtml(a) {
     const forced = acLiabForceFor(a.type);
     const wrongSign = forced !== null && a.isLiability !== forced;
@@ -19215,7 +19490,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       const ab = ACT.balances[a.id];
       const asOf = ACT.latestSnap[a.id];
       if (ab && ab.balance != null) balanceHtml = fmt$(ab.balance) + (a.isLiability ? ' owed' : '')
-        + (asOf ? ' (as of ' + acDateShort(asOf) + ')' : '')
+        + acPendingChipHtml(a, ab)
+        // BUG-0109, found reading BUG-0108: this said "(as of <snapshot date>)", which is a
+        // date the number is NOT as of. `balance` is the snapshot PLUS every settled flow
+        // through today -- Checking - Capital One read "$3,223 (as of Sep 14)" while already
+        // including a Sep 15 paycheck. The caption named the staler of the two dates, which is
+        // exactly the caption that makes a reader think recent activity has not been counted.
+        // The snapshot date is still worth printing -- it answers "when did I last confirm this
+        // against the bank" -- so it stays, now saying what it actually dates.
+        + (asOf ? ' (last set ' + acDateShort(asOf) + ')' : '')
         // A balance you cannot correct is a balance you stop trusting. The pencil edits
         // type/liability/credit-limit only, and the "start tracking" link below appears solely
         // when there is NO balance — so an account that had one was a dead end.
@@ -19608,6 +19891,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { if (out) out.innerHTML = '<span class="bad-text">Import failed (check the header row)</span>'; }
   }
 
+  // TODO-291 — per-bucket planned totals AS OF `month`: the live plan plus any archived line that
+  // was still live then. The per-line lens (acBudgetLinesAsOf) and this must agree, because the
+  // plan-vs-actual screen shows one on top of the other.
+  function acKindMonthlyAsOf(month) {
+    const bp = acPlan() || {};
+    const out = { ...(bp.kindMonthly || {}) };
+    const arch = bp.archivedLines || {};
+    const m = month || ACT.month || acNowMonth();
+    Object.keys(arch).forEach(k => {
+      (arch[k] || []).forEach(o => {
+        if (bgbArchivedAfter(o.archivedOn, m)) out[k] = (out[k] || 0) + (+o.planned || 0);
+      });
+    });
+    return out;
+  }
+
   async function acSyncPlan() {
     if (acWriteGuard()) return;   // the DEC-007 plan-lock vector — never lock a hypothetical plan
     if (!window.__budgetPlan && typeof bgbTotals === 'function') { try { if (typeof bgbBaseAutoFill === 'function') bgbBaseAutoFill(); bgbTotals(); } catch (e) {} }
@@ -19617,7 +19916,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nf = window.__nwForecast || { yearByYear: [], anchorValue: 0 };
     try {
       await post('/api/tracking/plan/' + ACT.month + '/lock', {
-        bucketPlanned: bp.kindMonthly, incomePlanned: bp.incomeBase, savingsRatePlanned: bp.savingsTarget,
+        // TODO-291: the buckets AS OF the month being locked. `bp.kindMonthly` is the ACTIVE plan,
+        // so locking a past month after archiving a line would freeze a bucket total that excludes
+        // it — while the per-line rows below (acBudgetLinesAsOf) correctly still show it. The bar
+        // and the lines under it would then disagree, on the one screen built to compare them.
+        bucketPlanned: acKindMonthlyAsOf(ACT.month), incomePlanned: bp.incomeBase, savingsRatePlanned: bp.savingsTarget,
         forecastCone: nf.yearByYear, anchorDate: ACT.month + '-01', anchorValue: nf.anchorValue,
         status: (ACT.month >= acNowMonth() ? 'draft' : 'locked'),
       });
@@ -19694,11 +19997,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // leg amount (splits can't be refunds, so this ratio math never needs a sign of its own).
   function acActualByCat(kind) {
     const map = {};
-    const add = (name, share, pOwed) => {
+    // BUG-0107. `raws` is the set of categories AS TYPED that fed this canonical row. Without it
+    // the unplanned fixer could only ever write an alias for the canonical name — which is the one
+    // name that is NOT on any transaction whenever an alias is what made the row unplanned. The
+    // owner's case exactly: a "Miscellaneous" charge aliased to "Other", no budget line called
+    // "Other", and every click on the fixer wrote `other → …` while the charge stayed
+    // `Miscellaneous`. The control could not fix the state it was looking at.
+    const add = (name, share, pOwed, raw) => {
       const nm = (name || '').trim() || '(uncategorized)', k = nm.toLowerCase();
-      if (!map[k]) map[k] = { name: nm, actual: 0, partner: 0 };
+      if (!map[k]) map[k] = { name: nm, actual: 0, partner: 0, raws: [] };
       map[k].actual += share;
       map[k].partner += pOwed;
+      const r = (raw || '').trim();
+      if (r && map[k].raws.indexOf(r) === -1) map[k].raws.push(r);
     };
     (ACT.txns || []).forEach(t => {
       if (t.direction !== 'out') return;
@@ -19708,11 +20019,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (leg.bucket === kind) {
             const legAmt = acSignedLegAmount(t, leg);
             const legPartner = t.amount > 0 ? pOwed * leg.amount / t.amount : 0;
-            add(acCanonCat(leg.category || t.category), legAmt - legPartner, legPartner);
+            add(acCanonCat(leg.category || t.category), legAmt - legPartner, legPartner, leg.category || t.category);
           }
         });
       } else if (t.bucket === kind) {
-        add(acCanonCat(t.category), acSignedAmount(t) - pOwed, pOwed);
+        add(acCanonCat(t.category), acSignedAmount(t) - pOwed, pOwed, t.category);
       }
     });
     return map;
@@ -19731,7 +20042,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       return t.bucket === kind && acCanonCat(t.category).toLowerCase() === name.toLowerCase();
     } else {
       // Unplanned: bucket matches but category is NOT among any named budget line.
-      const lineNames = new Set(acBudgetLines(kind).map(o => o.name.toLowerCase()));
+      // TODO-291: as-of the month being viewed. Without this, archiving a line would shove every
+      // one of its past transactions into "Unplanned" — the history loss this feature exists to
+      // prevent, arriving through the back door.
+      const lineNames = new Set(acBudgetLinesAsOf(kind).map(o => o.name.toLowerCase()));
       if (t.splits && t.splits.length) {
         return t.splits.some(leg => leg.bucket === kind && !lineNames.has(acCanonCat(leg.category || t.category).toLowerCase()));
       }
@@ -19809,7 +20123,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Per-category plan-vs-actual rows for a bucket: each budget line + an "Unplanned" catch-all.
   // Bar = solid segment (yourShare, green/red/gray) + dotted/striped extension (partner portion).
   function acLineRows(kind) {
-    const lines = acBudgetLines(kind), actMap = acActualByCat(kind);
+    const lines = acBudgetLinesAsOf(kind), actMap = acActualByCat(kind);
     if (!lines.length && !Object.keys(actMap).length) return '';
     const row = (name, planned, yourShare, partner, catKey) => {
       const m = acPcatRowMath(planned, yourShare, partner);
@@ -19827,7 +20141,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const used = new Set(); let rows = '';
     lines.forEach(o => { const k = o.name.toLowerCase(); used.add(k); rows += row(o.name, o.planned, (actMap[k] || {}).actual || 0, (actMap[k] || {}).partner || 0, o.name); });
     const unplannedCats = [];
-    Object.keys(actMap).forEach(k => { if (!used.has(k)) unplannedCats.push({ name: actMap[k].name, actual: actMap[k].actual, partner: actMap[k].partner }); });
+    Object.keys(actMap).forEach(k => { if (!used.has(k)) unplannedCats.push({ name: actMap[k].name, actual: actMap[k].actual, partner: actMap[k].partner, raws: actMap[k].raws || [] }); });
     let unplanned = 0, unplannedPartner = 0;
     unplannedCats.forEach(c => { unplanned += c.actual; unplannedPartner += c.partner; });
     let tail = '';
@@ -19844,7 +20158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function acUnplannedFixer(kind, cats) {
     if (!cats || !cats.length) return '';
-    const lines = acBudgetLines(kind);
+    const lines = acBudgetLinesAsOf(kind);
     const names = lines.map(o => o.name);
     const opts = '<option value="">count toward…</option>' +
       lines.map(o => '<option value="' + esc(o.name) + '">' + esc(o.name) + '</option>').join('');
@@ -19853,11 +20167,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       const accept = sug
         ? '<button type="button" class="bgb-alias-accept" data-aliasaccept="' + esc(kind) + '|' + esc(c.name) + '">→ ' + esc(sug) + ' ✓</button>'
         : '';
+      // BUG-0107. When the row's name is not a category anyone typed, an ALIAS put it here — and
+      // saying so is the difference between a fixable row and a mystery. The owner's "Other" row
+      // was really a "Miscellaneous" charge pointed at a budget line that does not exist.
+      const raws = c.raws || [];
+      const viaAlias = raws.length && raws.every(r => r.trim().toLowerCase() !== c.name.trim().toLowerCase());
+      const aliasNote = viaAlias
+        ? '<span class="pcat-upvia mini muted">' + esc(raws.join(', ')) + ' is being counted as “'
+          + esc(c.name) + '”, which is not a budget line here</span>'
+        : '';
       return '<div class="pcat-uprow">'
         + '<span class="pcat-upname">' + esc(c.name) + '</span>'
         + '<span class="pcat-upamt mono">' + acAmt(c.actual) + '</span>'
         + accept
-        + '<select class="pcat-countsel" aria-label="Count ' + esc(c.name) + ' toward a budget line" data-countcat="' + esc(kind) + '|' + esc(c.name) + '">' + opts + '</select>'
+        + '<select class="pcat-countsel" aria-label="Count ' + esc(c.name) + ' toward a budget line" data-countcat="' + esc(kind) + '|' + esc(c.name) + '"'
+        // BUG-0107: the categories AS TYPED. An alias is written for each of these, because the
+        // canonical name in `data-countcat` may appear on no transaction at all.
+        + ' data-countraw="' + esc(JSON.stringify(c.raws || [])) + '">' + opts + '</select>'
+        + aliasNote
         + '</div>';
     }).join('');
     return '<details class="pcat-unplanned-det"><summary class="mini muted">fix ' + cats.length + ' unplanned — assign to a budget line</summary><div class="pcat-unplanned-list">' + rows + '</div></details>';
@@ -22251,7 +22578,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         const s = cc.dataset.countcat, i = s.indexOf('|');
         const kind = s.slice(0, i), cat = s.slice(i + 1), line = cc.value;
         if (!line) return;
-        bgbAliasWrite(cat.toLowerCase(), line);
+        // BUG-0107. Alias the categories AS TYPED. Writing only the displayed name fixes nothing
+        // whenever an alias is what made the row unplanned: the owner's charge said
+        // "Miscellaneous", the row said "Other", and `other → …` never touched the charge. The
+        // displayed name is aliased too, so a row that is NOT the product of an alias behaves
+        // exactly as it did before.
+        let raws = [];
+        try { raws = JSON.parse(cc.dataset.countraw || '[]'); } catch (e) { raws = []; }
+        const targets = raws.concat([cat]);
+        const seen = {};
+        targets.forEach(r => {
+          const k = (r || '').trim().toLowerCase();
+          // An alias from a name to ITSELF is not an alias — and writing one would make the
+          // category permanently depend on a map entry it does not need.
+          if (!k || seen[k]) return;
+          seen[k] = 1;
+          if (k === line.trim().toLowerCase()) { bgbAliasRemove(k); return; }
+          bgbAliasWrite(k, line);
+        });
         bgbTotals();
         acRefresh();
         return;
