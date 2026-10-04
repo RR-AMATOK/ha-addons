@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.10.0
+
+**New: tags on scheduled payments and deposits**
+
+A scheduled bill had no tags of its own. When it posted, it borrowed tags from the payee — but only
+from a payee you had corrected by hand, and only when the schedule's payee matched it exactly. Most
+bills matched nothing, so a phone bill logged from its schedule arrived untagged, while the same
+bill typed in by hand carried its tags.
+
+The schedule form now has a **Tags** field, next to Category:
+
+- every payment the schedule posts — automatically, or when you log a varying amount — carries
+  exactly those tags
+- a schedule with no tags still borrows the payee's tags, as before
+- changing the tags affects **future** payments only; ones already in your ledger keep theirs
+- **Change this one and all future** carries the tags over to the new series
+- tags show on each schedule in the list
+
+Unticking **Recurring bill** on a budget line, or archiving it, used to remove a plain monthly bill
+without asking, since ticking the box again rebuilt it. A rebuilt bill would not have its tags, so
+a tagged bill now asks first and names the tags that go with it.
+
+**Fixed:** a payee's tags were dropped from a scheduled payment when you already had the same tag
+spelled with different capitals ("phone" vs "Phone").
+
 ## 0.9.9
 
 **New: archive a budget line instead of deleting it**

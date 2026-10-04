@@ -1098,6 +1098,21 @@
   .ac-amt .unit { font-size: var(--fs-xl); color: var(--muted); }
   .ac-amt input { flex: 1; min-width: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); background: none; border: none; padding: 7px 4px; outline: none; font-variant-numeric: tabular-nums; }
   .ac-row { display: flex; gap: 12px; align-items: flex-end; }
+  /* The tag chip box on the scheduled-payment form: the same chips-plus-text-input behaviour the
+     Actuals composer uses (#ac_tx_tags), dressed as a field so it sits beside the other inputs in
+     the row. The composer's box does NOT use this class: it carries its own look inline (a --line
+     border, no shadow), so the two boxes are close but not identical. This class adds the field
+     shadow and a focus ring the composer's box never had (its input hides its own outline, so
+     nothing shows focus there). */
+  .ac-tagbox { box-sizing: border-box; display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 34px;
+    border: 1px solid var(--field-border); border-radius: 6px; padding: 3px 6px;
+    background: var(--field); box-shadow: var(--field-shadow); }
+  .ac-tagbox:focus-within { border-color: var(--accent); box-shadow: var(--field-focus-ring); }
+  /* The inner input has to out-rank the global text-input rule (and its :focus ring), which would
+     otherwise draw a second, nested field inside the box: the box is the one field surface. */
+  .ac-tagbox > input[type="text"]:not(.input-pair *), .ac-tagbox > input[type="text"]:not(.input-pair *):focus {
+    border: none; background: transparent; box-shadow: none; outline: none; height: auto;
+    flex: 1; min-width: 64px; color: var(--text); font-size: var(--fs-md); padding: 1px; width: auto; }
   .ac-tools { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
   .ac-tool { background: none; border: none; color: var(--muted); cursor: pointer; padding: 2px 0; font-size: var(--fs-sm); }
   .ac-tool:hover { color: var(--accent); border-color: transparent; }
@@ -4323,6 +4338,10 @@
             <label class="ac-field" id="sch_bucket_wrap"><span class="ac-lbl">Bucket</span><select id="sch_bucket"></select></label>
             <label class="ac-field"><span class="ac-lbl">Category</span>
               <input id="sch_cat" type="text" placeholder="e.g. Salary, Electricity"></label>
+            <div class="ac-combo-anchor" id="sch_tags_wrap" style="flex:1 1 160px;min-width:0">
+              <label class="ac-field"><span class="ac-lbl"># Tags</span>
+                <span id="sch_tags" class="ac-tagbox"><input id="sch_tags_in" type="text" placeholder="add…" aria-label="Tags: add a tag"></span></label>
+            </div>
           </div>
           <div class="ac-row">
             <label class="ac-field" style="flex:2"><span class="ac-lbl">How often</span>
@@ -14647,6 +14666,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         && shift === 'none' && !sc.endsOn && !sc.endCount && !sc.autoPost;
   }
 
+  // Whether deleting this schedule loses nothing a re-tick would not rebuild. A plain monthly rule
+  // qualifies, UNLESS it carries tags: the tick POSTs a fresh schedule with none, so the tags the
+  // user chose on the Scheduled-money form would be gone without a word. Deliberately separate
+  // from bgbScheduleIsSimple, which also decides whether the day picker is honest, and a tagged
+  // plain monthly bill should keep its picker.
+  function bgbScheduleIsDisposable(sc) {
+    return bgbScheduleIsSimple(sc) && !(sc && sc.tags && sc.tags.length);
+  }
+
+  // The sentence that names what a tagged schedule takes with it when it is deleted, or ''.
+  function bgbScheduleTagNote(sc) {
+    const tags = (sc && sc.tags) || [];
+    return tags.length ? '\n\nIts tags (' + tags.join(', ') + ') are deleted with it.' : '';
+  }
+
   function bgbDayOptions(sel) {
     let o = '';
     for (let d = 1; d <= 31; d++) o += '<option value="' + d + '"' + (+sel === d ? ' selected' : '') + '>' + d + '</option>';
@@ -14679,10 +14713,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function bgbArchiveWithBill(it, bucketIdx) {
     if (!it) return;
     const sc = bgbScheduleFor({ it: it });
-    if (sc && !bgbScheduleIsSimple(sc)) {
+    if (sc && !bgbScheduleIsDisposable(sc)) {
       const ok = confirm('Archive “' + (it.name || 'this line') + '” and stop its bill?\n\n'
         + schCadenceText(sc) + '\n\nThat rule is deleted. Transactions already logged stay in '
-        + 'your ledger, and every month before this one still counts the line.');
+        + 'your ledger, and every month before this one still counts the line.'
+        + bgbScheduleTagNote(sc));
       if (!ok) return;
     }
     if (sc) {
@@ -15429,8 +15464,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const sc = bgbScheduleFor(tgt);
         if (!sc) { bgbSyncRecurringUI(); return; }
         try {
-          // The schedule's `description` is what actually tags the posted transaction, so the two
-          // are kept in step. The LINE is the identity; the schedule is the copy that posts.
+          // The schedule's `description` is what actually tags the posted transaction (unless the
+          // schedule carries its own tags), so the two are kept in step. The LINE is the identity; the schedule is the copy that posts.
           await patch('/api/tracking/schedules/' + sc.id, { description: v || null });
           if (window.__recurringSetup) await window.__recurringSetup.ensure();
         } catch (er) {
@@ -15468,8 +15503,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // THE WHOLE BILL, and the split recorded alongside it. 0.8.6 booked your share here
             // and it was wrong: the ledger then showed -$1,391 with nothing owed, where the same
             // rent typed by hand shows -$2,140 with $749 owed. `description` is the payee, which
-            // is what carries the tags — a bill posted as "Rent" matches no preset, one posted as
-            // "AMLI - Rent" picks up `Housing` exactly as typing it would.
+            // is what carries the tags, unless the schedule carries its own — a bill posted as
+            // "Rent" matches no preset, one posted as "AMLI - Rent" picks up `Housing` exactly as
+            // typing it would.
             await post('/api/tracking/schedules', {
               name: tgt.name, direction: 'out', amount: tgt.amount, bucket: kind, category: tgt.name,
               // THE LINE'S OWN PAYEE, never `payeeGuess`. The guess is keyed on the line NAME, so
@@ -15483,14 +15519,14 @@ document.addEventListener('DOMContentLoaded', async () => {
               amountIsEstimate: true, autoPost: false,
             });
           } else if (!t.checked && sc) {
-            // PROPORTIONATE. A plain monthly rule this menu created is deleted without ceremony —
-            // re-ticking rebuilds it. Anything the fuller editor shaped (twice-monthly, a weekend
-            // shift, an end date) is real work that would be destroyed silently, so it is named
-            // before it goes.
-            if (!bgbScheduleIsSimple(sc)) {
+            // PROPORTIONATE. A plain, untagged monthly rule this menu created is deleted without
+            // ceremony — re-ticking rebuilds it. Anything the fuller editor shaped (twice-monthly,
+            // a weekend shift, an end date, tags) is real work that would be destroyed silently,
+            // so it is named before it goes.
+            if (!bgbScheduleIsDisposable(sc)) {
               const ok = confirm('Stop tracking “' + tgt.name + '” as a bill?\n\n'
                 + schCadenceText(sc) + '\n\nThat rule is deleted. Transactions already logged stay '
-                + 'in your ledger — only the future occurrences stop.');
+                + 'in your ledger — only the future occurrences stop.' + bgbScheduleTagNote(sc));
               if (!ok) { t.checked = true; return; }
             }
             await del('/api/tracking/schedules/' + sc.id);
@@ -19046,26 +19082,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   const acAcctName = id => { const a = ACT.accounts.find(x => x.id === id); return a ? a.name : '#' + id; };
 
   // ----- tag chip input (quick-add) -----
-  function acRenderTagChips() {
-    const box = $('ac_tx_tags'), input = $('ac_tx_tags_in'); if (!box || !input) return;
+  // ONE widget with two homes: the Actuals composer ('tx') and the scheduled-payment form
+  // ('sch'). A scope is only a (chip box, text input, list of names) triple, so add/remove/render,
+  // the keyboard handling (acWireTagInput) and the suggestion popup (acComboInit over the one
+  // #ac_tags_list) are shared rather than rebuilt. The scope defaults to the composer so every
+  // pre-existing caller is unchanged.
+  const TAG_SCOPES = {
+    tx:  { box: 'ac_tx_tags', input: 'ac_tx_tags_in', get: () => ACT.tagState,   set: v => { ACT.tagState = v; } },
+    sch: { box: 'sch_tags',   input: 'sch_tags_in',   get: () => SCH_STATE.tags, set: v => { SCH_STATE.tags = v; } },
+  };
+  function acRenderTagChips(scope) {
+    scope = scope || 'tx';
+    const sc = TAG_SCOPES[scope];
+    const box = $(sc.box), input = $(sc.input); if (!box || !input) return;
     box.querySelectorAll('.ac-tagchip').forEach(c => c.remove());
-    ACT.tagState.forEach(t => {
+    sc.get().forEach(t => {
       const chip = document.createElement('span');
       chip.className = 'ac-tagchip';
       chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;background:var(--chip);border-radius:10px;padding:1px 7px;font-size:var(--fs-xs)';
-      chip.innerHTML = esc(t) + ' <a href="#" data-untag="' + esc(t) + '" style="text-decoration:none;color:var(--muted)">×</a>';
+      chip.innerHTML = esc(t) + ' <a href="#" data-untag="' + esc(t) + '" data-tagscope="' + scope + '" aria-label="Remove tag ' + esc(t) + '" style="text-decoration:none;color:var(--muted)">×</a>';
       box.insertBefore(chip, input);
     });
   }
-  function acAddTag(name) {
+  function acAddTag(name, scope) {
+    const sc = TAG_SCOPES[scope || 'tx'];
     name = (name || '').trim().replace(/^#/, '');
-    if (name && !ACT.tagState.some(x => x.toLowerCase() === name.toLowerCase())) ACT.tagState.push(name);
-    const i = $('ac_tx_tags_in'); if (i) i.value = '';
-    acRenderTagChips();
+    if (name && !sc.get().some(x => x.toLowerCase() === name.toLowerCase())) sc.get().push(name);
+    const i = $(sc.input); if (i) i.value = '';
+    acRenderTagChips(scope);
   }
-  function acRemoveTag(name) {
-    ACT.tagState = ACT.tagState.filter(x => x.toLowerCase() !== String(name).toLowerCase());
-    acRenderTagChips();
+  function acRemoveTag(name, scope) {
+    const sc = TAG_SCOPES[scope || 'tx'];
+    sc.set(sc.get().filter(x => x.toLowerCase() !== String(name).toLowerCase()));
+    acRenderTagChips(scope);
+  }
+  // Enter / comma commit what is typed, Backspace on an empty box removes the last chip, and a
+  // pick from the suggestion popup (which fires 'change') adds that tag.
+  function acWireTagInput(scope) {
+    const ti = $(TAG_SCOPES[scope].input); if (!ti) return;
+    ti.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); acAddTag(ti.value, scope); }
+      else if (ev.key === 'Backspace' && !ti.value && TAG_SCOPES[scope].get().length) { ev.preventDefault(); TAG_SCOPES[scope].get().pop(); acRenderTagChips(scope); }
+    });
+    ti.addEventListener('change', () => { if (ti.value) acAddTag(ti.value, scope); });
   }
   async function acLoadTags() {
     let r; try { r = await getJSON('/api/tracking/tags'); } catch (e) { return; }
@@ -20321,7 +20380,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // whose whole thesis is that the form says back what you chose.
   const SCH_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
                       'July', 'August', 'September', 'October', 'November', 'December'];
-  const SCH_STATE = { schedules: [], due: [], editing: null, listOk: true, dueOk: true };
+  const SCH_STATE = { schedules: [], due: [], editing: null, listOk: true, dueOk: true, tags: [] };
 
   const SCH_DOW = { MO: 'Monday', TU: 'Tuesday', WE: 'Wednesday', TH: 'Thursday', FR: 'Friday', SA: 'Saturday', SU: 'Sunday' };
   const SCH_LAST_DAY = 32;      // the engine's "last day of the month" sentinel
@@ -20687,6 +20746,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const where = sc.direction === 'in' ? 'income'
                   : (KINDS[sc.bucket] ? KINDS[sc.bucket].label : (sc.bucket || '—'));
       const meta = [esc(where)];
+      const tagChips = (sc.direction !== 'transfer' && sc.tags && sc.tags.length)
+        ? ' ' + sc.tags.map(tg => '<span class="ac-tag">' + esc(tg) + '</span>').join(' ') : '';
       if (r.n > 1) meta.push(r.n + ' transactions');
       else if (r.n === 1 && r.lastOn && r.lastOn !== r.on) meta.push('logged ' + schStamp(r.lastOn));
       // The household total goes in the META, not stacked under the amount: the amount column is
@@ -20797,7 +20858,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         + ' data-schocc="' + esc(String(sc.id)) + ':' + esc(r.on) + '" data-schrow="' + esc(String(sc.id)) + '">'
         + '<span class="sch-date"><b>' + (+r.on.slice(8, 10)) + '</b> ' + SCH_WD[new Date(r.on + 'T00:00:00').getDay()] + '</span>'
         + '<span class="sch-name ac-sched-name">' + esc(sc.name) + '</span>'
-        + '<span class="sch-meta">' + meta.join(' · ') + '</span>'
+        + '<span class="sch-meta">' + meta.join(' · ') + tagChips + '</span>'
         + '<span class="sch-amt' + (done ? '' : ' sch-amt-plan') + '">' + amt + '</span>'
         + '<span class="sch-status ' + scls + '">' + status + '</span>'
         + '<span class="sch-acts-occ">' + occActs + '</span>'
@@ -20903,6 +20964,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     show('sch_int_wrap', f === 'weekly' || f === 'daily');
     show('sch_moy_wrap', f === 'yearly');
     show('sch_bucket_wrap', (($('sch_dir') || {}).value) !== 'in');   // income carries no bucket
+    show('sch_tags_wrap', !schFormIsTransfer());                      // a transfer carries no tags
     const unit = $('sch_int_wrap') && $('sch_int_wrap').querySelector('.unit');
     if (unit) unit.textContent = f === 'daily' ? 'days' : 'wks';
     // The engine refuses to auto-post an estimate whatever this flag says. Rather than let the
@@ -20926,6 +20988,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.textContent = schCadenceText(schFormToPayload(true)) + '.';
   }
 
+  // The Flow select only offers in/out, so a transfer schedule (one made through the API) cannot
+  // be read back off it: loading one leaves the select blank. Fall back to the schedule being
+  // edited, which does know its own direction.
+  function schFormIsTransfer() {
+    const v = ($('sch_dir') || {}).value;
+    if (v) return v === 'transfer';
+    const s = SCH_STATE.editing != null ? (SCH_STATE.schedules || []).find(x => String(x.id) === String(SCH_STATE.editing)) : null;
+    return !!(s && s.direction === 'transfer');
+  }
+
   function schFormToPayload(loose) {
     const f = ($('sch_freq') || {}).value || 'semimonthly';
     const dir = ($('sch_dir') || {}).value || 'out';
@@ -20937,6 +21009,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       accountId: +(($('sch_acct') || {}).value) || null,
       bucket: dir === 'in' ? null : ((($('sch_bucket') || {}).value) || null),
       category: (($('sch_cat') || {}).value || '').trim() || null,
+      // The full list, every time: on a PATCH the form is the whole truth, and an empty array is
+      // how a tag gets cleared (an omitted key would leave it). Names were trimmed, de-hashed and
+      // de-duplicated by acAddTag as they were entered, the same as the transaction composer.
+      tags: schFormIsTransfer() ? [] : SCH_STATE.tags.slice(),
       freq: f,
       interval: Math.max(1, +(($('sch_int') || {}).value) || 1),
       weekdays: f === 'weekly' ? (($('sch_wd') || {}).value || 'FR') : null,
@@ -20967,6 +21043,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (s && s.accountId) set('sch_acct', String(s.accountId));
     set('sch_bucket', s ? (s.bucket || '') : '');
     set('sch_cat', s ? (s.category || '') : '');
+    // Cleared EXPLICITLY. `set` skips a null value, which is fine for a text box that was just
+    // reset to '' above it, but the tag list is not an element's value: leaving it to `set` would
+    // carry the previous schedule's tags into a new one. The list is this form's own (an empty
+    // new form, or the schedule being edited) and is read from nothing else.
+    SCH_STATE.tags = s && Array.isArray(s.tags) ? s.tags.slice() : [];
+    { const ti = $('sch_tags_in'); if (ti) ti.value = ''; }
+    acRenderTagChips('sch');
     set('sch_freq', s ? s.freq : 'semimonthly');
     set('sch_int', s ? String(s.interval || 1) : '2');
     if (s && s.weekdays) set('sch_wd', s.weekdays.split(',')[0]);
@@ -20983,6 +21066,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function schSave() {
     const err = $('sch_err'); if (err) err.textContent = '';
+    // A tag typed but not yet committed with Enter would otherwise be lost on Save; the composer
+    // commits it on Add for the same reason.
+    const pendingTag = ($('sch_tags_in') && $('sch_tags_in').value || '').trim();
+    if (pendingTag) acAddTag(pendingTag, 'sch');
     const p = schFormToPayload(false);
     if (!p.name) { if (err) err.textContent = 'Give it a name.'; return; }
     if (!p.accountId) { if (err) err.textContent = 'Pick the account it moves through.'; return; }
@@ -21002,6 +21089,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       schFormFrom(null);
       const wrap = $('sch_add_wrap'); if (wrap) wrap.open = false;
       await schRefresh();
+      acLoadTags();   // a tag first used here belongs in the suggestions the composer offers
       showToast(wasEditing ? 'Schedule updated' : 'Schedule saved');
     } catch (e) {
       const detail = errDetail(e);
@@ -22008,13 +22096,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     { const m = $('ac_tx_memo'); if (m) m.addEventListener('input', acPayeeAutofill); }       // known payee → suggest bucket/category
     { const b = $('ac_tx_bucket'); if (b) b.addEventListener('change', acFillCatList); }        // re-scope category suggestions to the bucket
     { const c = $('ac_tx_cat'); if (c) c.addEventListener('input', acCatChanged); }              // picking a budget-line category sets its bucket
-    { const ti = $('ac_tx_tags_in'); if (ti) {                                                 // tag chip input
-        ti.addEventListener('keydown', ev => {
-          if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); acAddTag(ti.value); }
-          else if (ev.key === 'Backspace' && !ti.value && ACT.tagState.length) { ev.preventDefault(); ACT.tagState.pop(); acRenderTagChips(); }
-        });
-        ti.addEventListener('change', () => { if (ti.value) acAddTag(ti.value); });             // datalist pick
-      } }
+    acWireTagInput('tx');                                                                       // tag chip input
+    acWireTagInput('sch');
     // Custom combobox popups replacing native <datalist> (color-scheme's documented active/
     // hover-row limitation — see acComboInit's own comment). selectEvent 'input'/'change' fires
     // the EXISTING listeners just above verbatim (acCatChanged/acPayeeAutofill/tag-add), so
@@ -22022,6 +22105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     acComboInit($('ac_tx_cat'), 'ac_cat_list', { selectEvent: 'input', label: 'Category suggestions' });
     acComboInit($('ac_tx_memo'), 'ac_payee_list', { selectEvent: 'input', label: 'Payee suggestions' });
     acComboInit($('ac_tx_tags_in'), 'ac_tags_list', { selectEvent: 'change', label: 'Tag suggestions' });
+    acComboInit($('sch_tags_in'), 'ac_tags_list', { selectEvent: 'change', label: 'Tag suggestions' });
     { const w = document.getElementById('sch_add_wrap');
       if (w) w.addEventListener('toggle', () => { if (w.open) schSyncFormShape(); }); }
     { const sv = document.getElementById('sch_save'); if (sv) sv.addEventListener('click', schSave); }
@@ -22397,7 +22481,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Status pill toggle (ledger + card detail share the same handler via acPatchStatus)
       const ts = ev.target.closest('[data-toggle-status]');
       if (ts) { ev.preventDefault(); acPatchStatus(ts.dataset.toggleStatus); return; }
-      const ut = ev.target.closest('[data-untag]'); if (ut) { ev.preventDefault(); acRemoveTag(ut.dataset.untag); return; }
+      const ut = ev.target.closest('[data-untag]'); if (ut) { ev.preventDefault(); acRemoveTag(ut.dataset.untag, ut.dataset.tagscope); return; }
       const aa = ev.target.closest('[data-aliasaccept]');
       if (aa) {
         ev.preventDefault();

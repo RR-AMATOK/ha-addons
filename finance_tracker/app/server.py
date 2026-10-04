@@ -2537,6 +2537,9 @@ class ScheduleModel(BaseModel):
     # for a LOCAL budget line, whose split the server cannot see; a live household split line
     # matching bucket+category wins over it at post time.
     partner_split_bps: int | None = Field(None, ge=0, le=10000, alias="partnerSplitBps")
+    # Applied to every transaction this schedule posts from now on (never to ones already
+    # posted). Omitted/null = none; a transfer carries none whatever is sent.
+    tags: list[str] | None = None
     model_config = {"populate_by_name": True}
 
 
@@ -2566,6 +2569,8 @@ class SchedulePatchModel(BaseModel):
     auto_post: bool | None = Field(None, alias="autoPost")
     active: bool | None = None
     partner_split_bps: int | None = Field(None, ge=0, le=10000, alias="partnerSplitBps")
+    # Omitted or null = unchanged; [] clears; a list replaces. Future postings only.
+    tags: list[str] | None = None
     model_config = {"populate_by_name": True}
 
 
@@ -2589,6 +2594,8 @@ class SplitScheduleModel(BaseModel):
     name: str | None = None
     account_id: int | None = Field(None, alias="accountId")
     auto_post: bool | None = Field(None, alias="autoPost")
+    # Omitted = the successor inherits the parent's tags; a list (even empty) replaces them.
+    tags: list[str] | None = None
     model_config = {"populate_by_name": True}
 
 
@@ -2612,6 +2619,8 @@ def _schedule_fields(m, *, partial: bool) -> dict:
             out[dst] = raw[src]
     if "amount" in raw and raw["amount"] is not None:
         out["amount_cents"] = _cents(raw["amount"])
+    if raw.get("tags") is not None:                 # null/omitted = "no change" (patch) or "none" (create)
+        out["tags"] = raw["tags"]
     return out
 
 
@@ -2851,6 +2860,8 @@ def split_schedule_endpoint(schedule_id: int, m: SplitScheduleModel, request: Re
     for src, dst in (("name", "name"), ("account_id", "account_id"), ("auto_post", "auto_post")):
         if src in raw:
             changes[dst] = raw[src]
+    if raw.get("tags") is not None:
+        changes["tags"] = raw["tags"]
     with closing(tracking_store.connect()) as c:
         try:
             return tracking_store.split_schedule(c, scope, schedule_id, m.from_date, **changes)

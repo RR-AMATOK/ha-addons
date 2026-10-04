@@ -103,6 +103,12 @@ _BACKUP_TABLES: tuple = (
     ("schedule",           ("id", "user_id", "name", "direction", "amount_cents", "amount_is_estimate", "account_id", "to_account_id", "bucket", "category", "description", "freq", "interval_n", "weekdays", "day_1", "day_2", "month_of_year", "anchor_on", "end_mode", "ends_on", "end_count", "weekend_shift", "auto_post", "active", "parent_id", "partner_split_bps", "created_at")),
     ("schedule_exception", ("id", "schedule_id", "occurrence_on", "action", "amount_cents", "moved_to", "description", "created_at")),
     ("schedule_txn",       ("schedule_id", "occurrence_on", "txn_id")),
+    # A schedule's own tags. A pure link table (no user_id; scope comes through the FK to
+    # `schedule`/`tag`, exactly like `txn_tag`). It MUST be listed: import_all runs with foreign
+    # keys OFF and clears only the tables named here, so an unlisted schedule_tag would keep stale
+    # rows pointing at whatever schedule/tag ids the restore reassigns -- attaching the wrong tags
+    # to the wrong bills. Parent-then-child: after `schedule` and `tag`.
+    ("schedule_tag",       ("schedule_id", "tag_id")),
     # FIRE progress log. Ordinary user data, plain verbatim restore. It matters MORE than most
     # that this is backed up: the rows cannot be regenerated from anything else, because the FI
     # target they carry was computed from assumptions that are gone. Lose the table and the
@@ -120,7 +126,7 @@ _BACKUP_TABLES: tuple = (
 _BACKUP_OPTIONAL_TABLES = frozenset({
     "scenario", "goal", "venture", "user_profile", "fund", "fund_txn",
     "household_budget", "household_budget_share",
-    "schedule", "schedule_exception", "schedule_txn",
+    "schedule", "schedule_exception", "schedule_txn", "schedule_tag",
     "fire_progress",
     # TODO-258. Optional like every table added after the original nine: a backup taken before
     # this existed simply has no key, and a restore must not reject it.
@@ -649,6 +655,18 @@ CREATE TABLE IF NOT EXISTS payee_preset (
   UNIQUE (user_id, dkey)
 );
 CREATE INDEX IF NOT EXISTS idx_schedtxn_txn ON schedule_txn(txn_id);
+
+-- A schedule's own tags, applied to every transaction it posts from now on. A pure link table
+-- with NO user_id: scope is inherited through the FK to `schedule` and `tag`, exactly like
+-- `txn_tag`. Additive CREATE ... IF NOT EXISTS, so it needs no `_MIGRATIONS` entry and does not
+-- move `user_version` (see `init_db`). Placed at the very END of SCHEMA for the same reason as
+-- every table above: the S1.1 QA harness cuts this text at fixed markers to simulate old devices.
+CREATE TABLE IF NOT EXISTS schedule_tag (
+  schedule_id INTEGER NOT NULL REFERENCES schedule(id) ON DELETE CASCADE,
+  tag_id      INTEGER NOT NULL REFERENCES tag(id)      ON DELETE CASCADE,
+  PRIMARY KEY (schedule_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_schedtag_tag ON schedule_tag(tag_id);
 """
 
 # Future migrations append to this list; each takes a conn and upgrades by one step.
@@ -2550,6 +2568,20 @@ def _account_dict(r) -> dict:
 
 # ----- tags (orthogonal to the bucket rollup; aggregate_actuals never reads them) -----
 
+def _tag_id_for(conn, user_id, name: str) -> int:
+    """The id of the caller's tag called `name`, creating it if absent.
+
+    Case-insensitive on BOTH halves, and the two must agree: the unique index on `tag` is
+    `COLLATE NOCASE`, so `INSERT OR IGNORE` of "phone" is silently ignored when "Phone" exists --
+    and a plain `WHERE name = ?` lookup then finds nothing. The SELECT therefore carries the same
+    `COLLATE NOCASE`. Scoped to `user_id` throughout: a tag row is never shared across users.
+    `name` must already be stripped and non-empty."""
+    conn.execute("INSERT OR IGNORE INTO tag (user_id, name, created_at) VALUES (?, ?, ?)",
+                 (user_id, name, _now()))
+    return conn.execute("SELECT id FROM tag WHERE user_id = ? AND name = ? COLLATE NOCASE",
+                        (user_id, name)).fetchone()["id"]
+
+
 def _set_txn_tags(conn, user_id, txn_id, names) -> None:
     """Replace a transaction's tags with `names` (upserting tags case-insensitively,
     scoped to the caller's own tags -- txn_tag inherits scope from its parent txn/tag,
@@ -2559,13 +2591,8 @@ def _set_txn_tags(conn, user_id, txn_id, names) -> None:
         name = str(raw).strip()
         if not name:
             continue
-        conn.execute(
-            "INSERT OR IGNORE INTO tag (user_id, name, created_at) VALUES (?, ?, ?)",
-            (user_id, name, _now()))
-        tid = conn.execute(
-            "SELECT id FROM tag WHERE user_id = ? AND name = ? COLLATE NOCASE",
-            (user_id, name)).fetchone()["id"]
-        conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?, ?)", (txn_id, tid))
+        conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?, ?)",
+                     (txn_id, _tag_id_for(conn, user_id, name)))
 
 
 def _attach_tags(conn, d: dict) -> dict:
@@ -4515,7 +4542,10 @@ def delete_recurring(conn, user_id, recurring_id) -> None:
 _CATCHUP_DAYS = 60          # how far back a catch-up will reach; see guard 2 above
 
 
-def _schedule_dict(r) -> dict:
+def _schedule_dict(r, tags: list[str]) -> dict:
+    """`tags` is required, not defaulted: a caller that forgot to look them up would otherwise
+    return a schedule that silently claims to have none. Use `_schedule_out` for one row, or
+    `_schedule_tags_map` once for a batch."""
     return {
         "id": r["id"], "name": r["name"], "direction": r["direction"],
         "amount": round(r["amount_cents"] / 100.0, 2),
@@ -4530,12 +4560,66 @@ def _schedule_dict(r) -> dict:
         "partnerSplitBps": (r["partner_split_bps"]
                             if "partner_split_bps" in r.keys() else None),
         "parentId": r["parent_id"], "createdAt": r["created_at"],
+        "tags": list(tags),
     }
 
 
 def _schedule_row(conn, user_id, schedule_id):
     return conn.execute("SELECT * FROM schedule WHERE id = ? AND user_id = ?",
                         (schedule_id, user_id)).fetchone()
+
+
+# ----- a schedule's own tags -----
+#
+# FUTURE POSTINGS ONLY. A schedule's tags are copied onto each transaction at the moment
+# `_post_occurrence` writes it. Editing them never touches a transaction already posted -- that
+# is real history, and silently re-tagging it is how a ledger stops matching what happened (the
+# same rule the payee presets state as "FUTURE ENTRIES ONLY").
+#
+# A TRANSFER carries no tags. Its legs never get tags when posted, so a stored tag set could only
+# ever be a lie the UI displays but nothing applies. Create stores none for a transfer, and a
+# patch that makes a schedule one clears whatever it had.
+
+def _schedule_tags(conn, schedule_id) -> list[str]:
+    """One schedule's tag names, ordered like `_attach_tags` orders a transaction's."""
+    return [r["name"] for r in conn.execute(
+        "SELECT t.name FROM schedule_tag st JOIN tag t ON t.id = st.tag_id "
+        "WHERE st.schedule_id = ? ORDER BY t.name", (schedule_id,)).fetchall()]
+
+
+def _schedule_tags_map(conn, user_id) -> dict[int, list[str]]:
+    """Every tag of every one of the caller's schedules in ONE query (no N+1). Scoped through
+    the schedule's `user_id`, which is how the link table inherits scope."""
+    out: dict[int, list[str]] = {}
+    for r in conn.execute(
+        "SELECT st.schedule_id, t.name FROM schedule_tag st "
+        "JOIN schedule s ON s.id = st.schedule_id JOIN tag t ON t.id = st.tag_id "
+        "WHERE s.user_id = ? ORDER BY t.name", (user_id,)).fetchall():
+        out.setdefault(r["schedule_id"], []).append(r["name"])
+    return out
+
+
+def _schedule_out(conn, row) -> dict:
+    """A single schedule row as the API object, tags attached."""
+    return _schedule_dict(row, _schedule_tags(conn, row["id"]))
+
+
+def _set_schedule_tags(conn, user_id, schedule_id, names) -> None:
+    """Replace a schedule's tags with `names`. Does not commit.
+
+    Names are stripped, empties dropped and duplicates collapsed case-insensitively (the tag
+    lookup is NOCASE), exactly as `_set_txn_tags` does. The schedule must belong to `user_id` --
+    the link table has no user_id of its own, so ownership is checked here rather than assumed --
+    and the tags are looked up or created within the caller's own scope."""
+    if _schedule_row(conn, user_id, schedule_id) is None:
+        raise ValueError("schedule not found")
+    conn.execute("DELETE FROM schedule_tag WHERE schedule_id = ?", (schedule_id,))
+    for raw in names or []:
+        name = str(raw).strip()
+        if not name:
+            continue
+        conn.execute("INSERT OR IGNORE INTO schedule_tag (schedule_id, tag_id) VALUES (?, ?)",
+                     (schedule_id, _tag_id_for(conn, user_id, name)))
 
 
 def _exceptions_for(conn, schedule_id) -> list[dict]:
@@ -4616,24 +4700,31 @@ def _validate_schedule_fields(conn, user_id, f: dict) -> dict:
     }
 
 
-def create_schedule(conn, user_id, created_at=None, **fields) -> dict:
+def create_schedule(conn, user_id, created_at=None, tags=None, **fields) -> dict:
     """`created_at` is injectable because it is load-bearing, not bookkeeping: it is one of the
     three terms in the catch-up window (see `_window_start`), so a caller reconstructing history
-    -- a migration, a restore, a test -- must be able to say when the schedule really began."""
+    -- a migration, a restore, a test -- must be able to say when the schedule really began.
+
+    `tags` are applied to every transaction this schedule posts FROM NOW ON (never to anything
+    already posted). A transfer stores none -- see the note above `_schedule_tags`."""
     vals = _validate_schedule_fields(conn, user_id, fields)
     cols = ["user_id"] + list(vals) + ["created_at"]
     params = [user_id] + list(vals.values()) + [created_at or _now()]
     cur = conn.execute(
         f"INSERT INTO schedule ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", params)
+    if vals["direction"] != "transfer":
+        _set_schedule_tags(conn, user_id, cur.lastrowid, tags)
     conn.commit()
-    return _schedule_dict(conn.execute("SELECT * FROM schedule WHERE id = ?", (cur.lastrowid,)).fetchone())
+    return _schedule_out(conn, conn.execute("SELECT * FROM schedule WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
 def list_schedules(conn, user_id, include_inactive=True) -> list[dict]:
     sql = "SELECT * FROM schedule WHERE user_id = ?"
     if not include_inactive:
         sql += " AND active = 1"
-    return [_schedule_dict(r) for r in conn.execute(sql + " ORDER BY name", (user_id,)).fetchall()]
+    rows = conn.execute(sql + " ORDER BY name", (user_id,)).fetchall()
+    tag_map = _schedule_tags_map(conn, user_id)
+    return [_schedule_dict(r, tag_map.get(r["id"], [])) for r in rows]
 
 
 def _fire_progress_dict(r) -> dict:
@@ -4737,10 +4828,11 @@ def schedules_in_window(conn, user_id, start: str, end: str, cap: int = 400) -> 
     certainly come through. The caller reconciles that; this reports only what it knows.
     """
     out = []
+    tag_map = _schedule_tags_map(conn, user_id)
     for row in conn.execute(
         "SELECT * FROM schedule WHERE user_id = ? AND active = 1 ORDER BY name", (user_id,)
     ).fetchall():
-        d = _schedule_dict(row)
+        d = _schedule_dict(row, tag_map.get(row["id"], []))
         posted = _posted_dates(conn, d["id"])
         hits = []
         for h in schedules.expand(schedules.Rule.from_row(row), _exceptions_for(conn, d["id"]),
@@ -4756,17 +4848,21 @@ def schedules_in_window(conn, user_id, start: str, end: str, cap: int = 400) -> 
 
 def get_schedule(conn, user_id, schedule_id) -> dict | None:
     row = _schedule_row(conn, user_id, schedule_id)
-    return _schedule_dict(row) if row else None
+    return _schedule_out(conn, row) if row else None
 
 
-def update_schedule(conn, user_id, schedule_id, **fields) -> dict | None:
+def update_schedule(conn, user_id, schedule_id, tags=None, **fields) -> dict | None:
     """Merge semantics with an explicit-clear escape hatch, which is what a schedule needs:
     an omitted field keeps its stored value, and passing `None` explicitly CLEARS it (the
     `_UNSET` sentinel is what distinguishes the two). Without that distinction there would be
     no way to remove an end date once set — the classic PATCH trap.
 
     The merged result is re-validated as a whole, so a partial edit can never leave a rule the
-    engine cannot expand."""
+    engine cannot expand.
+
+    `tags`: None leaves them unchanged, `[]` clears them, a list replaces them. FUTURE POSTINGS
+    ONLY -- transactions already posted are never re-tagged. If the schedule ends up a transfer
+    its tags are cleared whatever was passed (a transfer carries none; see `_schedule_tags`)."""
     row = _schedule_row(conn, user_id, schedule_id)
     if row is None:
         return None
@@ -4776,8 +4872,12 @@ def update_schedule(conn, user_id, schedule_id, **fields) -> dict | None:
     conn.execute(
         f"UPDATE schedule SET {', '.join(f'{k} = ?' for k in vals)} WHERE id = ? AND user_id = ?",
         list(vals.values()) + [schedule_id, user_id])
+    if vals["direction"] == "transfer":
+        _set_schedule_tags(conn, user_id, schedule_id, [])
+    elif tags is not None:
+        _set_schedule_tags(conn, user_id, schedule_id, tags)
     conn.commit()
-    return _schedule_dict(_schedule_row(conn, user_id, schedule_id))
+    return _schedule_out(conn, _schedule_row(conn, user_id, schedule_id))
 
 
 def delete_schedule(conn, user_id, schedule_id) -> bool:
@@ -4796,7 +4896,7 @@ def set_schedule_active(conn, user_id, schedule_id, active: bool) -> dict | None
     conn.execute("UPDATE schedule SET active = ? WHERE id = ? AND user_id = ?",
                  (1 if active else 0, schedule_id, user_id))
     conn.commit()
-    return _schedule_dict(_schedule_row(conn, user_id, schedule_id))
+    return _schedule_out(conn, _schedule_row(conn, user_id, schedule_id))
 
 
 # ----- occurrences -----
@@ -4898,6 +4998,9 @@ def _apply_payee_preset_tags(conn, user_id, txn_id: int, description) -> None:
     picks up the `Housing` tag exactly as typing it would, and re-tagging the payee changes future
     postings without touching the schedule.
 
+    This is what tags a posted schedule bill only when the schedule has no tags of its own: a
+    schedule that carries tags wins and the preset is not consulted (see `_apply_schedule_tags`).
+
     Only TAGS are taken. The schedule's own bucket and category are the owner's explicit choice for
     THIS bill and are not second-guessed by a preset built from history.
     """
@@ -4918,13 +5021,28 @@ def _apply_payee_preset_tags(conn, user_id, txn_id: int, description) -> None:
         name = str(name or "").strip()
         if not name:
             continue
-        conn.execute("INSERT OR IGNORE INTO tag (user_id, name, created_at) VALUES (?,?,?)",
-                     (user_id, name, _now()))
-        t = conn.execute("SELECT id FROM tag WHERE user_id = ? AND name = ?",
-                         (user_id, name)).fetchone()
-        if t:
-            conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?,?)",
-                         (txn_id, t["id"]))
+        conn.execute("INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) VALUES (?,?)",
+                     (txn_id, _tag_id_for(conn, user_id, name)))
+
+
+def _apply_schedule_tags(conn, txn_id: int, schedule_id: int) -> bool:
+    """Copy the schedule's own tags onto a freshly posted transaction, if it has any.
+
+    Returns True when the schedule HAS tags (they were copied, and the caller must not fall back
+    to the payee preset), False when it has none (nothing was written, and the preset applies).
+    That decision is an explicit existence check on `schedule_tag`, not a side effect of how many
+    rows the copy happened to insert.
+
+    Links by tag id straight from `schedule_tag`, so there is no name round-trip to get wrong;
+    the schedule's ownership of those tags was established when they were set."""
+    has_tags = conn.execute(
+        "SELECT 1 FROM schedule_tag WHERE schedule_id = ? LIMIT 1", (schedule_id,)).fetchone()
+    if has_tags is None:
+        return False
+    conn.execute(
+        "INSERT OR IGNORE INTO txn_tag (txn_id, tag_id) "
+        "SELECT ?, tag_id FROM schedule_tag WHERE schedule_id = ?", (txn_id, schedule_id))
+    return True
 
 
 def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, status: str) -> list[int]:
@@ -4974,9 +5092,13 @@ def _post_occurrence(conn, user_id, row, occurrence_on: str, amount_cents: int, 
         tg = None
         owed = _schedule_partner_owed_cents(conn, user_id, row, int(amount_cents))
         ids.append(_insert(row["account_id"], row["direction"], False, row["bucket"], ext))
-        # The payee's usual tags, so a bill logged from its schedule is indistinguishable from the
-        # same bill typed in by hand — which is the whole complaint this fixes.
-        _apply_payee_preset_tags(conn, user_id, ids[0], desc)
+        # THE POSTING RULE. A schedule that carries its own tags applies EXACTLY those and
+        # nothing else -- the payee preset is not consulted, so the owner can see and edit every
+        # tag a posted bill gets. Only a schedule with none falls back to the payee's usual tags
+        # (as before), so a bill logged from its schedule is still indistinguishable from the same
+        # bill typed in by hand. Transfers (the branch above) stay untagged.
+        if not _apply_schedule_tags(conn, ids[0], sid):
+            _apply_payee_preset_tags(conn, user_id, ids[0], desc)
 
     conn.execute("INSERT INTO schedule_txn (schedule_id, occurrence_on, txn_id) VALUES (?,?,?)",
                  (sid, occurrence_on, ids[0]))
@@ -5134,6 +5256,12 @@ def split_schedule(conn, user_id, schedule_id, from_date: str, **changes) -> dic
         raise ValueError("split date must be after the schedule's own start; edit the schedule instead")
 
     successor_fields = {k: row[k] for k in row.keys() if k not in ("id", "user_id", "created_at")}
+    # Tags are not a column, so `successor_fields` does not carry them: inherit the parent's unless
+    # the caller supplied a list (an empty list is a real answer -- "no tags from here on").
+    new_tags = changes.pop("tags", None)
+    if new_tags is _UNSET:
+        new_tags = None
+    tags = _schedule_tags(conn, schedule_id) if new_tags is None else new_tags
     successor_fields.update({k: v for k, v in changes.items() if v is not _UNSET})
     successor_fields["anchor_on"] = from_date
     successor_fields["parent_id"] = schedule_id
@@ -5143,12 +5271,12 @@ def split_schedule(conn, user_id, schedule_id, from_date: str, **changes) -> dic
         successor_fields["end_mode"] = "never"
         successor_fields["end_count"] = None
 
-    successor = create_schedule(conn, user_id, **successor_fields)
+    successor = create_schedule(conn, user_id, tags=tags, **successor_fields)
     conn.execute("UPDATE schedule SET end_mode = 'on', ends_on = ?, end_count = NULL "
                  "WHERE id = ? AND user_id = ?",
                  ((start - timedelta(days=1)).isoformat(), schedule_id, user_id))
     conn.commit()
-    return {"ended": _schedule_dict(_schedule_row(conn, user_id, schedule_id)), "successor": successor}
+    return {"ended": _schedule_out(conn, _schedule_row(conn, user_id, schedule_id)), "successor": successor}
 
 
 def schedule_occurrences(conn, user_id, schedule_id, start: str, end: str, cap: int = 400) -> list[dict]:
@@ -5717,6 +5845,8 @@ def export_all(conn: sqlite3.Connection, exported_at: str | None = None) -> dict
             order_by = "line_id, user_id"       # PK is (line_id, user_id) -- no surrogate id column
         elif tbl == "schedule_txn":
             order_by = "schedule_id, occurrence_on"  # PK is the pair -- no surrogate id column
+        elif tbl == "schedule_tag":
+            order_by = "schedule_id, tag_id"         # PK is the pair -- no surrogate id column
         else:
             order_by = "id"
         rows = conn.execute(f"SELECT * FROM {tbl} ORDER BY {order_by}").fetchall()
