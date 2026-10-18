@@ -1788,6 +1788,10 @@ def update_txn_endpoint(txn_id: int, m: TransactionUpdateModel, request: Request
     fields = {}
     for k, v in m.model_dump(by_alias=False).items():
         if v is None:
+            # None means "not sent" for every field EXCEPT an explicit `"bucket": null`, which is
+            # the ledger editor's "—" (uncategorized). Skipping it made that choice a silent no-op.
+            if k == "bucket" and "bucket" in m.model_fields_set:
+                fields["bucket"] = None
             continue
         if k == "amount":
             fields["amount_cents"] = _cents(v)
@@ -3007,6 +3011,49 @@ def plan_vs_actual_endpoint(month: str, tol: float = 0.05, request: Request = No
     comparison = tracking.plan_vs_actual(plan["payload"], actuals, month, tol)
     return {"month": month, "needsPlan": False, "planStatus": plan["status"], "comparison": comparison,
             "fundExcusal": actuals.get("fundExcusal")}
+
+
+_METRICS_MAX_MONTHS = 36
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def _month_span(start: str, end: str) -> list[str]:
+    """Inclusive ordered list of 'YYYY-MM' from `start` to `end`. Callers validate the format."""
+    y, m = int(start[:4]), int(start[5:])
+    ey, em = int(end[:4]), int(end[5:])
+    out = []
+    while (y, m) <= (ey, em):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+@app.get("/api/tracking/metrics")
+def metrics_endpoint(from_: str | None = Query(None, alias="from"), to: str | None = None,
+                     request: Request = None) -> dict:
+    """The ONE spending definition (metrics R1, `tracking.spending_from_rows`, "spending-v1").
+
+    READ-ONLY, and deliberately so: it never runs catch-up or any other writer, because a
+    number that is computed by first changing the data it measures cannot be trusted as a
+    reading of it. Every amount is integer cents; see `tracking.spending_from_rows` for the
+    definition and `tracking.spending_coverage` for what `coverage` means. `from`/`to` are
+    inclusive 'YYYY-MM'; `to` defaults to the current month and `from` to `to`. Malformed
+    months, from > to, and spans over 36 months are 422. `today` is the server's local date."""
+    today = _today_or(None)
+    end = today[:7] if to is None else to
+    start = end if from_ is None else from_
+    for label, value in (("from", start), ("to", end)):
+        if not _MONTH_RE.match(value):
+            raise HTTPException(status_code=422, detail=f"{label} must be YYYY-MM, got {value!r}")
+    if start > end:
+        raise HTTPException(status_code=422, detail="from must not be after to")
+    months = _month_span(start, end)
+    if len(months) > _METRICS_MAX_MONTHS:
+        raise HTTPException(status_code=422,
+                            detail=f"span is {len(months)} months; the limit is {_METRICS_MAX_MONTHS}")
+    scope = resolve_user(request)["scopeId"]
+    with closing(tracking_store.connect()) as c:
+        return tracking_store.spending_metrics(c, scope, months, today)
 
 
 # ----- scenarios (TODO-219, DEC-017): what-if comp + catch-up + revertible activation -----

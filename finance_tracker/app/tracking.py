@@ -14,7 +14,7 @@ See docs/plan-vs-actual-design.md and DEC-006/007/008.
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 
 # The five budget buckets (must match the budget builder's KINDS / bucket taxonomy).
 BUCKETS: tuple[str, ...] = ("need", "want", "investment", "travel", "other")
@@ -131,6 +131,140 @@ def aggregate_actuals(
         "income": _d(income),
         "asOfMonthEnd": _d(_net_worth_at(snapshot_rows, account_liability, me)),
         "netWorthSnapshots": _net_worth_series(snapshot_rows, account_liability, me),
+    }
+
+
+# ---------- spending: the one definition (metrics R1, "spending-v1") ----------
+
+SPENDING_DEFINITION = "spending-v1"
+
+# `txn.source` values that mean a PERSON typed or imported the row. A whitelist on purpose: a
+# source value nobody has classified yet counts as machine, so an unknown writer can only make
+# the app say "stale" (safe), never claim a month was logged when it was not.
+#   manual  the quick-add composer, the card-payment form, `create_txn`'s default
+#   csv     POST /api/tracking/import/csv, a person-initiated import
+# Machine, deliberately absent: `schedule` (catch-up auto-posts on every Actuals open) and
+# `fund_fold` (the synthetic sinking-fund excusal rows `month_actuals` appends).
+HUMAN_SOURCES: tuple[str, ...] = ("manual", "csv")
+
+# A past month counts as fully logged when its last person-typed spend row is within this many
+# days of month end. A proposal from the brief (4.3), not a measured fact; one constant so it
+# can be tuned in one place.
+COMPLETE_MONTH_SLACK_DAYS = 7
+
+
+def _spend_bucket_key(bucket) -> str | None:
+    """The bucket exactly as `aggregate_actuals` keys it, or None when null/blank (uncategorized)."""
+    return bucket if (bucket and str(bucket).strip()) else None
+
+
+def _spend_triple(gross: int, partner: int) -> dict:
+    return {"value": gross - partner, "gross": gross, "partnerShare": partner}
+
+
+def spending_coverage(month: str, *, has_rows: bool, last_human_on: str | None,
+                      first_txn_on: str | None, today: str) -> str:
+    """`none` | `partial` | `complete` for one month (brief 4.1 / 4.3).
+
+    complete = a PAST month (strictly before today's month) whose last person-typed spend row is
+    within COMPLETE_MONTH_SLACK_DAYS of month end, and whose tracking started on or before the
+    month's 1st (so a month the user joined part-way through is never "complete").
+    """
+    if not has_rows:
+        return "none"
+    if month >= today[:7] or not last_human_on or not first_txn_on:
+        return "partial"
+    cutoff = (date.fromisoformat(month_end(month)) - timedelta(days=COMPLETE_MONTH_SLACK_DAYS)).isoformat()
+    if last_human_on >= cutoff and first_txn_on <= f"{month}-01":
+        return "complete"
+    return "partial"
+
+
+def spending_from_rows(rows: list[dict], month: str, today: str, first_txn_on: str | None = None) -> dict:
+    """Pure: one month of `tracking_store._month_txn_rows` rows -> the spending-v1 figures.
+
+    All money is integer cents; nothing is rounded and nothing is clamped (a bucket or category
+    that refunds drive below zero stays negative). A counted row is `direction='out'`,
+    `is_transfer=0`, bucket not 'investment', dated in `month`:
+        gross        = the row's signed amount (a refund is already negative)
+        partnerShare = the row's signed partner share (a refund's comes back, so also negative)
+        value        = gross - partnerShare, YOUR share
+    A null/blank bucket is its own bucket key `uncategorized`. Investment-bucket rows are
+    reported separately as `invested` and never enter `spending`. Pending rows are counted AND
+    reported in `pending` (count of transactions, value = your share). The sinking-fund fold
+    rows are ordinary rows here, exactly as `aggregate_actuals` treats them, so
+    gross == sum(aggregate_actuals buckets except investment) + uncategorized, to the cent.
+
+    `value`/`gross`/`partnerShare` are None (and `coverage` is `none`) when the month has no
+    out/non-transfer rows at all: not logging is not the same as spending nothing.
+
+    Unlike the rest of this module, which emits float dollars, this emits integer CENTS: the
+    figures are compared across screens to the cent, and a float would make that comparison a
+    rounding argument.
+    """
+    buckets: dict[str, list[int]] = {}
+    cells: dict[tuple, list[int]] = {}
+    invested = [0, 0]
+    total = [0, 0]
+    pending_txns: set = set()
+    pending_value = 0
+    last_human: str | None = None
+    has_rows = False
+
+    for r in rows:
+        if r.get("is_transfer") or r["direction"] != "out" or not str(r["posted_on"]).startswith(month):
+            continue
+        has_rows = True
+        # A row dated after `today` (typed ahead, e.g. next week's rent) is real spend and is
+        # counted above, but it is not evidence the month has been logged up to now.
+        if (r.get("source") in HUMAN_SOURCES and r["posted_on"] <= today
+                and (last_human is None or r["posted_on"] > last_human)):
+            last_human = r["posted_on"]
+        gross = int(r["amount_cents"])
+        partner = int(r.get("partner_cents") or 0)
+        key = _spend_bucket_key(r.get("bucket"))
+        if key == "investment":
+            invested[0] += gross
+            invested[1] += partner
+            continue
+        total[0] += gross
+        total[1] += partner
+        bkey = key or "uncategorized"
+        b = buckets.setdefault(bkey, [0, 0])
+        b[0] += gross
+        b[1] += partner
+        cat = r.get("category")
+        cat = cat if (cat and str(cat).strip()) else None
+        c = cells.setdefault((key, cat), [0, 0])
+        c[0] += gross
+        c[1] += partner
+        if r.get("status") == "pending":
+            pending_txns.add(r.get("txn_id") if r.get("txn_id") is not None else id(r))
+            pending_value += gross - partner
+
+    coverage = spending_coverage(month, has_rows=has_rows, last_human_on=last_human,
+                                 first_txn_on=first_txn_on, today=today)
+    if not has_rows:
+        null = {"value": None, "gross": None, "partnerShare": None}
+        return {"month": month, "coverage": coverage, "spending": dict(null),
+                "pending": {"count": 0, "value": 0}, "lastHumanSpendOn": None,
+                "buckets": {}, "invested": dict(null), "rows": []}
+
+    def _order(k):          # None sorts after every string, for both bucket and category
+        return (k is None, k or "")
+
+    return {
+        "month": month,
+        "coverage": coverage,
+        "spending": _spend_triple(*total),
+        "pending": {"count": len(pending_txns), "value": pending_value},
+        "lastHumanSpendOn": last_human,
+        "buckets": {k: _spend_triple(*buckets[k]) for k in sorted(buckets)},
+        "invested": _spend_triple(*invested),
+        "rows": [
+            {"bucket": b, "category": c, **_spend_triple(*cells[(b, c)])}
+            for (b, c) in sorted(cells, key=lambda bc: (_order(bc[0]), _order(bc[1])))
+        ],
     }
 
 

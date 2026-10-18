@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.10.2
+
+**Fixed: the Actuals tab on a phone**
+
+- **The transaction list now fits.** It was a nine-column table that scrolled sideways: headers broke
+  letter by letter, "out" and the date wrapped, the bucket badge stacked one letter per line, and the
+  filter buttons were cut off. On a phone each transaction is now two lines, with the date, payee,
+  amount and the edit and delete buttons on the first, and the flow, bucket, category, tags, account
+  and status on the second. The edit and delete buttons are full-size tap targets, and editing a row
+  in place works at phone width. On a computer nothing changes.
+- **The Ventures form is one column.** Each field used to sit a little further right than the one
+  above it, leaving a wide empty gap on the left.
+- **Log it:** the Date and Account fields no longer run into each other, the Tags field is a single
+  box, and "Save current" stays with the Quick list instead of sitting alone.
+
+**Fixed: the Roth IRA line was missing from the budget summary.** "Allocated X of Y" left out the
+Roth IRA line you can see in your Investments bucket. It now counts on both sides, so what you have
+left over does not change, and the summary agrees with the "Spent + invested" table below it.
+
+## 0.10.1
+
+**Fixed: your spending was counted three different ways on three screens**
+
+The Actuals tab, the Overview's "Am I on track this month?" tile and FIRE each worked out "what
+did I spend" on their own, and they disagreed. Now there is one definition, and all three read it.
+It counts your share of every purchase, refunds subtract, and card payments and investing are not
+spending.
+
+What changes on screens you know:
+
+- **Actuals Outflow** now matches the bars above it. Before, the bars took out your partner's share
+  and the Outflow total did not, so August read $8,724 against bars that added to $6,971. It now
+  reads $6,971. The household total and your partner's share are shown under it, with a note when
+  some of it is still pending.
+- **Investing** sits below the total as "Invested · not in Outflow".
+- **"Am I on track this month?"** was counting every card payment as spending (about $5,000 a
+  month) and adding refunds instead of subtracting them. It now counts only what you spent. When
+  nothing has been logged recently it says "Logged through Sep 14 · N days ago" and gives no
+  verdict, instead of "Trending under, nice cushion" over an empty month.
+- **FIRE** averaged your last 12 months even though only 4 have any data, so the trailing figure
+  was about a third of the truth. It now counts only months with entries, and says so when it
+  falls back to your plan.
+- **Bar colours were backwards:** a bucket under budget showed a red "+", over budget a green "−".
+  The sign now means what it says: "+" is over budget, shown red.
+
+**Safer: "Sync plan" on a past month asks first.** It replaces that month's saved plan with
+today's income and savings target and could not be undone. It now names the plan it will replace
+and today's figures, and only goes ahead if you agree. The current month still saves in one tap.
+
+**Fixed: choosing "—" (uncategorized) for a bucket when editing a transaction did nothing,** and
+the editor said "Updated" anyway. It now saves, and any save the server refuses says so.
+
 ## 0.10.0
 
 **New: tags on scheduled payments and deposits**

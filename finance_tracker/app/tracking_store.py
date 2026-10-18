@@ -3116,12 +3116,57 @@ def _allocate_cents_by_weight(total_c: int, weights: dict) -> dict:
     return shares
 
 
-def month_actuals(conn, user_id, month: str) -> dict:
-    """Fetch the month's transactions + ALL snapshots (scoped to `user_id`) and hand
-    them to the pure aggregator. (Snapshots span history because the net-worth overlay
-    is a trajectory.) All user filtering happens HERE in the store query layer —
-    `tracking.aggregate_actuals` itself stays byte-unchanged (DEC-009 #1): it still
-    receives the same flat row shape and never sees `user_id`."""
+def _apportion_split_partner_cents(txn_rows: list[dict]) -> None:
+    """Spread each split txn's partner share across its legs, in place, CENT-EXACT.
+
+    The share lives on the PARENT txn (`partner_owed_cents`); the legs are what the
+    aggregator counts, so a share left on every leg would be multiplied by the leg count. It
+    is apportioned by leg amount with `_allocate_cents_by_weight` (largest remainder), so the
+    legs sum to EXACTLY the parent's share however the cents fall, and a refund's negative
+    sign is carried through. Legs are ordered by leg id, which makes the rounding cent's
+    destination deterministic. Strips the two helper keys from every row.
+    """
+    legs_by_txn: dict[int, list[dict]] = {}
+    for r in txn_rows:
+        if r.get("_leg_id") is not None:
+            legs_by_txn.setdefault(r["txn_id"], []).append(r)
+    for legs in legs_by_txn.values():
+        legs.sort(key=lambda r: r["_leg_id"])
+        sign = -1 if legs[0]["kind"] == "refund" else 1
+        parent_share = abs(legs[0]["partner_cents"])
+        shares = _allocate_cents_by_weight(parent_share, {r["_leg_id"]: r["_leg_amount_cents"] for r in legs})
+        for r in legs:
+            r["partner_cents"] = sign * shares[r["_leg_id"]]
+    for r in txn_rows:
+        r.pop("_leg_id", None)
+        r.pop("_leg_amount_cents", None)
+
+
+def _month_txn_rows(conn, user_id, month: str) -> list[dict]:
+    """The month's flat spend/income rows, EXACTLY as `month_actuals` feeds them to the pure
+    aggregator, plus extra keys the aggregator ignores. See `_month_txn_rows_and_funds`."""
+    return _month_txn_rows_and_funds(conn, user_id, month)[0]
+
+
+def _month_txn_rows_and_funds(conn, user_id, month: str) -> tuple[list[dict], dict]:
+    """ONE row source for every "how much did I spend" number (metrics R1, spending-v1).
+
+    Returns `(rows, fund_excusal)`. `rows` is what `tracking.aggregate_actuals` has always
+    received: splits flattened to their legs, refunds sign-flipped, and the sinking-fund fold
+    rows appended. `fund_excusal` is the additive `fundExcusal` dict `month_actuals` returns
+    beside the aggregate. Extracting this changed no arithmetic; it exists so
+    `month_spending` reads the SAME rows rather than re-deriving a second definition that
+    could drift from the Actuals tab (the failure the metrics brief was written to end).
+
+    Keys the aggregator reads (and so must stay byte-stable): `posted_on`, `direction`,
+    `amount_cents`, `bucket`, `is_transfer`. Everything else is for `tracking.spending_from_rows`:
+      category      the leg's own category, falling back to the parent's when the leg has none
+                    (the client's `leg.category || t.category`); NULL on fold rows.
+      partner_cents the partner's share, refund-signed like `amount_cents` (a refund hands
+                    the partner's share back, so it is negative). On a split txn the parent's
+                    share is apportioned across its legs by leg amount, CENT-EXACT.
+      status, source, kind, txn_id  as stored; fold rows carry `source='fund_fold'`.
+    """
     like = f"{month}-%"
     # Flatten splits in the STORE so the pure aggregator never changes (DEC-009): a txn WITH
     # splits is excluded from the first SELECT; its children (own bucket/amount, parent's
@@ -3129,15 +3174,24 @@ def month_actuals(conn, user_id, month: str) -> dict:
     txn_rows = [dict(r) for r in conn.execute(
         """SELECT t.account_id, t.posted_on, t.direction,
                   CASE WHEN t.kind='refund' THEN -t.amount_cents ELSE t.amount_cents END AS amount_cents,
-                  t.bucket, t.is_transfer
+                  t.bucket, t.is_transfer,
+                  t.category AS category,
+                  CASE WHEN t.kind='refund' THEN -t.partner_owed_cents ELSE t.partner_owed_cents END AS partner_cents,
+                  t.status AS status, t.source AS source, t.kind AS kind, t.id AS txn_id,
+                  NULL AS _leg_id, 0 AS _leg_amount_cents
              FROM txn t WHERE t.posted_on LIKE ? AND t.user_id = ?
                AND NOT EXISTS (SELECT 1 FROM txn_split s WHERE s.txn_id = t.id)
            UNION ALL
            SELECT t.account_id, t.posted_on, t.direction,
                   CASE WHEN t.kind='refund' THEN -s.amount_cents ELSE s.amount_cents END AS amount_cents,
-                  s.bucket, t.is_transfer
+                  s.bucket, t.is_transfer,
+                  COALESCE(NULLIF(s.category, ''), t.category) AS category,
+                  CASE WHEN t.kind='refund' THEN -t.partner_owed_cents ELSE t.partner_owed_cents END AS partner_cents,
+                  t.status AS status, t.source AS source, t.kind AS kind, t.id AS txn_id,
+                  s.id AS _leg_id, s.amount_cents AS _leg_amount_cents
              FROM txn_split s JOIN txn t ON t.id = s.txn_id WHERE t.posted_on LIKE ? AND t.user_id = ?""",
         (like, user_id, like, user_id)).fetchall()]
+    _apportion_split_partner_cents(txn_rows)
 
     # ---- Sinking funds Phase 2 fold (TODO-238, DEC-034 §5, docs/sinking-funds-design.md
     # §amendment-following "Phase 2" section) ----
@@ -3211,6 +3265,11 @@ def month_actuals(conn, user_id, month: str) -> dict:
                 txn_rows.append({
                     "account_id": None, "posted_on": f"{month}-01", "direction": "out",
                     "amount_cents": -offset_c, "bucket": bucket, "is_transfer": 0,
+                    # Not read by the aggregator. Synthetic rows are never typed by anyone
+                    # (`source='fund_fold'` keeps them out of "last logged"), carry no category
+                    # or partner share of their own, and are settled by construction.
+                    "category": None, "partner_cents": 0, "status": "settled",
+                    "source": "fund_fold", "kind": "charge", "txn_id": None,
                 })
             fund_excusal_c += funded_draw_c
         fund_contrib_c += contribution_c
@@ -3220,18 +3279,71 @@ def month_actuals(conn, user_id, month: str) -> dict:
             "fundedDraw": round(funded_draw_c / 100.0, 2),
         })
 
+    return txn_rows, {
+        "total": round(fund_excusal_c / 100.0, 2),
+        "contributions": round(fund_contrib_c / 100.0, 2),
+        "byFund": fund_breakdown,
+    }
+
+
+def month_actuals(conn, user_id, month: str) -> dict:
+    """Fetch the month's transactions + ALL snapshots (scoped to `user_id`) and hand
+    them to the pure aggregator. (Snapshots span history because the net-worth overlay
+    is a trajectory.) All user filtering happens in the store query layer
+    (`_month_txn_rows_and_funds`) — `tracking.aggregate_actuals` itself stays byte-unchanged
+    (DEC-009 #1): it still receives the same flat row shape and never sees `user_id`."""
+    txn_rows, fund_excusal = _month_txn_rows_and_funds(conn, user_id, month)
     snap_rows = [dict(r) for r in conn.execute(
         "SELECT account_id, as_of, balance_cents FROM balance_snapshot WHERE user_id = ?",
         (user_id,)).fetchall()]
     result = tracking.aggregate_actuals(txn_rows, snap_rows, account_liability_map(conn, user_id), month)
     # Additive breakdown for the client's "Am I on track?" annotation — rides ALONGSIDE
     # aggregate_actuals' own (untouched) output dict, never inside it.
-    result["fundExcusal"] = {
-        "total": round(fund_excusal_c / 100.0, 2),
-        "contributions": round(fund_contrib_c / 100.0, 2),
-        "byFund": fund_breakdown,
-    }
+    result["fundExcusal"] = fund_excusal
     return result
+
+
+# ---------- spending metrics (R1: one spending definition) ----------
+
+def first_txn_on(conn, user_id) -> str | None:
+    """Date of the user's earliest transaction of any kind, or None. A month that starts before
+    this is a month tracking had not begun, so it can never be "complete"."""
+    row = conn.execute("SELECT MIN(posted_on) AS d FROM txn WHERE user_id = ?", (user_id,)).fetchone()
+    return row["d"]
+
+
+def latest_human_spend_on(conn, user_id, upto: str) -> str | None:
+    """Latest date, on or before `upto`, of an out/non-transfer row a PERSON entered
+    (`tracking.HUMAN_SOURCES`). The freshness anchor: auto-posted schedule rows never move it.
+    The caller passes `upto` already capped at today (see `spending_metrics`), so a row typed
+    ahead of time cannot make the ledger look fresher than today."""
+    marks = ",".join("?" for _ in tracking.HUMAN_SOURCES)
+    row = conn.execute(
+        "SELECT MAX(posted_on) AS d FROM txn WHERE user_id = ? AND direction = 'out' "
+        f"AND is_transfer = 0 AND source IN ({marks}) AND posted_on <= ?",
+        (user_id, *tracking.HUMAN_SOURCES, upto)).fetchone()
+    return row["d"]
+
+
+def month_spending(conn, user_id, month: str, today: str, *, first_txn: str | None = None) -> dict:
+    """One month of spending-v1 figures, read from the SAME rows `month_actuals` aggregates
+    (`_month_txn_rows`), so the two cannot disagree. READ-ONLY. `today` is injected, never read
+    from the clock, so coverage is testable. `first_txn` is looked up when omitted; a caller
+    looping over months passes it once."""
+    if first_txn is None:
+        first_txn = first_txn_on(conn, user_id)
+    return tracking.spending_from_rows(_month_txn_rows(conn, user_id, month), month, today, first_txn)
+
+
+def spending_metrics(conn, user_id, months: list[str], today: str) -> dict:
+    """The `/api/tracking/metrics` payload for an inclusive, ordered list of 'YYYY-MM' months."""
+    first_txn = first_txn_on(conn, user_id)
+    return {
+        "definition": tracking.SPENDING_DEFINITION,
+        "asOf": latest_human_spend_on(conn, user_id, min(tracking.month_end(months[-1]), today)),
+        "today": today,
+        "months": [month_spending(conn, user_id, m, today, first_txn=first_txn) for m in months],
+    }
 
 
 def suggestions(conn, user_id) -> dict:
