@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.10.4
+
+**New: totals for the transactions you are looking at**
+
+Above the ledger on Actuals, a line shows the totals for the rows currently shown. When a filter is on, a
+second line gives something to compare against.
+
+- With no card in view: **In**, **Out** (refunds reduce it) and **Net**. Transfers between your own accounts are left
+  out, and the line says how many. The comparison line is the whole month.
+- Whenever a credit card is in view it switches to **Charges**, **Paid** (payments and refunds) and **Owed
+  this month**, and counts ONLY card money: paychecks and checking/savings rows are ignored (the line says
+  how many). The comparison line is all your cards.
+
+**Fixed: with a job change applied, your monthly take-home still did not give up the Roth IRA**
+
+When your budget amount comes from a job change (the paycheck figures in the Job change card), it is
+a payslip number, and a payslip has no Roth IRA line, so the Roth was never taken out of it. The
+budget treated that amount as already net of the Roth and left Remaining alone. It now takes the Roth
+off in that case, so changing the Roth IRA moves the green or red Remaining. A base that follows the
+plain Tax-tab take-home is still charged only once.
+
+Also: the "Investments · from Tax tab" box now lines up with the other budget boxes (its total sits
+in the same column, and its action no longer spills past the edge).
+
+## 0.10.3
+
+**Fixed: changing your Roth IRA did not change what is left in your budget**
+
+If your budget amount is a figure you typed (rather than following your Tax-tab take-home), the
+Roth IRA was in neither side of "Allocated … Remaining …", so raising or lowering it on the Tax tab
+left the green or red number exactly where it was. A Roth IRA is not taken out by payroll, so it
+comes out of the money you budget from. It now counts as allocated and reduces what is left.
+
+If your budget amount follows your take-home, nothing double-counts: take-home was already lower
+by the Roth, so what is left moves once, as before.
+
 ## 0.10.2
 
 **Fixed: the Actuals tab on a phone**

@@ -849,6 +849,15 @@
   .ac-amt-range span { color: var(--muted); font-size: var(--fs-xs); }
   /* The chips say the sentence out loud — "(Housing or Golf) and Amex" — because a row of menus
      with counts does not tell a reader how the pieces combine. */
+  /* The ledger's totals: In / Out / Net of the rows on screen (and the whole month when a filter is on),
+     so amounts can be checked without a calculator. Wraps on a phone; numbers never truncate. */
+  .ac-led-totals { display:flex; flex-wrap:wrap; gap:4px 20px; align-items:baseline; margin:8px 0 6px;
+                   font-variant-numeric: tabular-nums; font-size: var(--fs-sm); }
+  .ac-led-totals .lt-k { color: var(--muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: var(--ls-caps); margin-right:6px; }
+  .ac-led-totals .lt-row + .lt-row { margin-top: 0; }
+  .ac-led-totals .lt-line { display:flex; flex-wrap:wrap; gap:4px 20px; align-items:baseline; width:100%; }
+  .ac-led-totals .lt-note { color: var(--muted); font-size: var(--fs-xs); width:100%; }
+  .ac-led-totals b { font-weight: var(--fw-bold); }
   .ac-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
   .ac-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px 2px 9px;
              border: 1px solid var(--line); border-radius: 999px; background: var(--chip);
@@ -13567,7 +13576,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<td><span class="mng-flag" title="Already out of your take-home, so it is not part of what '
       +   'you allocate — but payroll does not move it for you.">from Tax tab</span></td>'
       + '<td class="num">' + f2(mo) + '</td>'
-      + '<td><a href="#" data-go="tax" class="gl-act">Change</a></td>';
+      + '<td><a href="#" data-go="tax" class="gl-act" title="Change it on the Tax tab" aria-label="Change Roth IRA on the Tax tab">Edit</a></td>';
   }
 
   function bgbTaxTabBucketHtml(cash) {
@@ -13582,7 +13591,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<span class="mng-name"><span style="color:' + col + '">&#9679;</span> Investments</span>'
       + '<span class="mini muted" title="This is already out of your take-home, so it is not part '
       + 'of what you allocate below — but payroll does not move it for you.">from Tax tab</span>'
-      + '<span class="bgb-bsum">' + f2(mo) + ' <span class="mini">/ ' + f2(mo * 12) + ' yr</span></span>'
+      + '<span class="bgb-bsum" style="margin-left:auto">' + f2(mo) + ' <span class="mini">/ ' + f2(mo * 12) + ' yr</span></span>'
+      + '<span class="bgb-x" aria-hidden="true"></span>'   // the ✕ slot: keeps the subtotal in the same column as the editable buckets
       + '</div>'
       // The same table shell as every other bucket, for the reason hbOrphanBucketHtml records:
       // `.bgb-items` is `table-layout: fixed`, so a table without this colgroup takes its widths
@@ -15266,23 +15276,32 @@ document.addEventListener('DOMContentLoaded', async () => {
         setBucketSum(bi, cats[bi].total, d);
       }
     }
-    const rem = base - allocated, partner = household - allocated;
+    const partner = household - allocated;
     // In total scope the ALLOCATED figure is the one that was rounded, so this line is its
     // header and has to carry the same disclosure the bucket headers do.
     const totalAdded = bgb.roundUp.scope === 'total'
       ? Object.values(roundUpByBucket).reduce((a, b) => a + b, 0) : 0;
-    // The Roth IRA is shown as a line on this tab but is out of `base` (take-home is already net of
-    // it) and out of `allocated` (budget lines only). It has to be counted on BOTH sides of this
-    // headline or the line the owner can see is the one number not in it. `Remaining` is the
-    // same either way: add it to both and the difference does not move.
+    // The Roth IRA is a line on this tab, and payroll does not move it -- you do, out of the money
+    // you budget from. Whether `base` ALREADY has it taken out depends on where base came from:
+    //   * LOCKED: base tracks the Tax tab's take-home, which is net of the Roth. It is already out,
+    //     so the headline adds it to BOTH sides and Remaining does not move (the same number twice
+    //     would be a double count).
+    //   * TYPED: base is a number the owner entered. Nothing has taken the Roth out of it, so it is
+    //     an allocation like any other line and it reduces Remaining. The owner's profile is this
+    //     case (baseLocked: false), which is why changing the Roth on the Tax tab used to leave the
+    //     green/red figure untouched.
     const rothMo = ((((window.__taxResult && window.__taxResult.cash) || {}).rothIra) || 0) / 12;
     const rothShown = rothMo > 0.005 ? rothMo : 0;
-    let s = '<b>Allocated ' + f2(allocated + rothShown) + '</b> of ' + f2(base + rothShown)
+    let rothInBase = bgbBaseIsLocked();                    // true: take-home already net of it
+    if (rothInBase) { bgbResolveBase(); rothInBase = !bgbBasePayslip; }   // a job-change payslip base is NOT net of it
+    const rothCharge = rothInBase ? 0 : rothShown;         // what Remaining must still give up
+    const rem = base - allocated - rothCharge;
+    let s = '<b>Allocated ' + f2(allocated + rothShown) + '</b> of ' + f2(base + (rothInBase ? rothShown : 0))
       + (rothShown > 0 ? ' <span class="mini muted">(incl. ' + f2(rothShown) + ' Roth IRA)</span>' : '')
       + (totalAdded > 0.005 ? ' <span class="mini muted">(incl. ' + f2(totalAdded) + ' rounded up)</span>' : '')
       + ' &middot; <span class="' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + (rem >= 0 ? 'Remaining ' : 'Over by ') + f2(Math.abs(rem)) + '</span>';
     if (partner > 0.005) s += '<br><span class="mini">Household ' + f2(household) + ' · your share ' + f2(allocated) + ' · partner ' + f2(partner) + '</span>';
-    { const pf = payFreq(); s += '<br><span class="mini">Per paycheck (' + pf + '×/yr): <b>' + f2((allocated + rothShown) * 12 / pf) + '</b> allocated of ' + f2((base + rothShown) * 12 / pf) + ' · ' + (rem >= 0 ? 'left ' : 'over ') + f2(Math.abs(rem) * 12 / pf) + '</span>'; }
+    { const pf = payFreq(); s += '<br><span class="mini">Per paycheck (' + pf + '×/yr): <b>' + f2((allocated + rothShown) * 12 / pf) + '</b> allocated of ' + f2((base + (rothInBase ? rothShown : 0)) * 12 / pf) + ' · ' + (rem >= 0 ? 'left ' : 'over ') + f2(Math.abs(rem) * 12 / pf) + '</span>'; }
     $('bgb_summary').innerHTML = s;
     window.__budgetSummary = { base: base, allocated: allocated, leftover: rem };   // monthly; for the Overview
     // Shared-line count travels with it: same tab, same render pass, one place to keep current.
@@ -16029,7 +16048,12 @@ document.addEventListener('DOMContentLoaded', async () => {
              current: cur > 0 ? Math.round(cur) : null, salary: rn(f.salary) };
   }
 
+  // True when the last resolved base is a PAYSLIP figure (job-change stretch/forward/current). Those are
+  // priced with the Roth IRA zeroed (a payslip has no IRA line), so unlike the Tax tab's take-home they
+  // are NOT already net of it.
+  let bgbBasePayslip = false;
   function bgbResolveBase() {
+    bgbBasePayslip = false;
     // BUG-0091. An APPLIED job change whose forward monthly has not computed yet returns NULL, not
     // a figure from the old job. This is a data-loss guard, not a cosmetic one: `bgbBaseAutoFill`
     // takes whatever this returns and does `bgb.baseMonthly = mo; saveBgb()`, so answering "tax
@@ -16060,23 +16084,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (pp && pp.perYear > 0) {
       const today = isoLocalDate(new Date());
       const here = (pp.phases || []).find(p => today >= p.from && today <= p.to);
-      if (here && here.net > 0) return Math.round(here.net * pp.perYear / 12);
+      if (here && here.net > 0) { bgbBasePayslip = true; return Math.round(here.net * pp.perYear / 12); }
       // After the last stretch — the new year. Before the FIRST one we fall through instead: the
       // job has not started, and `fwd.current` below is the right answer for the job you still
       // have.
       const last = (pp.phases || [])[pp.phases.length - 1];
-      if (last && today > last.to && pp.level > 0) return Math.round(pp.level * pp.perYear / 12);
+      if (last && today > last.to && pp.level > 0) { bgbBasePayslip = true; return Math.round(pp.level * pp.perYear / 12); }
     }
     // A job change that has ALREADY STARTED is the live answer: the old salary is not coming back
     // and budgeting on it plans money that no longer arrives. Before the start date it is news,
     // not the base — see bgbRenderJobChangeBanner.
     const fwd = bgbJobChangeForward();
-    if (fwd && isoLocalDate(new Date()) >= fwd.from) return fwd.monthly;
+    if (fwd && isoLocalDate(new Date()) >= fwd.from) { bgbBasePayslip = true; return fwd.monthly; }
     // BEFORE the start date, budget against what the CURRENT job actually pays in a month — not
     // the blended year "Apply" wrote into the Tax tab. You cannot spend a 12-month average of a
     // year you are two thirds of the way through: it is dragged toward the salary you no longer
     // earn by the months you already worked at it.
-    if (fwd && fwd.current != null) return fwd.current;
+    if (fwd && fwd.current != null) { bgbBasePayslip = true; return fwd.current; }
     const cu = window.__catchupCash;
     if (bgbCatchupMode && cu && cu.takeHomeMo != null) return Math.round(cu.takeHomeMo);
     const c = (window.__taxResult && window.__taxResult.cash) || {};
@@ -21585,8 +21609,64 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '</div>';
   }
 
+  // ---- Card groups: "card 1 + card 2 = total" without summing by hand. A group is a label and a list
+  // of account ids; it changes NOTHING about the money (payments, balances and the grand total are
+  // untouched) and only adds a subtotal under its members. Stored on `bgb` like `taxTabPlace`, so it
+  // rides the synced budget key. Cards in no group are shown as before. ----
+  function acCardGroups() { return (bgb && Array.isArray(bgb.cardGroups)) ? bgb.cardGroups : []; }
+  function acCardGroupOf(aid) { return acCardGroups().find(g => (g.ids || []).map(String).includes(String(aid))) || null; }
+  function acSetCardGroup(aid, target, newName) {
+    if (!bgb) return;
+    let gs = acCardGroups().map(g => ({ id: g.id, name: g.name, ids: (g.ids || []).filter(x => String(x) !== String(aid)) }));
+    if (target === '__new') {
+      const nm = String(newName || '').trim().slice(0, 40);
+      if (!nm) return;
+      gs.push({ id: 'g' + Date.now().toString(36), name: nm, ids: [String(aid)] });
+    } else if (target) {
+      const g = gs.find(x => x.id === target); if (g) g.ids.push(String(aid));
+    }
+    bgb.cardGroups = gs.filter(g => g.ids.length);          // a group with no cards is not kept
+    saveBgb();
+  }
+  function acRenameCardGroup(gid, name) {
+    const nm = String(name || '').trim().slice(0, 40); if (!nm || !bgb) return;
+    const g = acCardGroups().find(x => x.id === gid); if (g) { g.name = nm; saveBgb(); }
+  }
+  function acCardGroupPickerHtml(aid) {
+    const cur = acCardGroupOf(aid);
+    const opts = '<option value="">No group</option>'
+      + acCardGroups().map(g => '<option value="' + esc(g.id) + '"' + (cur && cur.id === g.id ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('')
+      + '<option value="__new">+ New group…</option>';
+    return '<div class="ac-card-group-pick" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
+      + '<label class="mini muted" for="ac_cg_' + aid + '">Group</label>'
+      + '<select id="ac_cg_' + aid + '" data-card-group="' + aid + '" style="min-height:36px">' + opts + '</select>'
+      + '<span data-card-group-new="' + aid + '" hidden style="display:none;gap:6px;align-items:center">'
+      +   '<input type="text" maxlength="40" placeholder="Group name" aria-label="New group name" data-card-group-name="' + aid + '" style="min-height:36px">'
+      +   '<button class="ac-tool" type="button" data-card-group-save="' + aid + '">Add</button></span>'
+      + '</div>';
+  }
+
+  function acRerenderCardsKeepingOpen(aid) {
+    if (!window.__acLastRollup) return;
+    acRenderCards(window.__acLastRollup);
+    const det = document.getElementById('ac_card_det_' + aid); if (det) det.style.display = '';
+    const tog = document.querySelector('[data-card-toggle="' + aid + '"]'); if (tog) tog.setAttribute('aria-expanded', 'true');
+  }
+  document.addEventListener('change', ev => {
+    const sel = ev.target.closest && ev.target.closest('[data-card-group]');
+    if (!sel) return;
+    const aid = sel.dataset.cardGroup;
+    if (sel.value === '__new') {
+      const f = document.querySelector('[data-card-group-new="' + aid + '"]');
+      if (f) { f.hidden = false; f.style.display = 'inline-flex'; const i = f.querySelector('input'); if (i) i.focus(); }
+      return;
+    }
+    acSetCardGroup(aid, sel.value);
+    acRerenderCardsKeepingOpen(aid);
+  });
   function acRenderCards(rollup) {
     const el = $('ac_cards'); if (!el) return;
+    window.__acLastRollup = rollup;
     if (!rollup || !rollup.perAccount || !Object.keys(rollup.perAccount).length) {
       el.innerHTML = '<div class="mini" style="color:var(--muted)">No credit cards yet.</div>';
       return;
@@ -21628,7 +21708,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     h += '<th class="num ac-col-total">Balance now</th>';
     h += '</tr></thead><tbody>';
 
-    accounts.forEach(card => {
+    const renderCard = card => {
       const rr = card.runningRemaining || 0;
       const rc = card.runningCredit    || 0;
       // manage-panel-redesign.md §3b: creditLimit reads off ACT.accounts (the /accounts payload),
@@ -21666,6 +21746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<tr class="ac-card-detail" id="ac_card_det_' + card.accountId + '" style="display:none">';
       h += '<td colspan="' + colSpan + '" style="padding:0">';
       h += '<div style="padding:10px 14px 12px;background:var(--panel-2);border-top:1px solid var(--line)">';
+      h += acCardGroupPickerHtml(card.accountId);
 
       // 1. Balance by category block (uses running/cumulative byBucketOwed)
       const byBucketOwed     = card.byBucketOwed     || {};
@@ -21821,6 +21902,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '</div>';
 
       h += '</div></td></tr>';
+    };
+
+    // Grouped cards sit together under their group's name, each keeping its own row, and the group
+    // gets a subtotal row below them (same rules as the grand total). The group appears where its
+    // first member would have; cards in no group follow in their usual order.
+    const byId = {}; accounts.forEach(c => { byId[String(c.accountId)] = c; });
+    const shown = new Set();
+    const subtotalCell = (owed, credit) => credit > EPS
+      ? '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span><br><span class="ac-pay-credit">' + acAmt(credit) + ' credit</span></td>'
+      : (owed < EPS ? '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span></td>'
+                    : '<td class="num ac-col-total"><b>' + acAmt(owed) + '</b></td>');
+    accounts.forEach(card => {
+      if (shown.has(String(card.accountId))) return;
+      const g = acCardGroupOf(card.accountId);
+      const members = g ? (g.ids || []).map(i => byId[String(i)]).filter(Boolean) : [];
+      if (!g || members.length < 1) { shown.add(String(card.accountId)); renderCard(card); return; }
+      h += '<tr class="ac-group-head"><td class="ac-col-name" colspan="2"><b>' + esc(g.name) + '</b>'
+        + ' <button class="ac-tool" type="button" data-card-group-rename="' + esc(g.id) + '" title="Rename this group">Rename</button>'
+        + '<span data-card-group-rename-form="' + esc(g.id) + '" hidden style="display:none;gap:6px;align-items:center;margin-left:6px">'
+        +   '<input type="text" maxlength="40" value="' + esc(g.name) + '" aria-label="Group name" data-card-group-rename-input="' + esc(g.id) + '" style="min-height:36px">'
+        +   '<button class="ac-tool" type="button" data-card-group-rename-save="' + esc(g.id) + '">Save</button></span></td></tr>';
+      members.forEach(m => { shown.add(String(m.accountId)); renderCard(m); });
+      const gOwed = members.reduce((a, m) => a + (m.runningRemaining || 0), 0);
+      const gCredit = members.reduce((a, m) => a + (m.runningCredit || 0), 0);
+      h += '<tr class="total ac-group-sub"><td class="ac-col-name">' + esc(g.name) + ' total</td>' + subtotalCell(gOwed, gCredit) + '</tr>';
     });
 
     // Grand total row
@@ -22167,6 +22273,64 @@ document.addEventListener('DOMContentLoaded', async () => {
   // `acRenderLedger` and there is no Apply button, because a filter that needs confirming is one
   // you cannot experiment with.
 
+  // Totals for a list of transactions, in integer cents.
+  //
+  // CHECKING-STYLE view (the default): In = money in; Out = money out LESS refunds; transfers between
+  // your own accounts are neither income nor spending, so they are left out and counted separately.
+  //
+  // CARD view (any row shown is on a credit card): only CARD money counts -- charges on a card and payments
+  // toward it. Paychecks and rows on checking/savings are ignored (and the line says how many). The questions are different. Charges = money out;
+  // Paid = payments toward the card (stored as an `in` transfer) plus refunds; Owed this month =
+  // Charges - Paid. Transfers are NOT excluded here -- a payment IS a transfer, and it is the point.
+  // Gross amounts, as printed in the rows.
+  function acIsCardTxn(t) { const a = (ACT.accounts || []).find(x => x.id === t.accountId); return !!(a && a.type === 'credit'); }
+  function acLedgerTotals(list, card) {
+    const c = x => Math.round((+x || 0) * 100);
+    let inC = 0, outC = 0, xfer = 0, xferC = 0, pend = 0, chargeC = 0, paidC = 0;
+    (list || []).forEach(t => {
+      if (t.status === 'pending') pend++;
+      if (card) {
+        if (t.direction === 'in' || t.kind === 'refund') paidC += c(t.amount); else chargeC += c(t.amount);
+        return;
+      }
+      if (t.isTransfer) { xfer++; xferC += c(t.amount); return; }
+      if (t.direction === 'in') inC += c(t.amount);
+      else if (t.kind === 'refund') outC -= c(t.amount);
+      else outC += c(t.amount);
+    });
+    return { inC: inC, outC: outC, netC: inC - outC, chargeC: chargeC, paidC: paidC, owedC: chargeC - paidC,
+             n: (list || []).length, xfer: xfer, xferC: xferC, pend: pend };
+  }
+  function acLedgerTotalsHtml(shown, all, filtered) {
+    const m = c => (c < 0 ? '−' : '') + acAmt(Math.abs(c) / 100);
+    const cardRows = shown.filter(acIsCardTxn);
+    const card = cardRows.length > 0;                 // any card in view: only card money counts (see above)
+    const cell = (k, v, cls) => '<span><span class="lt-k">' + k + '</span><b class="' + (cls || '') + '">' + v + '</b></span>';
+    const line = (which, label, t) => {
+      let body;
+      if (card) body = cell('Charges', m(t.chargeC)) + cell('Paid', t.paidC > 0 ? '+' + m(t.paidC) : m(t.paidC), t.paidC > 0 ? 'good-text' : '')
+        + cell('Owed this month', m(t.owedC), t.owedC > 0 ? 'bad-text' : (t.owedC < 0 ? 'good-text' : ''));
+      else body = cell('In', (t.inC > 0 ? '+' : '') + acAmt(t.inC / 100), t.inC > 0 ? 'good-text' : '')
+        + cell('Out', m(t.outC)) + cell('Net', (t.netC > 0 ? '+' : '') + m(t.netC), t.netC < 0 ? 'bad-text' : (t.netC > 0 ? 'good-text' : ''));
+      return '<div class="lt-line" data-lt="' + which + '"><span class="lt-k">' + label + ' ' + t.n + '</span>' + body + '</div>';
+    };
+    const a = acLedgerTotals(card ? cardRows : shown, card);
+    const skipped = card ? shown.length - cardRows.length : 0;
+    let h = '<div class="ac-led-totals" role="group" aria-label="Totals for the transactions shown" data-lt-mode="' + (card ? 'card' : 'cash') + '">' + line('shown', 'Showing', a);
+    if (filtered) {
+      // On a card the comparison is every CARD this month (paychecks have no place beside a card balance);
+      // otherwise it is the whole month.
+      if (card) { const cards = all.filter(acIsCardTxn); h += line('month', 'All cards', acLedgerTotals(cards, true)); }
+      else h += line('month', 'Whole month', acLedgerTotals(all, false));
+    }
+    const notes = [];
+    if (!card && a.xfer) notes.push(a.xfer + ' transfer' + (a.xfer > 1 ? 's' : '') + ' (' + acAmt(a.xferC / 100) + ') not counted');
+    if (skipped) notes.push(skipped + ' row' + (skipped > 1 ? 's' : '') + ' on non-card accounts not counted (paychecks, checking, savings)');
+    if (a.pend) notes.push(a.pend + ' pending included');
+    if (notes.length) h += '<div class="lt-note">' + esc(notes.join(' · ')) + '</div>';
+    return h + '</div>';
+  }
+
   async function acRenderLedger() {
     const el = $('ac_ledger'); if (!el) return;
     let txns; try { txns = (await getJSON('/api/tracking/transactions?month=' + ACT.month)).transactions; } catch (e) { return; }
@@ -22207,6 +22371,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<div style="padding:10px 0;font-size:var(--fs-sm)"><span class="muted">No transactions ' + typeWord + ' “' + esc(filterActive.value) + '” in ' + esc(acMonthLabel(ACT.month)) + '.</span> <a href="#" class="ac-tag" ' + filterActive.clearAttr + '="1" style="margin-left:6px">Clear filter ✕</a></div>';
       el.innerHTML = h;
     } else {
+      h += acLedgerTotalsHtml(shown, txns, shown.length !== txns.length);
       h += '<table class="res-table ac-led" role="table"><tr class="ac-led-head" role="row"><th role="columnheader">Date</th><th role="columnheader">Flow</th><th role="columnheader">Bucket</th><th role="columnheader">Category / tags</th><th role="columnheader">Payee / note</th><th role="columnheader">Account</th><th role="columnheader" class="num">Amount</th><th role="columnheader">Status</th><th role="columnheader"><span class="sr-only">Actions</span></th></tr>';
       shown.forEach(t => { h += acLedgerRow(t); });
       el.innerHTML = h + '</table>';
@@ -22696,6 +22861,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           catch (e) { showToast('Could not delete that schedule — ' + (errDetail(e) || 'the server refused it')); }
           await schRefresh(); return;
         } }
+      // Card groups (see acCardGroups): rename, save a new group, and the picker's "new group" reveal.
+      const cgRen = ev.target.closest('[data-card-group-rename]');
+      if (cgRen) { ev.preventDefault(); const f = document.querySelector('[data-card-group-rename-form="' + cgRen.dataset.cardGroupRename + '"]'); if (f) { f.hidden = false; f.style.display = 'inline-flex'; const i = f.querySelector('input'); if (i) { i.focus(); i.select(); } } return; }
+      const cgRenSave = ev.target.closest('[data-card-group-rename-save]');
+      if (cgRenSave) { ev.preventDefault(); const gid = cgRenSave.dataset.cardGroupRenameSave; const i = document.querySelector('[data-card-group-rename-input="' + gid + '"]'); acRenameCardGroup(gid, i && i.value); if (window.__acLastRollup) acRenderCards(window.__acLastRollup); return; }
+      const cgSave = ev.target.closest('[data-card-group-save]');
+      if (cgSave) { ev.preventDefault(); const aid = cgSave.dataset.cardGroupSave; const i = document.querySelector('[data-card-group-name="' + aid + '"]'); const nm = i && i.value.trim(); if (!nm) { if (i) i.focus(); return; } acSetCardGroup(aid, '__new', nm); acRerenderCardsKeepingOpen(aid); return; }
       // Card row expand/collapse
       const ct = ev.target.closest('[data-card-toggle]');
       if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open)); } return; }
