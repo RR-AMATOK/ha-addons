@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.5
+
+**Budget: your employer's HSA money now counts toward Investments**
+
+In the Budget tab's "By bucket" summary, the employer HSA contribution (from the Tax tab) gets its own line
+under Investments, labelled as paid by your employer. It is included in the Investments total, the investing
+percentage and the note under the table. It never comes out of your pocket, so Remaining, Allocated, the
+per-paycheck line and the plan Actuals compares against are unchanged.
+
 ## 0.10.4
 
 **New: totals for the transactions you are looking at**

@@ -15335,7 +15335,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (tt) tt.innerHTML = bgbTaxTabBucketHtml(tc);
       }
       const incomeBase = base + taxInvest;
-      const pctOf = v => (incomeBase > 0 ? (v / incomeBase * 100).toFixed(1) : '0.0') + '%';
+      // Employer-paid HSA money is invested for you but never leaves your pocket. It counts toward
+      // the Investments total and the percentages (the Overview's saving rate already counts it),
+      // and NOTHING else: not `allocated`/`allocTot` (that is what you spend + move), not
+      // `taxInvestMonthly`, and not `incomeBase`, which is exported to the Actuals plan.
+      const erInvest = (tc.employerHsa || 0) / 12;
+      const pctBase = incomeBase + erInvest;
+      const pctOf = v => (pctBase > 0 ? (v / pctBase * 100).toFixed(1) : '0.0') + '%';
       const pf = payFreq();                          // paychecks per year (e.g. 24 = semi-monthly)
       const pp = v => f2(v * 12 / pf);               // monthly → per-paycheck
       const categories = getCategories();
@@ -15349,10 +15355,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       // per-framework-kind, so it never needed folding. This fold only feeds the "By type vs
       // strategy" table + "Spending by type" bars just below, a pure display concern.
       const fold = foldCategoriesByCountsAs(categories, kindT);
-      fold.framework.investment += taxInvest;   // Tax-tab investments always count as Investment — not a category, bypasses countsAs entirely
+      fold.framework.investment += taxInvest + erInvest;   // Tax-tab investments always count as Investment — not a category, bypasses countsAs entirely
 
       // Verdict headline: investment rate vs the strategy's investment target
-      const _invPct = incomeBase > 0 ? fold.framework.investment / incomeBase : 0;
+      const _invPct = pctBase > 0 ? fold.framework.investment / pctBase : 0;
       const _invTgt = T.investment != null ? T.investment : 0.20;
       // Expose the derived monthly plan baseline so the Actuals tab can lock it for plan-vs-actual.
       const planLines = {};
@@ -15375,7 +15381,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       // performance on average but makes it WORSE in over a third of cases, and the moderator is
       // whether attention lands on the task or the self. An amount and a distance say the same
       // thing and judge nothing -- and a dollar delta is more actionable than a percentage point.
-      const _invAmt = fold.framework.investment, _invTgtAmt = incomeBase * _invTgt;
+      const _invAmt = fold.framework.investment, _invTgtAmt = pctBase * _invTgt;
       const _invDelta = _invAmt - _invTgtAmt;
       // The verb moved into the tile's label so it is not said twice. The rest of this line is
       // unchanged and deliberately so -- see the note above on grading the month, not the person.
@@ -15441,7 +15447,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           cs += '<div class="gdb mini muted">Calculate your taxes to see where your gross pay goes. <a href="#" data-go="tax">Open the Tax tab \u2192</a></div>';
         }
       }
-      cs += '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Investing</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + esc(_invLine) + '</div><div class="s">' + (_invPct * 100).toFixed(0) + '% of ' + f2(incomeBase) + '/mo · plan + payroll · vs ' + esc(bgb.strategy) + '</div></div></div>';
+      cs += '<div class="tiles" style="margin-bottom:10px"><div class="tile ' + (_invPct >= _invTgt ? 'good' : 'warn') + '"><div class="k">Investing</div><div class="v" style="font-size:var(--fs-lg);font-variant-numeric:tabular-nums">' + esc(_invLine) + '</div><div class="s">' + (_invPct * 100).toFixed(0) + '% of ' + f2(pctBase) + '/mo · plan + payroll · vs ' + esc(bgb.strategy) + '</div></div></div>';
       // 1) By type vs the selected strategy — per-paycheck + monthly + yearly + target + Δ. The
       // three rows are always the framework kinds (folded per countsAs); anything standalone
       // (countsAs=null) gets its own visually-distinct group below with no target — see
@@ -15474,7 +15480,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       cs += '<tr class="total"><td>Spent + invested</td><td class="num">' + pp(allocTot) + '</td><td class="num">' + f2(allocTot) + '</td><td class="num">' + f2(allocTot * 12) + '</td><td class="num">' + pctOf(allocTot) + '</td><td></td><td></td></tr>';
       cs += '<tr><td>Unallocated take-home</td><td class="num ' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + pp(rem) + '</td><td class="num ' + (rem >= 0 ? 'good-text' : 'bad-text') + '">' + f2(rem) + '</td><td class="num">' + f2(rem * 12) + '</td><td class="num">' + pctOf(rem) + '</td><td></td><td></td></tr>';
       cs += '</table>';
-      if (taxInvest > 0) cs += '<div class="note-box">Investment includes your <b>' + f2(taxInvest) + '/mo</b> of 401k/HSA/Roth/ESPP from the <b>Tax</b> tab, on top of budget investments. Percentages are of after-tax income (take-home + investments).</div>';
+      if (taxInvest > 0) cs += '<div class="note-box">Investment includes your <b>' + f2(taxInvest) + '/mo</b> of 401k/HSA/Roth/ESPP from the <b>Tax</b> tab, on top of budget investments' + (erInvest > 0.005 ? ', plus <b>' + f2(erInvest) + '/mo</b> your employer puts in your HSA (not from your pay)' : '') + '. Percentages are of after-tax income (take-home + investments).</div>';
 
       // 2) Bar graph by type (% of after-tax income) — same framework fold + standalone group
       // as the table above, for consistency (0.3.4 batch sweep).
@@ -15528,7 +15534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         ['Roth IRA', tc.rothIra], ['HSA', tc.hsa],
         ['ESPP', tc.eeStock], ['After-tax 401(k)', tc.afterTax401k],
       ].filter(k => (k[1] || 0) > 0).map(k => [k[0], (k[1] || 0) / 12]);
-      const invTotal = taxInvest + invCats.reduce((a, c) => a + c.total, 0);
+      const invTotal = taxInvest + erInvest + invCats.reduce((a, c) => a + c.total, 0);
       if (invTotal > 0) {
         cs += rowFor('<b>Investments</b>', invTotal, 'investment', 'bgb-inv-roll');
         taxKids.forEach(([label, amt]) => {
@@ -15536,6 +15542,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                      + ' <span class="bgb-inv-src">from Tax tab</span></span>', amt, 'investment',
                        'bgb-inv-sub');
         });
+        // Employer HSA: in the total above, but not from your pocket, so it says so.
+        if (erInvest > 0.005) {
+          cs += rowFor('<span class="bgb-inv-kid">HSA \u2014 employer <span class="bgb-inv-src">paid by employer, not from your pay</span></span>',
+                       erInvest, 'investment', 'bgb-inv-sub');
+        }
         // Budget-side investment lines join the SAME child list rather than sitting in a second,
         // parallel place — the owner's "if within our budget we have Investments, we should add
         // them to the sub lines". They are removed from the main list above, so nothing is counted
