@@ -945,8 +945,22 @@ def account_balances(txn_rows: list[dict], snapshot_rows: list[dict], accounts: 
     for lst in snaps_by_acct.values():
         lst.sort(key=lambda s: s["asOf"])
 
-    def _flow_sum_cents(rows: list[dict], lower_date: str | None, status: str,
-                         upper_date: str | None = None) -> int:
+    def _after(r: dict, anchor: tuple[str, str | None]) -> bool:
+        """Is this flow later than the anchor snapshot? A flow on a LATER day always is. A flow on the
+        anchor's OWN day used to never count ("already reflected in the hand-entered balance"), which
+        meant a payment recorded after you typed today's balance never moved it. It now counts when it
+        was recorded (``createdAt``) after the snapshot was saved. Missing timestamps keep the old
+        answer (not after), so callers that never carry them are unchanged."""
+        d, c = anchor
+        if r["postedOn"] > d:
+            return True
+        if r["postedOn"] == d:
+            rc = r.get("createdAt")
+            return bool(rc and c and rc > c)
+        return False
+
+    def _flow_sum_cents(rows: list[dict], lower_date: tuple[str, str | None] | None, status: str,
+                         upper_date: tuple[str, str | None] | None = None) -> int:
         """Σ nw-delta cents over ``rows`` with this ``status``, in the window
         ``(lower_date, upper_date or as_of]`` -- strictly after ``lower_date`` (the
         anchor's own day is assumed already reflected in its hand-entered balance,
@@ -962,9 +976,9 @@ def account_balances(txn_rows: list[dict], snapshot_rows: list[dict], accounts: 
         for r in rows:
             if r["status"] != status:
                 continue
-            if lower_date is not None and not (r["postedOn"] > lower_date):
+            if lower_date is not None and not _after(r, lower_date):
                 continue
-            if upper_date is not None and not (r["postedOn"] <= upper_date):
+            if upper_date is not None and _after(r, upper_date):
                 continue
             total += _nw_delta_cents(r["direction"], r["kind"], round(r["amount"] * 100))
         return total
@@ -979,8 +993,8 @@ def account_balances(txn_rows: list[dict], snapshot_rows: list[dict], accounts: 
         snaps = snaps_by_acct.get(acct_id, [])
 
         if snaps:
-            v0_date, v0_val = snaps[0]["asOf"], nw_sign * round(snaps[0]["balance"] * 100)
-            vk_date, vk_val = snaps[-1]["asOf"], nw_sign * round(snaps[-1]["balance"] * 100)
+            v0_date, v0_val = (snaps[0]["asOf"], snaps[0].get("createdAt")), nw_sign * round(snaps[0]["balance"] * 100)
+            vk_date, vk_val = (snaps[-1]["asOf"], snaps[-1].get("createdAt")), nw_sign * round(snaps[-1]["balance"] * 100)
         else:
             v0_date, v0_val = None, 0
             vk_date, vk_val = None, 0
@@ -1007,7 +1021,7 @@ def account_balances(txn_rows: list[dict], snapshot_rows: list[dict], accounts: 
         # isLiability-aware flip of its own.
         last_reconcile_delta_cents = 0
         if len(snaps) >= 2:
-            prior_date = snaps[-2]["asOf"]
+            prior_date = (snaps[-2]["asOf"], snaps[-2].get("createdAt"))
             prior_val = nw_sign * round(snaps[-2]["balance"] * 100)
             flows_between_cents = _flow_sum_cents(rows, prior_date, "settled", upper_date=vk_date)
             last_reconcile_delta_cents = vk_val - prior_val - flows_between_cents

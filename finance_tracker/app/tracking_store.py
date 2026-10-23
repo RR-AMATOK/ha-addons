@@ -2834,6 +2834,14 @@ def update_txn(conn, user_id, txn_id, **fields) -> dict | None:
         if has_splits:
             raise ValueError("refunds cannot be split")
     sets, vals = [], []
+    # A pending row that is CONFIRMED counts from the moment it is confirmed, not from when it was first
+    # typed: account_balances compares a same-day flow's created_at with the balance snapshot's, so
+    # re-stamping on pending -> settled is what makes a confirmed payment move the balance right then.
+    if fields.get("status") == "settled":
+        was = conn.execute("SELECT status FROM txn WHERE id = ? AND user_id = ?", (txn_id, user_id)).fetchone()
+        if was is not None and was["status"] == "pending":
+            fields["created_at"] = _now()
+            allowed = allowed | {"created_at"}
     for k, v in fields.items():
         if k not in allowed:
             continue
@@ -2975,7 +2983,8 @@ def upsert_snapshot(conn, user_id, account_id, as_of, balance_cents, source="man
         """INSERT INTO balance_snapshot (user_id, account_id, as_of, balance_cents, source, created_at)
            VALUES (?,?,?,?,?,?)
            ON CONFLICT(account_id, as_of)
-           DO UPDATE SET balance_cents = excluded.balance_cents, source = excluded.source""",
+           DO UPDATE SET balance_cents = excluded.balance_cents, source = excluded.source,
+                         created_at = excluded.created_at""",
         (user_id, account_id, as_of, int(balance_cents), source, _now()),
     )
     conn.commit()

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.6
+
+**New: Actuals "Sinking funds" card becomes three tabs, and "Cash vs cards" tells you whether you can pay every card**
+
+- **Tabs:** Sinking funds, Cash vs cards and Ventures now share one card on Actuals. The tab you used last is remembered.
+- **Cash vs cards:** the answer comes first ("Yes, you can pay all 3 cards now" or "Not yet. Short by $X"), then one row per
+  card saying **Pay now**, **Pay part** or **Wait** and which account pays it. Each account has a one-line rule
+  ("Only Amex Gold - Need + Want") with an **Edit** button; the controls stay collapsed until you open them.
+- **Joint and earmarked money:** an account can be limited to chosen cards and chosen buckets (need, want, travel...), so
+  money set aside for one use is not counted toward another.
+- **Fund pace:** each sinking fund shows whether its monthly contribution reaches the target by the target date - On target,
+  Over or Under.
+
+**Fixed: paying a card did not lower the money in the account that paid it**
+
+- The payment form now defaults to a real account (the one you used last) and balances reload as soon as a payment is saved.
+- A payment recorded on the same day you typed the balance now moves that balance. A payment recorded before you saved the
+  balance is not counted twice; a pending row counts from the moment you confirm it; typing the balance again re-sets the
+  starting point. This changes how every account balance is calculated, so check a few against your bank.
+
 ## 0.10.5
 
 **Budget: your employer's HSA money now counts toward Investments**

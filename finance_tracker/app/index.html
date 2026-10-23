@@ -2277,6 +2277,59 @@
   .ac-refund-toggle:hover { color: var(--good); border-color: transparent; }
   .ac-refund-toggle.active { color: var(--good); font-weight: var(--fw-semibold); }
   /* Sinking funds — reserve chip (TODO-238, DEC-034 Phase 1), same pill family as .ac-earmark-chip */
+  .ac-subtabs { display:flex; gap:6px; margin:0 0 12px; border-bottom:1px solid var(--line); }
+  .ac-subtab { appearance:none; background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; padding:10px 14px; min-height:44px; color:var(--muted); font:inherit; font-size:var(--fs-md, 1rem); font-weight:var(--fw-semibold); cursor:pointer; }
+  .ac-subtab[aria-selected="true"] { color:var(--text, inherit); border-bottom-color:var(--accent); }
+  .sf-pace { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:var(--fs-xs); font-weight:var(--fw-semibold); white-space:nowrap; border:1px solid var(--line); color:var(--muted); }
+  .sf-pace.on, .sf-pace.funded, .sf-pace.over { color:var(--good); border-color:var(--good); }
+  .sf-pace.under { color:var(--warn); border-color:var(--warn); }
+  .sf-pace.late { color:var(--bad); border-color:var(--bad); }
+  .cp-acct { padding:10px 0; border-top:1px solid var(--line-faint, var(--line)); }
+  .cp-acct-head { display:flex; justify-content:space-between; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .cp-cards { display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 2px; }
+  .cp-cards label { display:inline-flex; align-items:center; gap:6px; min-height:36px; font-size:var(--fs-sm); }
+
+  /* ---- Cash vs cards redesign ---- */
+  .warn-text { color:var(--warn); }
+  .cp-layout { display:grid; grid-template-columns:minmax(0,1fr); row-gap:var(--space-5); }
+  .cp-sec { min-width:0; }
+  .cp-sec > .subhead:first-child { margin-top:0; }
+  .cp-verdict.tiles { grid-template-columns:minmax(0,1fr); }
+  .cp-verdict .v { font-size:var(--fs-lg); }
+  .cp-verdict .s { font-size:var(--fs-sm); line-height:var(--lh-base); }
+  .cp-figs { margin:var(--space-2) 0 0; }
+  .cp-list { list-style:none; margin:0; padding:0; }
+  .cp-row { padding:10px 0; border-top:1px solid var(--line-faint); }
+  .cp-line, .cp-acct-sub { display:flex; justify-content:space-between; align-items:baseline; gap:4px 10px; }
+  .cp-name { font-weight:var(--fw-semibold); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cp-amt { font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cp-sub { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; margin-top:6px; font-size:var(--fs-sm); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .sf-pace.is-pay { color:var(--good); border-color:var(--good); }
+  .sf-pace.is-part, .sf-pace.is-wait { color:var(--warn); border-color:var(--warn); }
+  .cp-acct-sub { align-items:center; margin-top:2px; }
+  .cp-rule { font-size:var(--fs-sm); color:var(--muted); min-width:0; }
+  .cp-use { font-size:var(--fs-xs); color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+  .cp-acct .iv-act { flex-shrink:0; min-height:24px; min-width:24px; padding:3px 6px; margin-right:-6px; }
+  .cp-edit select { width:100%; }
+  .cp-edit[hidden] { display:none; }
+  .cp-pick { border:0; padding:0; margin:var(--space-3) 0 0; min-width:0; }
+  .cp-pick > legend { padding:0; }
+  .cp-pick .cp-cards { margin-top:var(--space-1); }
+  .cp-edit-foot { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); flex-wrap:wrap; margin-top:var(--space-2); }
+  .cp-edit-foot .iv-edit-note { margin:0; }
+  @media (min-width: 901px) {
+    .cp-layout { grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:32px; align-items:start; }
+    .cp-sec-verdict { grid-column:1; grid-row:1; }
+    .cp-sec-cards   { grid-column:1; grid-row:2; }
+    .cp-sec-buckets { grid-column:1; grid-row:3; }
+    .cp-sec-accts   { grid-column:2; grid-row:1 / span 3; }
+  }
+  @media (max-width: 480px) {
+    .cp-acct .iv-act { min-height:44px; min-width:44px; margin-block:-12px; }
+    .cp-done { min-height:44px; min-width:44px; }
+    .cp-edit select { min-height:44px; }
+    .cp-cards label { min-height:44px; }
+  }
   .sf-chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:var(--fs-xs); font-weight:var(--fw-semibold); background:var(--chip); white-space:nowrap; }
   .sf-chip.has-reserve { color:var(--good); border:1px solid var(--good); }
   .sf-chip.is-empty { color:var(--muted); border:1px solid var(--line); }
@@ -4462,18 +4515,24 @@
 
   <!-- Sinking funds — fund lens (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md §6.2) -->
   <section class="card" id="ac_funds_section">
-    <h2>Sinking funds</h2>
-    <p class="mini" style="margin:-4px 0 8px">Reserve per fund, this month's contributions/draws, and which funded amounts are excused vs. still count. Set up funds in the Budget tab. <span class="muted">Not folded into the "on track" verdict above yet — a separate lens for now.</span></p>
-    <div id="ac_funds"><div class="mini" style="color:var(--muted)">Loading funds…</div></div>
-  </section>
-
-  <!-- Ventures lives here, not on Decisions (ux-element-audit.md, Decisions table). Decisions is
-       the once-every-few-years tab -- house, car -- and Ventures is a MONTHLY tracker, the only
-       thing on that tab you touched more than once a year. It reads entirely from transactions
-       tagged in this tab, so its own note-box was pointing users back here; putting the tracker
-       next to the log that feeds it is what makes the upkeep stick. Above the ledger, because
-       the ledger grows without bound and nothing should sit below it. -->
-  <section class="card" id="vn_card">
+    <div class="ac-subtabs" role="tablist" aria-label="Funds and cash">
+      <button type="button" role="tab" class="ac-subtab" id="ac_tab_funds" data-ac-subtab="funds" aria-selected="true" aria-controls="ac_panel_funds">Sinking funds</button>
+      <button type="button" role="tab" class="ac-subtab" id="ac_tab_cash" data-ac-subtab="cash" aria-selected="false" aria-controls="ac_panel_cash" tabindex="-1">Cash vs cards</button>
+      <button type="button" role="tab" class="ac-subtab" id="ac_tab_ventures" data-ac-subtab="ventures" aria-selected="false" aria-controls="ac_panel_ventures" tabindex="-1">Ventures</button>
+    </div>
+    <div role="tabpanel" id="ac_panel_funds" aria-labelledby="ac_tab_funds" data-ac-panel="funds">
+      <p class="mini" style="margin:0 0 8px">Reserve per fund and whether each one is on pace for its target date. Set up funds in the Budget tab. <span class="muted">Not folded into the "on track" verdict above yet — a separate lens for now.</span></p>
+      <div id="ac_funds"><div class="mini" style="color:var(--muted)">Loading funds…</div></div>
+    </div>
+    <div role="tabpanel" id="ac_panel_cash" aria-labelledby="ac_tab_cash" data-ac-panel="cash" hidden>
+      <div id="ac_cashcards"><div class="mini" style="color:var(--muted)">Loading balances…</div></div>
+      <div id="ac_cash_live" class="sr-only" role="status" aria-live="polite"></div>
+    </div>
+    <div role="tabpanel" id="ac_panel_ventures" aria-labelledby="ac_tab_ventures" data-ac-panel="ventures" hidden>
+      <!-- Ventures lives on Actuals, not Decisions (ux-element-audit.md): it reads entirely from
+           transactions tagged here. It is a tab of the funds card so it stops being a long scroll
+           stop above the ledger. The id stays on the inner div: the section index looks it up. -->
+      <div id="vn_card">
     <h2>Ventures — earning back what you invest in yourself</h2>
     <p class="mini">Track a side venture — a course, a certification, equipment — against the money it earns. List what you put in, link its money (a tag you use below, or a dedicated account), and watch how long until it pays for itself.</p>
     <div id="vn_list" class="mini muted">No ventures yet — track a course, cert, or gear against what it earns back.</div>
@@ -4491,6 +4550,8 @@
       <button class="seed-btn" id="vn_add" type="button" style="margin-left:auto">+ Add venture</button>
     </div>
     <div class="note-box" style="margin-top:10px"><b>Two rules keep this honest.</b> (1) List the course and equipment here as investments — the money you want back. (2) Tag every dollar the venture earns <i>and</i> spends (client payments, vials, room rent, insurance) in the ledger below — or link a dedicated account so everything on it counts automatically. <b>Don't tag the course or equipment purchase</b> — it's already counted here. Miss a running cost and your return will look better than it really is. All figures are <b>pre-tax cash payback</b> — venture profit is self-employment income (SE + income tax owed at filing, plus WA B&amp;O if you move) — talk to a professional before acting on "paid back".</div>
+  </div>
+    </div>
   </section>
 
   <section class="card" id="ac_tx_card"><h2>This month's transactions</h2>
@@ -5154,6 +5215,8 @@ function tabIndexGo(id) {
   if (sec.tagName === 'DETAILS' && !sec.open) sec.open = true;
   const closed = sec.closest('details:not([open])');
   if (closed) closed.open = true;
+  const pan = sec.closest('[data-ac-panel]');          // a section on a hidden sub-tab: show that tab first
+  if (pan && pan.hidden) { const tb = document.querySelector('[data-ac-subtab="' + pan.dataset.acPanel + '"]'); if (tb) tb.click(); }
   sec.scrollIntoView({ block: 'start', behavior: (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth' });
   // Move focus, not just the viewport -- a keyboard user who activates a link must land there.
   const head = sec.querySelector(':scope > summary, :scope > h2') || sec;
@@ -19631,6 +19694,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ACT.snapLoadOk = false; ACT.history = {};
     }
     acRenderAcctList();
+    if (typeof acRenderCashCards === 'function') acRenderCashCards();
   }
 
   // manage-panel-redesign.md §2c — view + edit-one-row. VIEW row (default): a quiet .mng-row
@@ -20201,6 +20265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function acRefresh() {
     acEnsureBudgetPlan();
+    acLoadBalances();       // a payment, edit or delete moves account balances; never leave the old figure on screen
     // Catch-up FIRST, and this is the whole reason it moved: it WRITES transactions, and it used
     // to run at the tail of acRenderRecurring -- after the ledger, the plan-vs-actual and the
     // "$X in · $Y out" status had already painted. So on the load that posted them, everything on
@@ -20243,6 +20308,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await acRenderRecurring();
     try { const cr = await getJSON('/api/tracking/card-rollup?month=' + ACT.month); acRenderCards(cr.rollup); } catch (e) { acRenderCards(null); }
     try { const fr = await getJSON('/api/tracking/fund-rollup?month=' + ACT.month); ACT.funds = fr.funds || []; acRenderFunds(fr); } catch (e) { ACT.funds = []; acRenderFunds(null); }
+    acRenderCashCards();
     try { const op = await getJSON('/api/tracking/open-pending?month=' + ACT.month); ACT.openPending = op.txns || []; } catch (e) { ACT.openPending = []; }
     acRenderOpenPending();
   }
@@ -21875,7 +21941,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const _payDate = ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month);
       const _payAmt  = acMoneyEdit(Math.max(0, rr));
       const _nonCreditAccts = ACT.accounts.filter(a => a.type !== 'credit');
-      const _fromOpts = '<option value="">— none —</option>' + _nonCreditAccts.map(a => '<option value="' + a.id + '">' + esc(a.name) + '</option>').join('');
+      // A payment with no "from" credits the card and takes NOTHING out of any account, so the
+      // account balances (and Cash vs cards) never moved -- the owner's bug. Default to the account
+      // last paid from, else the first checking account; "none" stays available but is a choice.
+      let _lastFrom = ''; try { _lastFrom = localStorage.getItem('ac_pay_from') || ''; } catch (e) {}
+      const _defFrom = String((_nonCreditAccts.find(a => String(a.id) === _lastFrom) || _nonCreditAccts.find(a => a.type === 'checking') || {}).id || '');
+      const _fromOpts = '<option value="">— none (card only, no account changes) —</option>' + _nonCreditAccts.map(a => '<option value="' + a.id + '"' + (String(a.id) === _defFrom ? ' selected' : '') + '>' + esc(a.name) + '</option>').join('');
       const _catOpts  = '<option value="">Whole card / no category</option>'
         + getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join('');
       h += '<div class="ac-pay-form" id="ac_pay_form_' + card.accountId + '" hidden>';
@@ -21954,6 +22025,264 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.innerHTML = h;
   }
 
+  // ---- Fund pace: is the reserve on course to hit the target by the date? Projects the reserve at
+  // the target date from what is saved now plus the monthly contribution, and compares it with the
+  // target. Over = would finish above it, Under = would fall short. A fund with no target or no date
+  // has no pace ('none'); a fund already at its target is 'funded'; past its date and short is 'late'.
+  function acFundPace(f) {
+    const target = +f.target || 0, endStr = f.effectiveTargetDate || f.targetDate;
+    if (!(target > 0) || !endStr) return { kind: 'none' };
+    const reserve = +f.reserve || 0;
+    if (reserve >= target - 0.005) return { kind: 'funded', target, reserve };
+    const end = new Date(endStr + 'T12:00:00'), days = (end - new Date()) / 86400000;
+    if (!(days >= 0)) return { kind: 'late', target, reserve, short: target - reserve, endStr };
+    const monthsLeft = days / 30.4375, monthly = +f.monthlyContribution || 0;
+    const projected = reserve + monthly * monthsLeft, delta = projected - target;
+    const tol = Math.max(1, target * 0.01);
+    return { kind: delta > tol ? 'over' : delta < -tol ? 'under' : 'on', target, reserve, projected, delta,
+             needMonthly: (target - reserve) / Math.max(monthsLeft, 1), monthly, monthsLeft, endStr };
+  }
+  function acFundPaceChip(p) {
+    if (p.kind === 'none') return '<span class="sf-pace none" title="Set a target amount and date in the Budget tab to see the pace">no target</span>';
+    if (p.kind === 'funded') return '<span class="sf-pace funded">Funded</span>';
+    if (p.kind === 'late') return '<span class="sf-pace late">Past due · ' + acAmt(p.short) + ' short</span>';
+    if (p.kind === 'on') return '<span class="sf-pace on">On target</span>';
+    return '<span class="sf-pace ' + p.kind + '">' + (p.kind === 'over' ? 'Over ' : 'Under ') + acAmt(Math.abs(p.delta)) + '</span>';
+  }
+  function acFundPaceLine(p, f) {
+    if (p.kind === 'none' || p.kind === 'funded') return '';
+    if (p.kind === 'late') return 'Target date ' + esc(sfDateLabel(p.endStr)) + ' has passed with ' + acAmt(p.short) + ' still to go.';
+    const by = esc(sfDateLabel(p.endStr));
+    const verdict = p.kind === 'on' ? 'on target' : p.kind === 'over' ? 'over target by ' + acAmt(p.delta) : 'under target by ' + acAmt(-p.delta);
+    return 'At ' + acAmt(p.monthly) + '/mo you would have about <b>' + acAmt(p.projected) + '</b> by ' + by + ' of ' + acAmt(p.target)
+      + ' — <b>' + verdict + '</b>.' + (p.kind === 'under' ? ' Setting aside ' + acAmt(p.needMonthly) + '/mo would get there.' : '');
+  }
+
+  // ---- Cash vs cards: can the checking and savings cover every card right now? Each account says
+  // which cards it may pay: any (default), only the ticked ones (a joint account that should cover
+  // just its own card), or none (an emergency fund you will not touch). Stored on `bgb.cardPayFrom`
+  // like card groups, so it rides the synced budget key. It changes no money, only the answer shown.
+  function acCashPlanRules() { return (bgb && bgb.cardPayFrom && typeof bgb.cardPayFrom === 'object') ? bgb.cardPayFrom : {}; }
+  function acSetCashRule(aid, patch) {
+    if (!bgb) return;
+    if (!bgb.cardPayFrom || typeof bgb.cardPayFrom !== 'object') bgb.cardPayFrom = {};
+    const cur = bgb.cardPayFrom[aid] || {};
+    bgb.cardPayFrom[aid] = Object.assign({ mode: cur.mode || 'any', cards: (cur.cards || []).slice(),
+      bucketMode: cur.bucketMode || 'all', buckets: (cur.buckets || []).slice() }, patch);
+    saveBgb();
+  }
+  // What a card owes, split by bucket, in cents-safe dollars. Bucket splits come from the card rollup
+  // (settled charges minus payments earmarked to a bucket); a general payment lowers the card's total
+  // but no bucket, so the buckets are scaled down to add up to what the card really owes now.
+  function acCardChunks(c) {
+    const owe = Math.max(0, +c.runningRemaining || 0); if (owe < 0.005) return [];
+    const bb = c.byBucketOwed || {}, parts = [];
+    Object.keys(bb).forEach(k => { if (+bb[k] > 0.004) parts.push([k, +bb[k]]); });
+    if ((+c.uncategorizedOwed || 0) > 0.004) parts.push(['uncat', +c.uncategorizedOwed]);
+    const gross = parts.reduce((t, x) => t + x[1], 0);
+    if (gross < 0.005) return [['uncat', owe]];
+    const k = gross > owe ? owe / gross : 1;
+    const out = parts.map(x => [x[0], x[1] * k]);
+    if (gross * k < owe - 0.004) out.push(['uncat', owe - gross * k]);
+    return out;
+  }
+  const acBucketName = k => k === 'uncat' ? 'No bucket' : labelForBucket(k);
+  function acCashPlan() {
+    const cash = (ACT.accounts || []).filter(a => !a.isLiability && ['checking', 'savings', 'cash'].includes(a.type));
+    const rollup = window.__acLastRollup;
+    const cards = rollup && rollup.perAccount ? Object.values(rollup.perAccount) : [];
+    const rules = acCashPlanRules();
+    const chunks = []; cards.forEach(c => acCardChunks(c).forEach(x => chunks.push({ card: c.accountId, cname: c.name || acAcctName(c.accountId), bucket: x[0], owed: x[1], left: x[1], by: [] })));
+    const bucketKeys = []; chunks.forEach(x => { if (!bucketKeys.includes(x.bucket)) bucketKeys.push(x.bucket); });
+    const accts = cash.map(a => {
+      const ab = (ACT.balances || {})[a.id], bal = ab && ab.balance != null ? Math.max(0, +ab.balance) : 0;
+      const r = rules[a.id] || {};
+      return { id: a.id, name: a.name, type: a.type, bal, known: !!(ab && ab.balance != null), mode: r.mode || 'any',
+               cards: (r.cards || []).map(String), bucketMode: r.bucketMode === 'only' ? 'only' : 'all',
+               buckets: (r.buckets || []).map(String), left: (r.mode === 'none') ? 0 : bal, used: 0 };
+    });
+    const narrow = a => (a.mode === 'only' ? 1 : 0) + (a.bucketMode === 'only' ? 1 : 0);
+    // Accounts with the tightest rules pay first, so a flexible account is left for whatever they cannot cover.
+    accts.map((a, i) => [a, i]).sort((x, y) => narrow(y[0]) - narrow(x[0]) || x[1] - y[1]).forEach(([a]) => {
+      if (a.mode === 'none') return;
+      chunks.forEach(x => {
+        if (a.mode === 'only' && !a.cards.includes(String(x.card))) return;
+        if (a.bucketMode === 'only' && !a.buckets.includes(x.bucket)) return;
+        const amt = Math.min(a.left, x.left); if (amt <= 0.004) return;
+        a.left -= amt; x.left -= amt; a.used += amt; x.by.push({ name: a.name, amt });
+      });
+    });
+    const sum = (arr, f) => arr.reduce((t, x) => t + f(x), 0);
+    const rows = cards.map(c => {
+      const mine = chunks.filter(x => x.card === c.accountId);
+      return { id: c.accountId, name: c.name || acAcctName(c.accountId), owed: sum(mine, x => x.owed), short: sum(mine, x => x.left),
+               paidBy: mine.reduce((m, x) => { x.by.forEach(p => { const e = m.find(y => y.name === p.name); if (e) e.amt += p.amt; else m.push({ name: p.name, amt: p.amt }); }); return m; }, []) };
+    }).filter(r => r.owed > 0.004);
+    const byBucket = bucketKeys.map(k => { const m = chunks.filter(x => x.bucket === k);
+      return { key: k, owed: sum(m, x => x.owed), short: sum(m, x => x.left) }; });
+    return { accts, rows, byBucket, bucketKeys, totalOwed: sum(rows, r => r.owed), totalShort: sum(rows, r => r.short),
+             usable: sum(accts.filter(a => a.mode !== 'none'), a => a.bal), cashTotal: sum(accts, a => a.bal), cards };
+  }
+  let acCashEditId = null;
+  function acCashRuleSummary(a, plan) {
+    if (a.mode === 'none') return 'Kept, pays no cards';
+    const cardName = id => { const c = plan.cards.find(x => String(x.accountId) === String(id)); return c ? (c.name || acAcctName(c.accountId)) : null; };
+    let cards = 'Any card';
+    if (a.mode === 'only') {
+      const names = a.cards.map(cardName).filter(Boolean);
+      if (!names.length) return '<span class="warn-text">⚠ No cards ticked, pays nothing</span>';
+      cards = 'Only ' + (names.length <= 2 ? names.map(esc).join(', ') : names.length + ' cards');
+    }
+    const bk = a.bucketMode !== 'only' ? 'every bucket'
+      : (a.buckets.length ? a.buckets.map(k => esc(acBucketName(k))).join(' + ') : '<span class="warn-text">⚠ no buckets ticked</span>');
+    return cards + ' · ' + bk;
+  }
+  function acCashVerdict(plan) {
+    const EPS = 0.005, n = plan.rows.length;
+    const pl = (k, w) => k + ' ' + w + (k === 1 ? '' : 's');
+    if (!plan.cards.length) return { cls: '', v: 'No credit cards yet', s: 'Add a card in Accounts and this tab shows whether your checking and savings can pay it.' };
+    if (plan.totalOwed < EPS) return { cls: 'good', v: '✓ Nothing owed on your cards', s: '' };
+    if (plan.accts.every(a => !a.known)) return { cls: '', v: 'Record a balance first', s: 'None of your checking or savings accounts has a balance yet, so this cannot tell whether they cover ' + acAmt(plan.totalOwed) + '.' };
+    if (plan.totalShort < EPS || plan.rows.every(r => r.short < EPS)) return { cls: 'good', v: '✓ Yes, you can pay ' + (n === 1 ? 'your card' : 'all ' + n + ' cards') + ' now', s: acAmt(plan.usable - plan.totalOwed) + ' left over after paying ' + (n === 1 ? 'it' : 'them') + '.' };
+    const pay = plan.rows.filter(r => r.short < EPS).length, part = plan.rows.filter(r => r.short >= EPS && r.paidBy.length).length, wait = n - pay - part;
+    const can = []; if (pay) can.push(pl(pay, 'card') + ' in full'); if (part) can.push(pay ? part + ' in part' : pl(part, 'card') + ' in part');
+    const s = (can.length ? 'You can pay ' + can.join(' and ') + ' now.' : 'No card can be paid in full right now.') + (wait ? ' ' + wait + (wait === 1 ? ' has' : ' have') + ' to wait.' : '');
+    return { cls: 'warn', v: '⚠ Not yet. Short by ' + acAmt(plan.totalShort), s };
+  }
+  function acRenderCashCards() {
+    const el = $('ac_cashcards'); if (!el) return;
+    if (!window.__acLastRollup) { el.innerHTML = '<div class="mini muted">Card balances have not loaded yet. Pull to refresh or open Actuals again.</div>'; return; }
+    const plan = acCashPlan();
+    { const ord = getCategories().map(c => c.key), rank = k => k === 'uncat' ? 1e9 : (ord.indexOf(k) < 0 ? 1e6 : ord.indexOf(k));
+      plan.bucketKeys.sort((a, b) => rank(a) - rank(b)); plan.byBucket.sort((a, b) => rank(a.key) - rank(b.key)); }
+    if (!plan.accts.length) { el.innerHTML = '<div class="mini muted">No checking or savings accounts yet. Add one in Accounts and this tab tells you whether it can pay your cards.</div>'; return; }
+    const EPS = 0.005;
+    const vd = acCashVerdict(plan);
+    let h = '<div class="cp-layout">';
+    // 1. verdict
+    h += '<div class="cp-sec cp-sec-verdict"><div class="tiles cp-verdict"><div class="tile ' + vd.cls + '" data-cp-verdict="' + (vd.cls || 'none') + '"><div class="v">' + vd.v + '</div>' + (vd.s ? '<div class="s">' + vd.s + '</div>' : '') + '</div></div>';
+    h += '<p class="mini muted cp-figs">' + (plan.totalOwed >= EPS ? 'Cards owe now ' + acAmt(plan.totalOwed) + ' · ' : '') + 'Checking + savings ' + acAmt(plan.cashTotal)
+      + (plan.usable < plan.cashTotal - EPS ? ', ' + acAmt(plan.usable) + ' available for cards' : '') + '. Pending charges are not counted.</p></div>';
+    // 2. per-card pay now / wait
+    if (plan.rows.length) {
+      const st = r => r.short < EPS ? 0 : (r.paidBy.length ? 1 : 2);
+      const rows = plan.rows.map((r, i) => [r, i]).sort((x, y) => st(x[0]) - st(y[0]) || x[1] - y[1]).map(x => x[0]);
+      const from = r => r.paidBy.length === 1 ? 'from ' + esc(r.paidBy[0].name) : 'from ' + r.paidBy.map(p => esc(p.name) + ' ' + acAmt(p.amt)).join(' + ');
+      h += '<div class="cp-sec cp-sec-cards"><div class="subhead" role="heading" aria-level="3">Cards</div><ul class="cp-list" role="list">';
+      rows.forEach(r => {
+        const k = st(r);
+        const pill = k === 0 ? '<span class="sf-pace is-pay">● Pay now</span>' : k === 1 ? '<span class="sf-pace is-part">◐ Pay part</span>' : '<span class="sf-pace is-wait">○ Wait</span>';
+        const meta = k === 0 ? from(r) : k === 1 ? acAmt(r.owed - r.short) + ' ' + from(r) + ' · ' + acAmt(r.short) + ' waits' : acAmt(r.short) + ' waits';
+        h += '<li class="cp-row" data-cp-row="' + r.id + '"><div class="cp-line"><span class="cp-name">' + esc(r.name) + '</span><span class="cp-amt">' + acAmt(r.owed) + '</span></div>'
+          + '<div class="cp-sub">' + pill + '<span>' + meta + '</span></div></li>';
+      });
+      h += '</ul></div>';
+    }
+    // 3. accounts
+    h += '<div class="cp-sec cp-sec-accts"><div class="subhead" role="heading" aria-level="3">Accounts</div>'
+      + '<p class="mini muted" style="margin:0 0 4px">Which cards and buckets each account’s money is for.</p>';
+    const sel = (attr, aid, val, opts) => '<select ' + attr + '="' + aid + '">' + opts.map(o => '<option value="' + o[0] + '"' + (val === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+    plan.accts.forEach(a => {
+      const open = String(acCashEditId) === String(a.id);
+      h += '<div class="cp-acct' + (open ? ' is-editing' : '') + '" data-cp-acct="' + a.id + '"><div class="cp-acct-head"><b>' + esc(a.name) + '</b><span>' + (a.known ? acAmt(a.bal) : '<span class="muted">no balance yet</span>') + '</span></div>';
+      h += '<div class="cp-acct-sub"><span class="cp-rule">' + acCashRuleSummary(a, plan) + '</span>'
+        + '<button type="button" class="ac-tool iv-act" data-cp-edit="' + a.id + '" aria-expanded="' + open + '" aria-controls="cp_edit_' + a.id + '" aria-label="Edit what ' + esc(a.name) + ' may pay">Edit</button></div>';
+      const use = a.used > EPS ? 'Pays ' + acAmt(a.used) + ' toward cards' + (a.bal - a.used > EPS ? ' · ' + acAmt(a.bal - a.used) + ' stays' : '') : '';
+      if (use && !open) h += '<div class="cp-use">' + use + '</div>';
+      h += '<div class="hb-editing iv-edit cp-edit" id="cp_edit_' + a.id + '"' + (open ? '' : ' hidden') + '><div class="iv-edit-grid">'
+        + '<label class="ac-field"><span class="ac-lbl">May pay</span>' + sel('data-cp-mode', a.id, a.mode, [['any', 'Any card'], ['only', 'Only the cards I tick'], ['none', 'No cards (keep it)']]) + '</label>'
+        + (a.mode === 'none' ? '' : '<label class="ac-field"><span class="ac-lbl">Covers</span>' + sel('data-cp-bmode', a.id, a.bucketMode, [['all', 'Every bucket'], ['only', 'Only the buckets I tick']]) + '</label>')
+        + '</div>';
+      if (a.mode === 'only') {
+        h += '<fieldset class="cp-pick"><legend class="ac-lbl">Cards it may pay</legend><div class="cp-cards">' + (plan.cards.length ? plan.cards.map(c => '<label><input type="checkbox" data-cp-card="' + a.id + '|' + c.accountId + '"'
+          + (a.cards.includes(String(c.accountId)) ? ' checked' : '') + '> ' + esc(c.name || acAcctName(c.accountId)) + '</label>').join('') : '<span class="mini muted">No credit cards yet.</span>') + '</div></fieldset>';
+      }
+      if (a.mode !== 'none' && a.bucketMode === 'only') {
+        h += '<fieldset class="cp-pick"><legend class="ac-lbl">Buckets it may pay</legend><div class="cp-cards">' + (plan.bucketKeys.length ? plan.bucketKeys.map(k => '<label><input type="checkbox" data-cp-bucket="' + a.id + '|' + esc(k) + '"'
+          + (a.buckets.includes(k) ? ' checked' : '') + '> ' + esc(acBucketName(k)) + '</label>').join('') : '<span class="mini muted">Nothing owed to split yet.</span>') + '</div></fieldset>';
+      }
+      const echo = vd.cls === 'good' ? '✓ every card covered' : vd.cls === 'warn' ? '⚠ Short by ' + acAmt(plan.totalShort) : '';
+      h += '<div class="cp-edit-foot"><p class="iv-edit-note">This account: ' + (use || 'pays nothing toward cards now') + (echo ? '<br>All cards: <b>' + echo + '</b>' : '') + '</p>'
+        + '<button type="button" class="ac-tool cp-done" data-cp-done="' + a.id + '">Done</button></div></div></div>';
+    });
+    h += '</div>';
+    // 4. by bucket
+    if (plan.byBucket.length >= 2) {
+      h += '<div class="cp-sec cp-sec-buckets"><div class="subhead" role="heading" aria-level="3">By bucket</div><div class="ac-cards-scroll"><table class="res-table ac-cards-table"><thead><tr><th class="ac-col-name">Bucket</th><th class="num">Owed</th><th class="num">Short</th></tr></thead><tbody>';
+      plan.byBucket.forEach(r => {
+        h += '<tr><td class="ac-col-name">' + esc(acBucketName(r.key)) + '</td><td class="num">' + acAmt(r.owed) + '</td><td class="num">'
+          + (r.short > EPS ? '<span class="warn-text">' + acAmt(r.short) + '</span>' : '<span class="good-text">covered</span>') + '</td></tr>';
+      });
+      h += '</tbody></table></div></div>';
+    }
+    h += '</div>';
+    // a background refresh (sync, a payment) must not drop focus out of an open editor
+    const ae = document.activeElement, CPA = ['data-cp-mode', 'data-cp-bmode', 'data-cp-card', 'data-cp-bucket', 'data-cp-edit', 'data-cp-done'];
+    const keep = ae && el.contains(ae) ? CPA.map(a => [a, ae.getAttribute(a)]).find(x => x[1] != null) : null;
+    el.innerHTML = h;
+    if (keep) { const back = el.querySelector('[' + keep[0] + '="' + keep[1] + '"]'); if (back) back.focus(); }
+  }
+  document.addEventListener('click', ev => {
+    const e = ev.target.closest && ev.target.closest('[data-cp-edit]');
+    if (e) { acCashEditId = String(acCashEditId) === e.dataset.cpEdit ? null : e.dataset.cpEdit; if (acCashEditId == null) { acRenderCashCards(); const b = document.querySelector('[data-cp-edit="' + e.dataset.cpEdit + '"]'); if (b) b.focus(); return; } acRenderCashCards(); const f = document.querySelector('[data-cp-mode="' + acCashEditId + '"]'); if (f) f.focus(); return; }
+    const d = ev.target.closest && ev.target.closest('[data-cp-done]');
+    if (d) { const id = d.dataset.cpDone; acCashEditId = null; acRenderCashCards(); const t = document.querySelector('[data-cp-edit="' + id + '"]'); if (t) t.focus(); }
+  });
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    const ed = ev.target.closest && ev.target.closest('.cp-edit'); if (!ed) return;
+    ev.preventDefault(); const id = ed.id.replace('cp_edit_', ''); acCashEditId = null; acRenderCashCards();
+    const t = document.querySelector('[data-cp-edit="' + id + '"]'); if (t) t.focus();
+  });
+  const AC_SUBTABS = ['funds', 'cash', 'ventures'];
+  function acSetSubtab(which) {
+    if (!AC_SUBTABS.includes(which)) which = 'funds';
+    AC_SUBTABS.forEach(k => { const p = $('ac_panel_' + k); if (p) p.hidden = k !== which; });
+    document.querySelectorAll('[data-ac-subtab]').forEach(b => {
+      const on = b.dataset.acSubtab === which;
+      b.setAttribute('aria-selected', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1;
+    });
+    try { localStorage.setItem('ac_subtab', which); } catch (e) {}
+    if (which === 'cash') acRenderCashCards();
+  }
+  document.addEventListener('click', ev => {
+    const t = ev.target.closest && ev.target.closest('[data-ac-subtab]');
+    if (t) { ev.preventDefault(); acSetSubtab(t.dataset.acSubtab); }
+  });
+  document.addEventListener('keydown', ev => {
+    const t = ev.target.closest && ev.target.closest('[data-ac-subtab]');
+    if (!t || (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight')) return;
+    ev.preventDefault();
+    const i = AC_SUBTABS.indexOf(t.dataset.acSubtab);
+    const next = AC_SUBTABS[(i + (ev.key === 'ArrowRight' ? 1 : AC_SUBTABS.length - 1)) % AC_SUBTABS.length];
+    acSetSubtab(next); const b = document.querySelector('[data-ac-subtab="' + next + '"]'); if (b) b.focus();
+  });
+  document.addEventListener('change', ev => {
+    const cpEl = ev.target.closest && ev.target.closest('[data-cp-mode],[data-cp-bmode],[data-cp-card],[data-cp-bucket]');
+    if (cpEl) setTimeout(() => { const at = ['data-cp-mode','data-cp-bmode','data-cp-card','data-cp-bucket'].find(x => cpEl.hasAttribute(x));
+      const back = document.querySelector('[' + at + '="' + cpEl.getAttribute(at) + '"]') || document.querySelector('[data-cp-mode="' + cpEl.getAttribute(at).split('|')[0] + '"]');
+      if (back) back.focus(); const v = document.querySelector('#ac_cashcards [data-cp-verdict] .v'); const lv = $('ac_cash_live'); if (v && lv) lv.textContent = v.textContent; }, 0);
+    const m = ev.target.closest && ev.target.closest('[data-cp-mode]');
+    if (m) { acSetCashRule(m.dataset.cpMode, { mode: m.value }); acRenderCashCards(); return; }
+    const bm = ev.target.closest && ev.target.closest('[data-cp-bmode]');
+    if (bm) { acSetCashRule(bm.dataset.cpBmode, { bucketMode: bm.value }); acRenderCashCards(); return; }
+    const bk = ev.target.closest && ev.target.closest('[data-cp-bucket]');
+    if (bk) {
+      const [aid, key] = bk.dataset.cpBucket.split('|');
+      const cur = ((acCashPlanRules()[aid] || {}).buckets || []).map(String).filter(x => x !== key);
+      if (bk.checked) cur.push(key);
+      acSetCashRule(aid, { bucketMode: 'only', buckets: cur }); acRenderCashCards(); return;
+    }
+    const c = ev.target.closest && ev.target.closest('[data-cp-card]');
+    if (c) {
+      const [aid, cid] = c.dataset.cpCard.split('|');
+      const cur = (acCashPlanRules()[aid] || { cards: [] }).cards.map(String).filter(x => x !== cid);
+      if (c.checked) cur.push(cid);
+      acSetCashRule(aid, { mode: 'only', cards: cur }); acRenderCashCards();
+    }
+  });
+  try { const w = localStorage.getItem('ac_subtab'); if (w && w !== 'funds') setTimeout(() => acSetSubtab(w), 0); } catch (e) {}
+
   // ---- Sinking funds: the fund lens (TODO-238, DEC-034 Phase 1, docs/sinking-funds-design.md
   // §6.2) — per-fund reserve trajectory + linked-transaction history, mirroring the card rollup's
   // structure verbatim (same .ac-cards-* classes). This table itself is untouched by Phase 2 (the
@@ -21975,8 +22304,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Every txn already linked to ANY fund this render (one fund per txn, server-enforced) —
     // excluded from every fund's "link a transaction" picker so a dollar can't be offered twice.
     const linkedTxnIds = new Set(funds.flatMap(f => (f.history || []).map(h => h.txnId)));
-    let h = '<div class="ac-cards-scroll"><table class="res-table ac-cards-table"><thead><tr>';
-    h += '<th class="ac-col-name">Fund</th><th class="num ac-col-total">Reserve</th>';
+    const paces = funds.map(acFundPace);
+    const cnt = k => paces.filter(x => x.kind === k).length;
+    const behind = cnt('under') + cnt('late'), okay = cnt('on') + cnt('over') + cnt('funded'), none = cnt('none');
+    let h = '<div class="mini" style="margin:0 0 10px"><b>' + okay + '</b> on pace' + (behind ? ' · <b class="' + 'bad-text' + '">' + behind + ' under</b>' : '')
+      + (none ? ' · <span class="muted">' + none + ' with no target date</span>' : '') + '</div>';
+    h += '<div class="ac-cards-scroll"><table class="res-table ac-cards-table"><thead><tr>';
+    h += '<th class="ac-col-name">Fund</th><th class="num">Pace</th><th class="num ac-col-total">Reserve</th>';
     h += '</tr></thead><tbody>';
     funds.forEach(f => {
       const reserve = f.reserve || 0;
@@ -21985,11 +22319,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       h += '<button class="ac-card-toggle" data-fund-toggle="' + f.id + '" aria-expanded="false">' + esc(f.name) + '</button>';
       h += '<span class="mini" style="color:var(--muted);display:block;margin-top:2px"><span style="color:' + categoryColor(f.bucket || 'need') + '">●</span> ' + esc(labelForBucket(f.bucket || 'need')) + ' · ' + acAmt(f.monthlyContribution) + '/mo' + (f.recurrence === 'yearly' ? ' · renews yearly' : '') + '</span>';
       h += '</td>';
+      const pace = acFundPace(f);
+      h += '<td class="num">' + acFundPaceChip(pace) + '</td>';
       h += '<td class="num ac-col-total"><span class="sf-chip ' + (hasReserve ? 'has-reserve' : 'is-empty') + '">' + (hasReserve ? acAmt(reserve) : 'no reserve yet') + '</span></td></tr>';
 
       h += '<tr class="ac-card-detail" id="ac_fund_det_' + f.id + '" style="display:none">';
-      h += '<td colspan="2" style="padding:0"><div style="padding:10px 14px 12px;background:var(--panel-2);border-top:1px solid var(--line)">';
+      h += '<td colspan="3" style="padding:0"><div style="padding:10px 14px 12px;background:var(--panel-2);border-top:1px solid var(--line)">';
 
+      { const pl = acFundPaceLine(pace, f); if (pl) h += '<div class="mini" style="margin-bottom:8px">' + pl + '</div>'; }
       if (f.target) {
         h += '<div class="mini" style="color:var(--muted);margin-bottom:8px">Target ' + acAmt(f.target) + (f.targetDate ? ' by ' + esc(f.targetDate) : '') + '</div>';
       }
@@ -23048,7 +23385,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (pc) { ev.preventDefault(); const aid = pc.dataset.payCancel; const form = document.getElementById('ac_pay_form_' + aid); if (form) form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) { trig.setAttribute('aria-expanded', 'false'); trig.focus(); } return; }
       // Card payment submit: POST then refresh
       const ps = ev.target.closest('[data-pay-submit]');
-      if (ps) { ev.preventDefault(); if (acWriteGuard()) return; const aid = ps.dataset.paySubmit; const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; const amtRaw = (form.querySelector('[data-pay="amt"]') || {}).value || '0'; const amount = parseFloat(amtRaw.replace(/,/g, '')) || 0; const date = (form.querySelector('[data-pay="date"]') || {}).value || acToday(); const fromId = (form.querySelector('[data-pay="from"]') || {}).value || ''; const catKey = (form.querySelector('[data-pay="cat"]') || {}).value || ''; const body = { cardAccountId: aid, amount, date }; if (fromId) body.fromAccountId = fromId; if (catKey) body.applyToCategory = catKey; (async () => { try { await post('/api/tracking/card-payment', body); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) trig.setAttribute('aria-expanded', 'false'); showToast('Payment recorded'); acRefresh(); } catch (e) { showToast('Could not record payment'); } })(); return; }
+      if (ps) { ev.preventDefault(); if (acWriteGuard()) return; const aid = ps.dataset.paySubmit; const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; const amtRaw = (form.querySelector('[data-pay="amt"]') || {}).value || '0'; const amount = parseFloat(amtRaw.replace(/,/g, '')) || 0; const date = (form.querySelector('[data-pay="date"]') || {}).value || acToday(); const fromId = (form.querySelector('[data-pay="from"]') || {}).value || ''; const catKey = (form.querySelector('[data-pay="cat"]') || {}).value || ''; const body = { cardAccountId: aid, amount, date }; if (fromId) body.fromAccountId = fromId; if (catKey) body.applyToCategory = catKey; try { localStorage.setItem('ac_pay_from', fromId); } catch (e) {} (async () => { try { await post('/api/tracking/card-payment', body); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) trig.setAttribute('aria-expanded', 'false'); showToast('Payment recorded'); acRefresh(); } catch (e) { showToast('Could not record payment'); } })(); return; }
     });
     function acUpdateEarmarkChip(form) {
       const cat = form.querySelector('[data-pay="cat"]'); const chip = form.querySelector('.ac-earmark-chip');
