@@ -65,6 +65,8 @@
     /* H4 (docs/ui-redesign.md §H formatting audit): mirrors --accent-tint/--danger-tint above —
        replaces #bgb_cu_row's hardcoded rgba(255,180,80,.07) amber tint, which bypassed tokens and
        stayed cool-amber on warm linen in shiro. */
+    --good-tint: rgba(95,211,139,0.14);                                   /* fallback line first */
+    --good-tint: color-mix(in srgb, var(--good) 14%, transparent);       /* soft filled "Paid off" chip; keep BOTH lines in this order */
     --warn-tint: rgba(240,185,87,0.12);                                   /* fallback line first */
     --warn-tint: color-mix(in srgb, var(--warn) 12%, transparent);       /* themeable override; keep BOTH lines in this order */
     /* DEC-024 HA theme adapter: .warn-box tokens (dark defaults below match today's hardcoded
@@ -2330,6 +2332,165 @@
     .cp-edit select { min-height:44px; }
     .cp-cards label { min-height:44px; }
   }
+  /* ---- Your cards (#ac_cards). Reuses the Cash vs cards row idiom (.cp-row/.cp-line/.cp-amt, .sf-pace
+     chips). Detail panels sit on --panel with a hairline, never on --panel-2, and nothing here sets
+     accent-coloured text on --panel-2 (the summary tile). The old .ac-card-row/.ac-cards-table rules
+     stay: #ac_funds still renders its rows with them. ---- */
+  #ac_cards { min-width:0; }
+  .yc-sum.tiles { grid-template-columns:minmax(0,1fr); }
+  .yc-sum .v { font-size:var(--fs-xl); }
+  .yc-sum .s { font-size:var(--fs-sm); line-height:var(--lh-base); }
+  .yc-foot { margin:var(--space-2) 0 0; }
+  .yc-link { background:none; border:0; padding:0; min-height:24px; display:inline-flex; align-items:center; color:var(--accent); font:inherit; font-size:var(--fs-sm); text-decoration:underline; cursor:pointer; }
+  .yc-link:hover { border-color:transparent; color:var(--text); }
+  #ac_cards { --yc-in:18px; }   /* the shared left/right content edge of a group's header, owing panels and paid-off rows */
+  .yc-list { margin-top:var(--space-3); container-type:inline-size; container-name:yccards; --yc-c-bk:240px; }
+  /* A group is one rounded card sitting a touch lighter than the page. Its children carry their own inner padding (--yc-in), so the header,
+     the owing panel and the paid-off rows all share one content edge. */
+  .yc-group { margin-top:var(--space-4); padding:6px; border:1px solid var(--line); border-radius:16px; background:var(--panel); box-shadow:0 1px 2px rgba(60,50,40,0.06), 0 6px 18px rgba(60,50,40,0.07); }
+  .yc-group-head { position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-1) var(--space-3); margin:0 var(--yc-in) 6px; padding:var(--space-3) 32px var(--space-3) 0; border-bottom:1px solid var(--line-faint); }   /* the kebab is pinned to the right, so a long name or tag wraps among itself and never pushes it to a second line */
+  .yc-group-head h3 { margin:0; flex:0 1 auto; min-width:0; font-size:20px; font-weight:var(--fw-semibold); }
+  .yc-group-head [data-card-group-rename-form], .yc-group-head [data-card-group-tag-form] { flex:1 1 100%; }
+  @media (max-width: 480px) { .yc-group-head input[type="text"] { min-height:44px; } }
+  .yc-group-total { margin-left:auto; font-weight:var(--fw-semibold); font-variant-numeric:tabular-nums; }
+  .yc-group > .yc-list { margin-top:0; }
+  .yc-group .cp-list { list-style:none; margin:0; padding:0; }
+  /* The optional tag beside the group name: a soft pill, muted text. */
+  .yc-tag { flex:0 1 auto; min-width:0; padding:var(--space-1) var(--space-3); border-radius:999px; background:var(--chip); color:var(--muted); font-size:var(--fs-md); line-height:var(--lh-base); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Group icon: a filled accent rounded square with a generic card glyph drawn in CSS (no brand mark). */
+  .yc-gtile { position:relative; flex:none; width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%); box-shadow:0 1px 2px rgba(0,0,0,0.18); }
+  .yc-gtile::before { content:''; position:absolute; left:50%; top:50%; width:22px; height:15px; margin:-8px 0 0 -11px; box-sizing:border-box; border:2px solid var(--on-accent); border-radius:3px; }
+  .yc-gtile::after { content:''; position:absolute; left:50%; top:50%; width:22px; height:2px; margin:-3px 0 0 -11px; background:var(--on-accent); }
+  /* Paid-off rows: a round, soft-surface icon tile with a muted card glyph. */
+  .yc-tile { position:relative; flex:none; width:46px; height:46px; border-radius:50%; background:var(--chip); }
+  .yc-tile::before { content:''; position:absolute; left:50%; top:50%; width:20px; height:14px; margin:-7px 0 0 -10px; box-sizing:border-box; border:2px solid var(--muted); border-radius:3px; }
+  .yc-tile::after { content:''; position:absolute; left:50%; top:50%; width:20px; height:2px; margin:-2px 0 0 -10px; background:var(--muted); }
+  /* The big card art on an owing row: a neutral accent gradient with a chip shape and a faint stripe (aspect 1.6). Sizes step up with the container. */
+  .yc-art { position:relative; flex:none; width:56px; height:35px; border-radius:8px; background:radial-gradient(120% 90% at 18% 0%, rgba(255,255,255,0.22), transparent 60%), linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%); box-shadow:0 1px 2px rgba(0,0,0,0.18), 0 4px 10px rgba(0,0,0,0.12); }
+  .yc-art::before { content:''; position:absolute; left:12%; top:30%; width:20%; height:22%; border-radius:2px; background:var(--on-accent); opacity:0.55; }
+  .yc-art::after { content:''; position:absolute; left:12%; right:12%; bottom:14%; height:2px; border-radius:1px; background:var(--on-accent); opacity:0.4; }
+  .yc-card .cp-line { display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:0; min-width:0; }
+  .yc-tog { max-width:100%; min-width:44px; min-height:44px; display:flex; align-items:flex-end; gap:var(--space-1); padding:0 0 var(--space-1); background:none; border:0; border-radius:6px; color:var(--muted); font:inherit; font-size:var(--fs-sm); font-weight:var(--fw-semibold); text-transform:uppercase; letter-spacing:var(--ls-caps); text-align:left; cursor:pointer; }
+  .yc-tog:hover { border-color:transparent; color:var(--text); }
+  .yc-tog::after { content:'›' / ''; flex:none; font-size:var(--fs-xl); line-height:1; transform:rotate(0deg); }
+  .yc-tog[aria-expanded="true"]::after { transform:rotate(90deg); }
+  .yc-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .yc-card .cp-amt { font-size:var(--fs-2xl); line-height:1.15; color:var(--text); }
+  .yc-card .cp-amt.is-credit { color:var(--good); }
+  /* An owing card is a fully rounded soft panel (all four corners), inset in its group and set off from the next row by a gap. Only this panel
+     is tinted: paid-off rows below have no background. Narrow containers stack: art + label/Owed, equation, buckets, chips, Pay. From 600px Pay
+     moves beside the main block with the buckets under it; from 940px the buckets become a divided column between the main block and Pay. */
+  .yc-card { position:relative; display:grid; grid-template-columns:56px minmax(0,1fr); column-gap:var(--space-3); grid-template-areas:"art line" "eq eq" "bk bk" "meta meta" "pay pay" "det det";
+    padding:20px var(--yc-in); margin:0 0 var(--space-2); border-top:0; border-radius:16px; background:color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
+  .yc-card > .yc-art { grid-area:art; align-self:start; margin-top:var(--space-2); }
+  .yc-card > .cp-line { grid-area:line; }
+  .yc-eq { grid-area:eq; margin-top:var(--space-2); font-size:var(--fs-base); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .yc-bk { grid-area:bk; list-style:none; margin:var(--space-3) 0 0; padding:var(--space-2) 0 0; border-top:1px solid var(--line); max-width:420px; font-size:var(--fs-lg); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .yc-bk li { display:flex; align-items:center; min-height:34px; }
+  .yc-bk-dot { margin-right:var(--space-3); font-size:var(--fs-lg); line-height:1; }
+  .yc-bk-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .yc-bk b { margin-left:auto; padding-left:var(--space-3); color:var(--text); font-size:var(--fs-xl); font-weight:var(--fw-semibold); white-space:nowrap; }
+  .yc-meta { grid-area:meta; min-width:0; margin-top:var(--space-2); display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-1) var(--space-2); font-size:var(--fs-sm); color:var(--muted); font-variant-numeric:tabular-nums; }
+  .yc-meta:empty { display:none; }
+  .yc-meta .ac-util { margin-top:0; }
+  .yc-pay { grid-area:pay; justify-self:stretch; align-self:center; margin-top:var(--space-3); min-height:48px; min-width:96px; padding:0 var(--space-5); display:inline-flex; align-items:center; justify-content:center; gap:var(--space-2);
+    border:0; border-radius:999px; background:var(--selected-bg); color:var(--selected-ink); font-size:var(--fs-lg); font-weight:var(--fw-semibold); cursor:pointer; }
+  .yc-pay:hover { border-color:transparent; background:var(--selected-bg); filter:brightness(0.92); }
+  .yc-pay-arrow { display:inline-block; }
+  .yc-pay[aria-expanded="true"] .yc-pay-arrow { transform:rotate(90deg); }
+  .yc-card > .yc-det { grid-area:det; }
+  @container yccards (min-width:600px) {
+    .yc-card { grid-template-columns:88px minmax(0,1fr) auto; column-gap:var(--space-4); grid-template-areas:"art line pay" "art eq pay" "bk bk bk" "meta meta meta" "det det det"; }
+    .yc-pay { justify-self:end; margin-top:0; }
+    .yc-card > .yc-art { width:88px; height:55px; align-self:center; margin-top:0; }
+    .yc-bk { max-width:none; }   /* QA: a 420px cap left the right half of the panel empty at 600-939px */
+  }
+  @container yccards (min-width:940px) {
+    .yc-card { grid-template-columns:128px minmax(0,1fr) var(--yc-c-bk) auto; column-gap:var(--space-5); grid-template-rows:auto auto 1fr auto; grid-template-areas:"art line bk pay" "art eq bk pay" "art meta bk pay" "det det det det"; }   /* the 1fr row absorbs a tall bucket column, so no gap opens between the equation and the chips */
+    .yc-card > .yc-art { width:128px; height:80px; border-radius:8px; }
+    .yc-card > .cp-line, .yc-eq, .yc-meta { align-self:center; }
+    .yc-card > .cp-line { align-self:end; }
+    .yc-eq { align-self:start; margin-top:0; }
+    .yc-meta { align-self:start; }
+    .yc-card .cp-amt { font-size:var(--fs-3xl); }
+    /* the divider is a short rule (about 60% of the panel), not a full-height border */
+    .yc-bk { position:relative; align-self:stretch; display:flex; flex-direction:column; justify-content:center; margin:0; max-width:none; padding:var(--space-1) 0 var(--space-1) var(--space-5); border-top:0; }
+    .yc-bk::before { content:''; position:absolute; left:0; top:20%; bottom:20%; width:1px; background:var(--line); }
+  }
+  @container yccards (min-width:1200px) { .yc-list { --yc-c-bk:300px; } }
+  /* A paid-off or in-credit card is one plain row (no background): round icon tile, the name (the toggle), a soft green chip beneath, and the
+     amount with a chevron at the far right. Hairlines separate the rows, inset to the content edge. The toggle's ::after covers the whole row
+     so the right side is part of the hit target; the open details sit above that cover. */
+  .yc-card.is-clear { grid-template-columns:46px minmax(0,1fr) auto; column-gap:var(--space-4); grid-template-areas:"art name amt" "art meta amt" "det det det"; align-items:center;
+    padding:var(--space-3) 0; margin:0 var(--yc-in); border-top:1px solid var(--line-faint); border-radius:0; background:transparent; }
+  .yc-card.is-clear:last-child { border-bottom:1px solid var(--line-faint); }
+  .yc-group > .yc-list > .yc-card.is-clear:first-child { border-top:0; }
+  .yc-card.is-clear > .yc-tile { grid-area:art; }
+  .yc-card.is-clear > .cp-line { display:contents; }
+  .yc-card.is-clear .yc-tog { grid-area:name; align-self:end; align-items:center; padding:0; color:var(--text); font-size:var(--fs-xl); text-transform:none; letter-spacing:0; }
+  .yc-card.is-clear .yc-tog::after { content:''; position:absolute; inset:0; font-size:inherit; transform:none; border-radius:12px; }
+  .yc-card.is-clear .yc-name { white-space:normal; overflow-wrap:anywhere; }
+  .yc-card.is-clear .yc-tog:focus-visible { outline:none; }
+  .yc-card.is-clear .yc-tog:focus-visible::after { outline:2px solid var(--accent); outline-offset:-2px; }
+  .yc-card.is-clear .cp-amt { grid-area:amt; justify-self:end; font-size:20px; display:inline-flex; align-items:center; gap:var(--space-2); }
+  .yc-card.is-clear .cp-amt::after { content:'›' / ''; color:var(--muted); font-size:var(--fs-2xl); font-weight:var(--fw-normal); line-height:1; transition:transform 120ms; }
+  .yc-card.is-clear:hover .cp-amt::after { color:var(--text); }
+  .yc-card.is-clear .yc-tog[aria-expanded="true"] ~ .cp-amt::after { transform:rotate(90deg); }
+  .yc-card.is-clear > .yc-meta { grid-area:meta; align-self:start; margin-top:0; }
+  /* the Paid off / In credit chip is a soft filled pill, no outline */
+  .yc-card.is-clear .sf-pace.funded { padding:var(--space-1) var(--space-3); border:0; background:var(--good-tint); font-size:var(--fs-base); }
+  .yc-card.is-clear > .yc-det { position:relative; z-index:1; }
+  @media (prefers-reduced-motion: reduce) { .yc-card.is-clear .cp-amt::after { transition:none; } }
+  .yc-menu { position:absolute; top:11px; right:-14px; }
+  .yc-kebab { min-width:44px; min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:0; background:none; border:0; border-radius:50%; color:var(--muted); cursor:pointer; }
+  .yc-kebab:hover { border-color:transparent; background:var(--chip); color:var(--text); }
+  .yc-kebab[aria-expanded="true"] { background:var(--chip); color:var(--text); }
+  .yc-kebab-dots { display:block; width:4px; height:4px; border-radius:50%; background:currentColor; box-shadow:0 -7px 0 currentColor, 0 7px 0 currentColor; }
+  .yc-menu-pop { position:absolute; top:calc(100% + 6px); right:0; z-index:250; min-width:180px; padding:var(--space-1); background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow-pop); }
+  .yc-menu-pop[hidden] { display:none; }
+  .yc-menu-item { width:100%; min-height:44px; display:flex; align-items:center; padding:0 var(--space-3); background:none; border:0; border-radius:var(--radius-md); color:var(--text); font:inherit; font-size:var(--fs-base); text-align:left; cursor:pointer; }
+  .yc-menu-item:hover { border-color:transparent; background:var(--chip); }
+  .yc-det { margin:var(--space-2) 0 var(--space-1); padding:var(--space-3) var(--space-4); border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+  .yc-det > .ac-pay-form { margin:0 0 var(--space-4); }
+  .yc-det .ac-pay-earmark { background:transparent; border-left-width:1px; border-left-color:var(--line); }
+  .yc-det .ac-lbl-strong { color:var(--text); }
+  .yc-sec + .yc-sec { margin-top:var(--space-4); }
+  .yc-sec > h4 { margin:0 0 var(--space-2); font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:var(--ls-caps); font-weight:var(--fw-semibold); color:var(--muted); }
+  .yc-stmt, .yc-bkt { max-width:560px; }
+  .yc-stmt th, .yc-stmt td, .yc-bkt th, .yc-bkt td { padding:3px 0; border-bottom:0; }
+  .yc-stmt th { color:var(--text); font-size:var(--fs-sm); font-weight:var(--fw-normal); text-transform:none; letter-spacing:0; }
+  .yc-stmt td, .yc-bkt td, .yc-bkt th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .yc-stmt td { font-size:var(--fs-sm); }
+  .yc-stmt tr.is-sum th, .yc-stmt tr.is-sum td { border-top:1px solid var(--line); padding-top:var(--space-1); font-weight:var(--fw-semibold); }
+  .yc-bkt th:first-child, .yc-bkt td:first-child { text-align:left; }
+  .yc-bkt td { font-size:var(--fs-sm); }
+  .yc-bkt tfoot td, .yc-bkt tfoot th { border-top:1px solid var(--line); font-weight:var(--fw-semibold); }
+  .yc-note { margin:var(--space-2) 0 0; max-width:560px; }
+  .yc-det > .yc-note { margin:var(--space-2) 0 var(--space-4); }
+  .yc-pays { list-style:none; margin:0; padding:0; }
+  .yc-pay-row { display:flex; align-items:center; gap:var(--space-2); padding:3px 0; border-bottom:1px solid var(--line-faint); font-size:var(--fs-sm); }
+  .yc-pd { flex:none; min-width:46px; color:var(--muted); }
+  .yc-pm { flex:1 1 auto; min-width:0; }
+  .yc-pa { flex:none; display:inline-flex; gap:var(--space-1); }
+  .yc-pa .ac-tool { min-height:28px; min-width:44px; padding:0 var(--space-2); }
+  .yc-pa .ac-tool:last-child:hover { color:var(--bad); }
+  .yc-foot-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--space-2) var(--space-4); }
+  .yc-foot-row .ac-card-group-pick { margin:0; }
+  .ac-card-group-pick select, .ac-card-group-pick input { min-height:36px; }
+  @media (max-width: 600px) {
+    #ac_cards { --yc-in:14px; }
+    .yc-group-head { gap:var(--space-1) var(--space-2); }
+  }
+  @media (max-width: 480px) {
+    .yc-link { min-height:44px; }
+    .yc-group-head .ac-tool, .yc-det .ac-tool, .yc-det .calc-btn { min-height:44px; min-width:44px; }
+    .yc-pa .ac-tool { min-height:44px; }
+    .yc-pay-row { flex-wrap:wrap; }
+    .yc-pay-row a { display:inline-flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; }
+    .yc-pay-row .ac-ed { min-height:44px; }
+    .yc-det input, .yc-det select, .ac-card-group-pick select, .ac-card-group-pick input { min-height:44px; }
+    .yc-det { padding:var(--space-3); }
+  }
   .sf-chip { display:inline-flex; align-items:center; padding:3px 10px; border-radius:999px; font-size:var(--fs-xs); font-weight:var(--fw-semibold); background:var(--chip); white-space:nowrap; }
   .sf-chip.has-reserve { color:var(--good); border:1px solid var(--good); }
   .sf-chip.is-empty { color:var(--muted); border:1px solid var(--line); }
@@ -4508,8 +4669,9 @@
   </div>
 
   <section class="card" id="ac_cards_section">
-    <h2>Pay off your cards</h2>
+    <h2>Your cards</h2>
     <div id="ac_cards"><div class="mini" style="color:var(--muted)">Loading card summary…</div></div>
+    <div id="ac_cards_live" class="sr-only" role="status" aria-live="polite"></div>
     <div id="ac_open_pending"></div>
   </section>
 
@@ -5354,6 +5516,10 @@ function persist(key, valueStr) {
     try { localStorage.setItem(WI_SESSION_KEY, JSON.stringify(WhatIf.session)); } catch (e) {}
     return;
   }
+  // An identical re-save is not a change. bgbBaseAutoFill()/render() re-persist the same bytes on a plain
+  // visit to Budget; marking the profile dirty for that made an out-of-date device PUT its old blob over
+  // the server's newer one (2026-10-23, card groups lost). A key not yet stored still counts as a change.
+  try { if (localStorage.getItem(key) === valueStr) return; } catch (e) {}
   try { localStorage.setItem(key, valueStr); } catch (e) {}
   // S1.2 §6.1 autosave hook — LIVE branch only. Structurally unreachable in What-If Mode (the
   // active branch above returns before this line) and during boot/every mode transition (the
@@ -8227,6 +8393,9 @@ async function repaintAfterHydrate() {
     // newer than the hydrate and has to survive it.
     if (__repaintDeferredDirty) { __repaintDeferredDirty = false; markProfileDirty(); }
   }
+  // QA 2026-10-24: the card list is drawn from the rollup, not from paintFromState(), so a hydrate that changed
+  // card groups (name, tag, members) left the old ones on screen until a tab round trip.
+  try { if (typeof window.__acRepaintCards === 'function') window.__acRepaintCards(); } catch (e) {}
 }
 
 // Honest, non-blocking conflict affordance for D2/X1 (§4/§7). Both `kind`s reach this after a
@@ -8783,7 +8952,11 @@ async function foregroundResyncAction(force) {
     // other caller of identityChanged only ever sees a real (non-null) ident because of this bail.
     if (ident == null) return;
     const changed = identityChanged(window.__role, window.__scopeId, ident);
-    if (!changed && !force) return;   // cheap no-op poll — the common case on every foreground event
+    // 2026-10-23: no early return when identity is unchanged. A device left open (the HA companion webview)
+    // never pulled what another device saved, and its next edit then PUT its whole old blob over the
+    // server's copy -- that is how card groups vanished. The engine is a no-op when the device is already
+    // in sync (§4 S1), pulls when it is behind and clean, and flushes when it is dirty, so running it on
+    // every foreground is the cheap fix. `force` is kept for callers that pass it.
     // SHOULD-FIX (2026-07-27 review, item 2): a REAL identity change with a dirty local edit is
     // dangerous in a way `force`-only re-arms (Fix C, unchanged identity) are not — the §4.0
     // scopeId-mismatch guard collapses ANY scope change to derived state 'empty' regardless of
@@ -21678,11 +21851,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       + '<span class="ac-util-cap">' + Math.round(pct * 100) + '% of ' + fmt$(limit) + (suffix || '') + '</span></div>';
   }
   // Detail expand: the full track+fill bar (legible at full width) + a fuller caption.
-  function acUtilMeterHtml(rr, pct, limit) {
+  // `cents` prints exact dollars-and-cents (Your cards owes to the cent); the default keeps the Manage row's whole dollars.
+  function acUtilMeterHtml(rr, pct, limit, cents) {
     const fillPct = Math.min(100, Math.max(0, pct * 100));
+    const m = cents ? acAmt : fmt$;
     return '<div class="ac-util ' + acUtilBand(pct) + '">'
       + '<div class="ac-util-track"><div class="ac-util-fill" style="width:' + fillPct + '%"></div></div>'
-      + '<span class="ac-util-cap">' + fmt$(rr) + ' of ' + fmt$(limit) + ' &middot; ' + Math.round(pct * 100) + '%</span>'
+      + '<span class="ac-util-cap">' + m(rr) + ' of ' + m(limit) + ' &middot; ' + Math.round(pct * 100) + '%</span>'
       + '</div>';
   }
 
@@ -21694,7 +21869,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acCardGroupOf(aid) { return acCardGroups().find(g => (g.ids || []).map(String).includes(String(aid))) || null; }
   function acSetCardGroup(aid, target, newName) {
     if (!bgb) return;
-    let gs = acCardGroups().map(g => ({ id: g.id, name: g.name, ids: (g.ids || []).filter(x => String(x) !== String(aid)) }));
+    let gs = acCardGroups().map(g => ({ ...g, ids: (g.ids || []).filter(x => String(x) !== String(aid)) }));   // spread: every other field (tag, and any future one) survives a regroup
     if (target === '__new') {
       const nm = String(newName || '').trim().slice(0, 40);
       if (!nm) return;
@@ -21705,20 +21880,57 @@ document.addEventListener('DOMContentLoaded', async () => {
     bgb.cardGroups = gs.filter(g => g.ids.length);          // a group with no cards is not kept
     saveBgb();
   }
+  // The group's kebab menu: Rename and Edit tag. Open puts focus on the first item; closing from the keyboard returns it to the kebab.
+  function acCardGroupMenu(gid, open, refocus) {
+    const btn = document.querySelector('[data-card-group-menu="' + gid + '"]'), pop = document.getElementById('yc_gm_' + gid);
+    if (!btn || !pop) return;
+    if (open) acCardGroupMenusClose();   // only one group menu is open at a time
+    pop.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    if (open) { const it = pop.querySelector('[role="menuitem"]'); if (it) it.focus(); }
+    else if (refocus) btn.focus();
+  }
+  function acCardGroupMenusClose() { document.querySelectorAll('.yc-menu-pop:not([hidden])').forEach(p => acCardGroupMenu(p.id.replace('yc_gm_', ''), false, false)); }
+  // Leaves the rename field: save (Enter / Save button) or cancel (Escape). Either way focus goes back to the kebab.
+  function acCardGroupRenameEnd(gid, save) {
+    const fm = document.querySelector('[data-card-group-rename-form="' + gid + '"]'), inp = fm && fm.querySelector('input'), val = inp ? inp.value : '';
+    if (fm) { fm.hidden = true; fm.style.display = 'none'; }
+    if (save) { acRenameCardGroup(gid, val); if (window.__acLastRollup) acRenderCards(window.__acLastRollup); }
+    else if (inp) { const g = acCardGroups().find(x => x.id === gid); if (g) inp.value = g.name; }
+    const k = document.querySelector('[data-card-group-menu="' + gid + '"]'); if (k) k.focus();
+  }
   function acRenameCardGroup(gid, name) {
     const nm = String(name || '').trim().slice(0, 40); if (!nm || !bgb) return;
     const g = acCardGroups().find(x => x.id === gid); if (g) { g.name = nm; saveBgb(); }
+  }
+  // The optional tag chip beside a group's name ("Personal"). Up to 20 characters; empty clears it.
+  const AC_TAG_MAX = 20;
+  function acSetCardGroupTag(gid, tag) {
+    const g = acCardGroups().find(x => x.id === gid); if (!g) return;
+    const t = String(tag || '').trim().slice(0, AC_TAG_MAX);
+    if (t) g.tag = t; else delete g.tag;
+    saveBgb();
+  }
+  function acCardGroupTagOpen(gid) {
+    const f = document.querySelector('[data-card-group-tag-form="' + gid + '"]'); if (!f) return;
+    f.hidden = false; f.style.display = 'inline-flex'; const i = f.querySelector('input'); if (i) { i.focus(); i.select(); }
+  }
+  function acCardGroupTagEnd(gid, save) {
+    const fm = document.querySelector('[data-card-group-tag-form="' + gid + '"]'), inp = fm && fm.querySelector('input'), val = inp ? inp.value : '';
+    if (fm) { fm.hidden = true; fm.style.display = 'none'; }
+    if (save) { acSetCardGroupTag(gid, val); if (window.__acLastRollup) acRenderCards(window.__acLastRollup); }
+    else if (inp) { const g = acCardGroups().find(x => x.id === gid); if (g) inp.value = g.tag || ''; }
+    const k = document.querySelector('[data-card-group-menu="' + gid + '"]'); if (k) k.focus();
   }
   function acCardGroupPickerHtml(aid) {
     const cur = acCardGroupOf(aid);
     const opts = '<option value="">No group</option>'
       + acCardGroups().map(g => '<option value="' + esc(g.id) + '"' + (cur && cur.id === g.id ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('')
       + '<option value="__new">+ New group…</option>';
-    return '<div class="ac-card-group-pick" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
+    return '<div class="ac-card-group-pick" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
       + '<label class="mini muted" for="ac_cg_' + aid + '">Group</label>'
-      + '<select id="ac_cg_' + aid + '" data-card-group="' + aid + '" style="min-height:36px">' + opts + '</select>'
+      + '<select id="ac_cg_' + aid + '" data-card-group="' + aid + '">' + opts + '</select>'
       + '<span data-card-group-new="' + aid + '" hidden style="display:none;gap:6px;align-items:center">'
-      +   '<input type="text" maxlength="40" placeholder="Group name" aria-label="New group name" data-card-group-name="' + aid + '" style="min-height:36px">'
+      +   '<input type="text" maxlength="40" placeholder="Group name" aria-label="New group name" data-card-group-name="' + aid + '">'
       +   '<button class="ac-tool" type="button" data-card-group-save="' + aid + '">Add</button></span>'
       + '</div>';
   }
@@ -21741,288 +21953,287 @@ document.addEventListener('DOMContentLoaded', async () => {
     acSetCardGroup(aid, sel.value);
     acRerenderCardsKeepingOpen(aid);
   });
+  // ---- Your cards (slice 1 of the redesign). One word for the money everywhere: "Owed" (plus the ledger's own
+  // words Charges, Paid, Pending, Owed with pending). A card in credit is shown as a credit and is NEVER netted
+  // against another card, so no total or group may say "Paid off" while any card still owes. All the arithmetic
+  // below is in integer cents so the statement adds up to the same Owed the ledger totals line prints. ----
+  const acCents = x => Math.round((+x || 0) * 100);
+  const acSignedAmt = c => (c < 0 ? '−' : '') + acAmt(Math.abs(c) / 100);
+  const AC_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const acMonDay = iso => { const a = String(iso || '').split('-').map(Number); return a.length === 3 && a[1] ? AC_MON[a[1] - 1] + ' ' + a[2] : String(iso || ''); };
+  let acCardsPaid = null;            // set by a recorded payment; the next render announces it and puts focus back
+  let acCardsMonth = null;           // the month the cards were last painted for; open panels carry over only within it
+  // Everything one card's row and statement need, derived once. Carried in is the balance brought forward from before
+  // this month's 1st: Owed less this month's own movement. Refunds count as Paid exactly like the ledger totals line
+  // (Charges = settled net charges + refunds), so the Owed here and the ledger's Owed are the same number.
+  function acCardFacts(card) {
+    const rrC = acCents(card.runningRemaining), rcC = acCents(card.runningCredit), owedC = rrC - rcC;
+    const payNowC = acCents(card.payNow), paidC = acCents(card.paid);
+    const refundsC = (ACT.txns || []).filter(t => t.accountId === card.accountId && t.kind === 'refund' && t.direction === 'out'
+      && t.status !== 'pending' && !t.isTransfer).reduce((n, t) => n + acCents(t.amount), 0);
+    const meta = (ACT.accounts || []).find(x => x.id === card.accountId);
+    const limit = meta ? meta.creditLimit : null, hasLimit = limit != null && limit > 0;
+    return { card, id: String(card.accountId), name: card.name || acAcctName(card.accountId), rrC, rcC, owedC,
+      pendC: acCents(card.runningPending), payNowC, paidC, refundsC, chargesC: payNowC + refundsC, paidShownC: paidC + refundsC,
+      carriedC: owedC - (payNowC - paidC), limit, hasLimit, utilPct: hasLimit ? Math.max(0, rrC / 100 / limit) : 0 };
+  }
+  // By bucket to date. Left is the card's own split of what it still owes (the same split Cash vs cards uses),
+  // in whole cents by largest remainder so the column adds up to Owed exactly. Charged is every settled charge in
+  // that bucket; Paid is what has come off it: payments earmarked to it plus its share of whole-card payments.
+  // Owed by bucket, for the card row: only the buckets that still owe money. The amounts add up to the card's Owed.
+  function acCardBucketsHtml(f) {
+    const br = acCardBucketRows(f);
+    if (!br.length) return '';
+    return '<ul class="yc-bk" role="list" data-card-buckets="' + f.id + '" aria-label="Owed by bucket">'
+      + br.map(r => '<li data-bucket="' + esc(r.key) + '"><span class="yc-bk-dot" aria-hidden="true" style="color:' + (r.key === 'uncat' ? 'var(--muted)' : categoryColor(r.key)) + '">●</span> '
+        + '<span class="yc-bk-name" title="' + esc(acBucketName(r.key)) + '">' + esc(acBucketName(r.key)) + '</span> <b data-bucket-left>' + acAmt(r.leftC / 100) + '</b></li>').join('') + '</ul>';
+  }
+  function acCardBucketRows(f) {
+    if (f.rrC <= 0) return [];
+    const card = f.card, bb = card.byBucketOwed || {}, em = card.cumulativeEarmarkedPaid || {};
+    const chunks = acCardChunks(card), raw = chunks.map(x => x[1] * 100), fl = raw.map(Math.floor);
+    let rest = f.rrC - fl.reduce((a, b) => a + b, 0);
+    const order = raw.map((v, i) => [v - fl[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+    for (let i = 0; rest > 0 && order.length; i = (i + 1) % order.length, rest--) fl[order[i][1]]++;
+    for (let i = order.length - 1; rest < 0 && order.length; i = (i - 1 + order.length) % order.length, rest++) if (fl[order[i][1]] > 0) fl[order[i][1]]--; else rest--;
+    const left = {}; chunks.forEach((x, i) => { left[x[0]] = fl[i]; });
+    const keys = chunks.map(x => x[0]);
+    Object.keys(bb).concat(Object.keys(em)).forEach(k => { if (!keys.includes(k)) keys.push(k); });
+    if (acCents(card.uncategorizedOwed) > 0 && !keys.includes('uncat')) keys.push('uncat');
+    const ord = getCategories().map(c => c.key), rank = k => k === 'uncat' ? 1e9 : (ord.indexOf(k) < 0 ? 1e6 : ord.indexOf(k));
+    return keys.map(k => {
+      const l = left[k] || 0;
+      const ch = Math.max(l, k === 'uncat' ? acCents(card.uncategorizedOwed) : acCents(bb[k]) + acCents(em[k]));
+      return { key: k, chargedC: ch, leftC: l, paidC: ch - l };
+    }).filter(r => r.leftC > 0).sort((a, b) => rank(a.key) - rank(b.key) || String(a.key).localeCompare(String(b.key)));   // custom buckets all rank alike: tie-break on the key so the order never changes between loads
+  }
+  function acCardPayFormHtml(f) {
+    const aid = f.id, rr = f.rrC / 100;
+    const payDate = ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month);
+    const nonCredit = (ACT.accounts || []).filter(a => a.type !== 'credit');
+    // A payment with no "from" credits the card and takes NOTHING out of any account, so the account balances (and
+    // Cash vs cards) never moved. Default to the account last paid from, else the first checking account; "none"
+    // stays available but is a choice.
+    let lastFrom = ''; try { lastFrom = localStorage.getItem('ac_pay_from') || ''; } catch (e) {}
+    const defFrom = String((nonCredit.find(a => String(a.id) === lastFrom) || nonCredit.find(a => a.type === 'checking') || {}).id || '');
+    const fromOpts = '<option value="">— none (card only, no account changes) —</option>' + nonCredit.map(a => '<option value="' + a.id + '"' + (String(a.id) === defFrom ? ' selected' : '') + '>' + esc(a.name) + '</option>').join('');
+    const catOpts = '<option value="">Whole card / no category</option>'
+      + getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join('');
+    // max-width:9ch is set on the <input> itself (not the shared `.ac-amt input` rule) so only THIS form is scoped down;
+    // `ch` must resolve against the element whose font-size is --fs-2xl or it clips the digits.
+    return '<div class="ac-pay-form" id="ac_pay_form_' + aid + '" hidden>'
+      + '<div class="ac-row" style="flex-wrap:wrap">'
+      + '<label class="ac-field ac-amt" style="flex:0 0 auto"><span class="ac-lbl">Amount</span>'
+      +   '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-pay="amt" value="' + acMoneyEdit(Math.max(0, rr)) + '" style="max-width:9ch"></span></label>'
+      + '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Date</span><input type="date" data-pay="date" value="' + payDate + '"></label>'
+      + '</div>'
+      + '<div class="ac-pay-earmark">'
+      + '<label class="ac-field"><span class="ac-lbl">Paid from</span><select data-pay="from">' + fromOpts + '</select></label>'
+      + '<label class="ac-field"><span class="ac-lbl ac-lbl-strong">Toward</span><select data-pay="cat">' + catOpts + '</select></label>'
+      + '</div>'
+      + '<span class="ac-earmark-chip is-whole" data-pay-chip="' + aid + '" aria-live="polite">→ applies to whole card balance</span>'
+      + '<div class="ac-pay-actions"><button class="calc-btn" type="button" data-pay-submit="' + aid + '">Record payment</button>'
+      + '<button class="ac-tool" type="button" data-pay-cancel="' + aid + '">Cancel</button></div></div>';
+  }
+  function acCardDetailHtml(f) {
+    const monthName = AC_MON[(+ACT.month.slice(5, 7) || 1) - 1] + ' 1';
+    const row = (th, td, key) => '<tr' + (key ? ' class="is-sum"' : '') + '><th scope="row">' + th + '</th><td' + (key ? ' data-stmt="' + key + '"' : '') + '>' + td + '</td></tr>';
+    let h = acCardPayFormHtml(f);
+    // 1. Statement: the month, line by line, to the same Owed the ledger shows
+    h += '<section class="yc-sec" aria-labelledby="yc_st_' + f.id + '"><h4 id="yc_st_' + f.id + '">Statement, ' + esc(acMonthLabel(ACT.month)) + '</h4>';
+    h += '<table class="yc-stmt" data-card-stmt="' + f.id + '"><tbody>'
+      + row(f.carriedC < 0 ? 'Credit carried in before ' + monthName : 'Carried in before ' + monthName, acSignedAmt(f.carriedC))
+      + row('+ Charges (settled)', acAmt(f.chargesC / 100))
+      + row('− Paid', acAmt(f.paidShownC / 100))
+      + row('= Owed', acSignedAmt(f.owedC), 'owed')
+      + row('+ Pending', acSignedAmt(f.pendC))
+      + row('= Owed with pending', acSignedAmt(f.owedC + f.pendC), 'owed-with-pending')
+      + '</tbody></table></section>';
+    // 2. The owed-by-bucket list now lives on the row itself (acCardBucketsHtml), outside this collapsible panel.
+    if (f.rrC > 0) h += '<p class="mini muted yc-note">The buckets on the row show what is still owed in each one, including charges from earlier months. Payments to the whole card are spread across the buckets in proportion.</p>';
+    // 3. Payments this month (the IN legs of card payments)
+    const pays = (ACT.txns || []).filter(t => t.accountId === f.card.accountId && t.direction === 'in' && t.isTransfer);
+    h += '<section class="yc-sec" aria-labelledby="yc_pm_' + f.id + '"><h4 id="yc_pm_' + f.id + '">Payments this month</h4>';
+    if (!pays.length) h += '<p class="mini muted" style="margin:0">No payments recorded this month.</p>';
+    else {
+      h += '<ul class="yc-pays" role="list">';
+      pays.forEach(p => {
+        const toward = p.bucket ? 'toward ' + esc(labelForBucket(p.bucket)) : 'whole card';
+        const leg = (ACT.txns || []).find(t => p.transferGroup && t.transferGroup === p.transferGroup && t.direction === 'out');
+        const what = acMonDay(p.postedOn) + ', ' + acAmt(p.amount);
+        h += '<li class="yc-pay-row" id="ac_pay_row_' + p.id + '"><span class="yc-pd">' + esc(acMonDay(p.postedOn)) + '</span>'
+          + '<span class="yc-pm"><b>' + acAmt(p.amount) + '</b> <span class="muted">' + toward + (leg ? ', from ' + esc(acAcctName(leg.accountId)) : '') + '</span></span>'
+          + '<span class="yc-pa"><button type="button" class="ac-tool" data-edit-payment="' + p.id + '" aria-label="Edit the ' + esc(what) + ' payment">Edit</button>'
+          + '<button type="button" class="ac-tool" data-del-payment="' + p.id + '" aria-label="Delete the ' + esc(what) + ' payment">Delete</button></span></li>';
+      });
+      h += '</ul>';
+    }
+    h += '</section>';
+    // 4. Footer: which group the card sits in, and its rows in the ledger (N counts charges, refunds and payment legs)
+    const n = (ACT.txns || []).filter(t => t.accountId === f.card.accountId).length;
+    h += '<div class="yc-sec yc-foot-row">' + acCardGroupPickerHtml(f.id)
+      + (n ? '<button type="button" class="ac-tool" data-card-txns="' + f.id + '">' + (n === 1 ? 'Show this transaction' : 'Show these ' + n + ' transactions') + ' in the ledger ↓</button>'
+           : '<span class="mini muted">No transactions this month.</span>') + '</div>';
+    return h;
+  }
+  function acUpdateEarmarkChip(form) {
+    const cat = form.querySelector('[data-pay="cat"]'); const chip = form.querySelector('.ac-earmark-chip');
+    if (!cat || !chip) return;
+    if (cat.value) { chip.textContent = '→ applies to ' + cat.options[cat.selectedIndex].text; chip.classList.add('is-cat'); chip.classList.remove('is-whole'); }
+    else { chip.textContent = '→ applies to whole card balance'; chip.classList.add('is-whole'); chip.classList.remove('is-cat'); }
+  }
+  // The focus target of whatever the user was on, so a background refresh (sync, a payment, a group change) puts them back.
+  const AC_CARD_FOCUS = ['data-card-toggle', 'data-card-pay', 'data-pay-submit', 'data-pay-cancel', 'data-card-group', 'data-card-group-name', 'data-card-group-save',
+    'data-card-group-menu', 'data-card-group-rename', 'data-card-group-rename-save', 'data-card-group-rename-input', 'data-card-group-tag-edit', 'data-card-group-tag-save', 'data-card-group-tag-input', 'data-edit-payment', 'data-del-payment', 'data-card-txns', 'data-cards-cash'];
+  function acCardsFocusKey(ae) {
+    const pay = ae.getAttribute && ae.getAttribute('data-pay'), form = pay && ae.closest('.ac-pay-form');
+    if (form) return { sel: '#' + form.id + ' [data-pay="' + pay + '"]', pos: ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null };
+    const a = AC_CARD_FOCUS.find(x => ae.hasAttribute && ae.hasAttribute(x));
+    if (!a) return null;
+    const v = ae.getAttribute(a);
+    return { sel: '[' + a + '="' + v + '"]', alt: /^data-card-group-(rename(-save|-input)?|tag-(edit|save|input))$/.test(a) ? '[data-card-group-menu="' + v + '"]' : null, pos: null };
+  }
+  window.__acRepaintCards = () => { if (window.__acLastRollup && document.getElementById('ac_cards')) acRenderCards(window.__acLastRollup); };
   function acRenderCards(rollup) {
     const el = $('ac_cards'); if (!el) return;
     window.__acLastRollup = rollup;
-    if (!rollup || !rollup.perAccount || !Object.keys(rollup.perAccount).length) {
-      el.innerHTML = '<div class="mini" style="color:var(--muted)">No credit cards yet.</div>';
+    if (!rollup) { el.innerHTML = '<div class="mini muted">Card balances have not loaded yet. Pull to refresh or open Actuals again.</div>'; return; }
+    if (!rollup.perAccount || !Object.keys(rollup.perAccount).length) {
+      el.innerHTML = '<div class="mini muted">No credit cards yet. Add one in Accounts.</div>';
       return;
     }
-    const accounts = Object.values(rollup.perAccount);
-    const bucketsOwed = rollup.bucketsOwed || rollup.buckets || [];
-    const grand = rollup.grandTotal || {};
-    const EPS = 0.005;
-    const grandOwed    = grand.runningRemaining || 0;
-    const grandPending = grand.runningPending   || 0;
-    const grandCredit  = grand.runningCredit    || 0;
-
-    // KPI hero tiles
-    let h = '<div class="tiles" style="margin-bottom:14px">';
-    if (grandOwed < EPS && grandPending < EPS) {
-      // All caught up — single green tile
-      h += '<div class="tile" style="border-color:var(--accent)">';
-      h += '<div class="k">Total you owe now</div>';
-      h += '<div class="v"><span class="ac-pay-paidoff" style="font-size:inherit">✓ All caught up</span></div>';
-      h += '</div>';
-    } else {
-      h += '<div class="tile" style="border-color:var(--accent)">';
-      h += '<div class="k">Total you owe now</div>';
-      h += '<div class="v">' + acAmt(grandOwed) + '</div>';
-      h += '<div class="s">Cumulative balance across all cards</div></div>';
-    }
-    if (grandPending >= EPS) {
-      h += '<div class="tile">';
-      h += '<div class="k">Coming (pending)</div>';
-      h += '<div class="v ac-pay-coming">' + acAmt(grandPending) + '</div>';
-      h += '<div class="s">Not yet settled — excluded from balance</div></div>';
-    }
-    h += '</div>';
-
-    // Summary table — 2 columns: Card | Balance now
-    const colSpan = 2;
-    h += '<div class="ac-cards-scroll"><table class="res-table ac-cards-table"><thead><tr>';
-    h += '<th class="ac-col-name">Card</th>';
-    h += '<th class="num ac-col-total">Balance now</th>';
-    h += '</tr></thead><tbody>';
-
-    const renderCard = card => {
-      const rr = card.runningRemaining || 0;
-      const rc = card.runningCredit    || 0;
-      // manage-panel-redesign.md §3b: creditLimit reads off ACT.accounts (the /accounts payload),
-      // never account-balances -- keeps this section's math fully independent of that endpoint.
-      const acctMeta = ACT.accounts.find(x => x.id === card.accountId);
-      const limit = acctMeta ? acctMeta.creditLimit : null;
-      const hasLimit = limit != null && limit > 0;
-      const utilPct = hasLimit ? Math.max(0, rr / limit) : 0;
-      // Adversarial-review finding #9: any paid-off state (rc>EPS OR rr<EPS) shows NO meter --
-      // 0% utilization tells the user nothing new next to "✓ Paid off", and the summary/detail
-      // must agree (the detail already excluded this; the summary previously didn't, showing a
-      // stray "0% of $5,000" the detail never did). One boolean, used in both places below.
-      const showMeter = hasLimit && rr >= EPS;
-
-      // Summary row (always visible) — card name is an expand toggle
-      h += '<tr class="ac-card-row"><td class="ac-col-name">';
-      h += '<button class="ac-card-toggle" data-card-toggle="' + card.accountId + '" aria-expanded="false">';
-      h += esc(card.name || acAcctName(card.accountId));
-      h += '</button>';
-      h += '<button class="ac-tool" type="button" data-card-pay="' + card.accountId + '" aria-expanded="false" aria-controls="ac_pay_form_' + card.accountId + '" title="Record a payment toward this card" style="display:block;width:max-content;margin-top:2px">+ Record payment</button></td>';
-
-      // Balance now cell — a card with a credit limit set AND an actual balance owed gets a
-      // compact utilization caption underneath (no bar; the sticky column is too narrow).
-      if (rc > EPS) {
-        h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span>'
-          + '<br><span class="ac-pay-credit">' + acAmt(rc) + ' credit</span></td>';
-      } else if (rr < EPS) {
-        h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span></td>';
-      } else {
-        h += '<td class="num ac-col-total"><b>' + acAmt(rr) + '</b>' + (showMeter ? acUtilCapHtml(utilPct, limit) : '') + '</td>';
-      }
-      h += '</tr>';
-
-      // Detail expand row (hidden until toggle)
-      h += '<tr class="ac-card-detail" id="ac_card_det_' + card.accountId + '" style="display:none">';
-      h += '<td colspan="' + colSpan + '" style="padding:0">';
-      h += '<div style="padding:10px 14px 12px;background:var(--panel-2);border-top:1px solid var(--line)">';
-      h += acCardGroupPickerHtml(card.accountId);
-
-      // 1. Balance by category block (uses running/cumulative byBucketOwed)
-      const byBucketOwed     = card.byBucketOwed     || {};
-      const earmarkedPaid    = card.earmarkedPaid     || {};  // month-scoped (display only; byBucketOwed already nets cumulative)
-      const generalPaidMonth = card.generalPaid       || 0;   // whole-card payments this month
-      const generalPaidPrior = Math.max(0, Math.round((card.cumulativeGeneralPaid || 0) * 100) - Math.round((card.generalPaid || 0) * 100)) / 100;  // prior months (cent-safe)
-      const uncatOwed        = card.uncategorizedOwed || 0;
-      const hasOwedLines  = bucketsOwed.some(b => Math.abs(byBucketOwed[b] || 0) > EPS || (earmarkedPaid[b] || 0) > EPS)
-                            || uncatOwed > EPS || generalPaidPrior > EPS || generalPaidMonth > EPS;
-      if (hasOwedLines) {
-        h += '<div class="subhead" style="margin:0 0 6px">Balance by category</div>';
-      }
-      bucketsOwed.forEach(b => {
-        const net = byBucketOwed[b] || 0;
-        const ear = earmarkedPaid[b] || 0;
-        if (!(Math.abs(net) > EPS || ear > EPS)) return;
-        const color = categoryColor(b);
-        const label = KINDS[b] ? KINDS[b].label : b;
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
-        h += '<span><span style="color:' + color + '">●</span> ' + esc(label) + '</span>';
-        if (net < -EPS) {
-          h += '<span class="ac-pay-credit">' + acAmt(-net) + ' credit</span>';
-        } else {
-          h += '<span>' + acAmt(net) + '</span>';
-        }
-        h += '</div>';
-        if (ear > EPS) {
-          h += '<div style="display:flex;justify-content:space-between;font-size:var(--fs-xs);padding:1px 0 3px 12px;border-bottom:1px solid var(--line-faint)">';
-          h += '<span style="color:var(--muted)">− earmarked payment</span>';
-          h += '<span style="color:var(--good)">−' + acAmt(ear) + '</span>';
-          h += '</div>';
-        }
+    // What is open now (panels, an unsent payment form, focus) comes through the repaint, within the same month.
+    const snap = { open: [], forms: {}, focus: null, rename: {}, tag: {} };
+    if (acCardsMonth === ACT.month) {
+      el.querySelectorAll('.yc-det').forEach(d => { if (d.style.display !== 'none') snap.open.push(d.id.replace('ac_card_det_', '')); });
+      el.querySelectorAll('.ac-pay-form').forEach(fm => {
+        if (fm.hidden) return;
+        const v = {}; fm.querySelectorAll('[data-pay]').forEach(i => { v[i.dataset.pay] = i.value; });
+        snap.forms[fm.id.replace('ac_pay_form_', '')] = { v, manual: (fm.querySelector('[data-pay="cat"]') || {}).dataset.payManual === 'true' };
       });
-      if (uncatOwed > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
-        h += '<span style="color:var(--muted)">Uncategorized</span>';
-        h += '<span>' + acAmt(uncatOwed) + '</span>';
-        h += '</div>';
-      }
-      if (generalPaidPrior > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
-        h += '<span style="color:var(--muted)">− whole-card payments (earlier)</span>';
-        h += '<span style="color:var(--good)">−' + acAmt(generalPaidPrior) + '</span>';
-        h += '</div>';
-      }
-      if (generalPaidMonth > EPS) {
-        h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:2px 0;border-bottom:1px solid var(--line-faint)">';
-        h += '<span style="color:var(--muted)">− whole-card payment (this month)</span>';
-        h += '<span style="color:var(--good)">−' + acAmt(generalPaidMonth) + '</span>';
-        h += '</div>';
-      }
-      // Net owed (bold summary row)
-      h += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:var(--fs-sm);padding:4px 0;font-weight:var(--fw-bold)">';
-      h += '<span>Net owed</span>';
-      if (rc > EPS) {
-        h += '<span><span class="ac-pay-paidoff">✓ Paid off</span> <span class="ac-pay-credit">' + acAmt(rc) + ' credit</span></span>';
-      } else {
-        h += '<span>' + acAmt(rr) + '</span>';
-      }
-      h += '</div>';
+      // A group name being typed survives the repaint: its text, caret and focus.
+      el.querySelectorAll('[data-card-group-rename-form]').forEach(fm => {
+        const inp = fm.querySelector('input'); if (fm.hidden || !inp) return;
+        snap.rename[fm.dataset.cardGroupRenameForm] = { v: inp.value, pos: [inp.selectionStart, inp.selectionEnd] };
+      });
+      el.querySelectorAll('[data-card-group-tag-form]').forEach(fm => {
+        const inp = fm.querySelector('input'); if (fm.hidden || !inp) return;
+        snap.tag[fm.dataset.cardGroupTagForm] = { v: inp.value, pos: [inp.selectionStart, inp.selectionEnd] };
+      });
+      if (el.contains(document.activeElement)) snap.focus = acCardsFocusKey(document.activeElement);
+    }
+    const EPS = 0.005;
+    const facts = Object.values(rollup.perAccount).map(acCardFacts)
+      .sort((a, b) => b.owedC - a.owedC || a.name.localeCompare(b.name));
+    const byId = {}; facts.forEach(f => { byId[f.id] = f; });
+    const owedTotC = facts.reduce((n, f) => n + f.rrC, 0), pendTotC = facts.reduce((n, f) => n + f.pendC, 0);
+    const credits = facts.filter(f => f.rcC > 0);
+    const nCards = facts.length + (facts.length === 1 ? ' card' : ' cards');
 
-      // 1.5. Utilization meter (manage-panel-redesign.md §3b) — full track+fill bar, legible at
-      // detail width. Skipped for ANY paid-off state (showMeter === hasLimit && rr>=EPS), matching
-      // the summary cell exactly (adversarial-review finding #9).
+    // Summary: Owed first; credits are noted, never netted
+    let h = '<div class="tiles cp-verdict yc-sum"><div class="tile ' + (owedTotC < 1 ? 'good' : '') + '" data-yc-summary="' + (owedTotC < 1 ? 'clear' : 'owed') + '">';
+    if (owedTotC < 1) h += '<div class="v">✓ Nothing owed on your cards</div>';
+    else h += '<div class="k">Owed</div><div class="v" data-yc-owed>' + acAmt(owedTotC / 100) + '</div>';
+    h += '<div class="s">' + (pendTotC !== 0
+      ? (pendTotC < 0 ? '− ' : '+ ') + acAmt(Math.abs(pendTotC) / 100) + ' pending = ' + acAmt((owedTotC + pendTotC) / 100) + ' owed with pending'
+      : 'No pending charges') + ' · ' + nCards + '</div>';
+    credits.forEach(f => { h += '<div class="s" data-yc-credit="' + f.id + '">' + esc(f.name) + ': ' + acAmt(f.rcC / 100) + ' credit, not netted</div>'; });
+    h += '</div></div>';
+    if (owedTotC >= 1) h += '<p class="yc-foot"><button type="button" class="yc-link" data-cards-cash>Can your cash pay these? See Cash vs cards</button></p>';
+
+    const renderCard = f => {
+      const owes = f.rrC > 0, inCredit = f.rcC > 0, showMeter = f.hasLimit && owes;
+      const amount = inCredit ? '−' + acAmt(f.rcC / 100) : acAmt(f.rrC / 100);
+      h += '<li class="cp-row yc-card' + (owes ? '' : ' is-clear') + '" data-card-row="' + f.id + '"><span class="' + (owes ? 'yc-art' : 'yc-tile') + '" aria-hidden="true"></span><div class="cp-line">'
+        + '<button type="button" class="yc-tog" data-card-toggle="' + f.id + '" aria-expanded="false" aria-controls="ac_card_det_' + f.id + '"><span class="yc-name" title="' + esc(f.name) + '">' + esc(f.name) + '</span></button>'
+        + '<span class="cp-amt' + (inCredit ? ' is-credit' : '') + '">' + amount + '</span></div>';
+      // The breakdown is on the row itself, before opening the card or pressing Pay (owner, 2026-10-23).
+      if (owes) h += '<div class="yc-eq" data-card-eq="' + f.id + '">' + (f.carriedC < 0 ? 'Credit&nbsp;carried&nbsp;in&nbsp;' : 'Carried&nbsp;in&nbsp;') + acAmt(Math.abs(f.carriedC) / 100) + ' <span aria-hidden="true">+</span><span class="sr-only">plus</span>&nbsp;Charges&nbsp;' + acAmt(f.chargesC / 100)
+        + ' <span aria-hidden="true">−</span><span class="sr-only">minus</span>&nbsp;Paid&nbsp;' + acAmt(f.paidShownC / 100) + '</div>' + acCardBucketsHtml(f);
+      h += '<div class="yc-meta">';
+      if (inCredit) h += '<span class="sf-pace funded">✓ In credit</span>';
+      else if (!owes) h += '<span class="sf-pace funded">✓ Paid off</span>';
+      if (f.pendC !== 0) h += '<span class="sf-pace">' + (f.pendC < 0 ? '− ' : '+ ') + acAmt(Math.abs(f.pendC) / 100) + ' pending = ' + acSignedAmt(f.owedC + f.pendC) + '<span class="sr-only"> owed with pending</span></span>';
       if (showMeter) {
-        h += acUtilMeterHtml(rr, utilPct, limit);
+        h += acUtilMeterHtml(f.rrC / 100, Math.min(1, f.utilPct), f.limit, true);
+        if (f.utilPct > 1) h += '<span class="sf-pace late">▲ over limit</span>';
+        else if (f.utilPct >= 0.70) h += '<span class="sf-pace under">▲ ' + Math.round(f.utilPct * 100) + '% used</span>';
       }
-
-      // 2. Muted subline: carriedIn · payNow · runningPending (omit ~0 clauses)
-      const carriedIn = card.carriedIn      || 0;
-      const payNow    = card.payNow         || 0;
-      const runPend   = card.runningPending || 0;
-      const clauses = [];
-      if (carriedIn > EPS) clauses.push(acAmt(carriedIn) + ' carried in from prior months');
-      if (payNow    > EPS) clauses.push(acAmt(payNow)    + ' added this month');
-      if (runPend   > EPS) clauses.push(acAmt(runPend)   + ' pending — not yet settled');
-      if (clauses.length) {
-        h += '<div class="mini" style="color:var(--muted);margin-top:8px;padding-top:6px;border-top:1px solid var(--line-faint)">' + clauses.join(' · ') + '</div>';
-      }
-
-      // 2.5. Payments made toward this card this month (IN + isTransfer legs)
-      const cardPayments = (ACT.txns || []).filter(t => t.accountId === card.accountId && t.direction === 'in' && t.isTransfer);
-      h += '<div class="subhead" style="margin:10px 0 5px;padding-top:8px;border-top:1px solid var(--line-faint)">Payments</div>';
-      if (!cardPayments.length) {
-        h += '<div class="mini" style="color:var(--muted)">No payments recorded this month.</div>';
-      } else {
-        cardPayments.forEach(pmt => {
-          const earmarkLabel = pmt.bucket ? (KINDS[pmt.bucket] ? KINDS[pmt.bucket].label : pmt.bucket) : 'whole card';
-          const fundingLeg = (ACT.txns || []).find(t => pmt.transferGroup && t.transferGroup === pmt.transferGroup && t.direction === 'out');
-          const fundingName = fundingLeg ? acAcctName(fundingLeg.accountId) : null;
-          h += '<div id="ac_pay_row_' + pmt.id + '" style="display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);padding:3px 0;border-bottom:1px solid var(--line-faint)">';
-          h += '<span style="color:var(--muted);min-width:38px;flex-shrink:0">' + (pmt.postedOn || '').slice(5) + '</span>';
-          h += '<span style="flex:1;min-width:0"><b>' + acAmt(pmt.amount) + '</b>';
-          h += ' <span style="color:var(--muted)">· ' + esc(earmarkLabel) + (fundingName ? ' · from ' + esc(fundingName) : '') + '</span></span>';
-          h += '<span style="flex-shrink:0;white-space:nowrap">';
-          h += '<a href="#" class="ac-act-edit" data-edit-payment="' + pmt.id + '" title="Edit payment" aria-label="Edit payment">✎</a> ';
-          h += '<a href="#" class="ac-act-del" data-del-payment="' + pmt.id + '" title="Delete payment" aria-label="Delete payment">✕</a>';
-          h += '</span></div>';
-        });
-      }
-
-      // 3. The month's purchases live in the LEDGER below — filter it there instead of
-      //    duplicating the rows here (user feedback 2026-07-10; designer + DA aligned).
-      //    N counts ALL of the card's rows in the month (charges + refunds + payment legs)
-      //    so the label always matches what the filtered ledger will show.
-      const allAcctRows = (ACT.txns || []).filter(t => t.accountId === card.accountId).length;
-      if (!allAcctRows) {
-        h += '<span class="mini" style="color:var(--muted);display:block;margin-top:8px">No transactions this month.</span>';
-      } else {
-        h += '<button type="button" class="ac-tool" data-card-txns="' + card.accountId + '" style="margin-top:10px">'
-          + (allAcctRows === 1 ? 'Show this transaction' : 'Show these ' + allAcctRows + ' transactions') + ' in the ledger ↓</button>';
-      }
-
-      // 4. Inline payment form — amount prefilled to runningRemaining (the real cumulative owed)
-      const _payDate = ACT.month === acNowMonth() ? acToday() : acMonthEnd(ACT.month);
-      const _payAmt  = acMoneyEdit(Math.max(0, rr));
-      const _nonCreditAccts = ACT.accounts.filter(a => a.type !== 'credit');
-      // A payment with no "from" credits the card and takes NOTHING out of any account, so the
-      // account balances (and Cash vs cards) never moved -- the owner's bug. Default to the account
-      // last paid from, else the first checking account; "none" stays available but is a choice.
-      let _lastFrom = ''; try { _lastFrom = localStorage.getItem('ac_pay_from') || ''; } catch (e) {}
-      const _defFrom = String((_nonCreditAccts.find(a => String(a.id) === _lastFrom) || _nonCreditAccts.find(a => a.type === 'checking') || {}).id || '');
-      const _fromOpts = '<option value="">— none (card only, no account changes) —</option>' + _nonCreditAccts.map(a => '<option value="' + a.id + '"' + (String(a.id) === _defFrom ? ' selected' : '') + '>' + esc(a.name) + '</option>').join('');
-      const _catOpts  = '<option value="">Whole card / no category</option>'
-        + getCategories().filter(c => c.key !== 'investment').map(c => '<option value="' + c.key + '">' + esc(c.label) + '</option>').join('');
-      h += '<div class="ac-pay-form" id="ac_pay_form_' + card.accountId + '" hidden>';
-      h += '<div class="ac-row" style="flex-wrap:wrap">';
-      // Payment-form Amount field bug (user report): `.ac-field.ac-amt` here sits in a
-      // `flex:0 0 auto` row (unlike the main "Log it" composer's hero Amount field, which is
-      // `flex:1` and self-limits to its own share of the row) -- with no width/size on the
-      // <input>, the browser falls back to its default size=20 at .ac-amt input's --fs-2xl
-      // font, rendering ~390px wide (dwarfing the Date field beside it). max-width:9ch is set
-      // directly on the <input> (not the shared `.ac-amt input` CSS rule, and not the
-      // `.input-pair` wrapper -- `ch` must resolve against the SAME element whose font-size is
-      // actually --fs-2xl, or it computes against a smaller inherited size and clips the digits)
-      // so only THIS payment-form instance is scoped down; the composer's hero field is untouched.
-      h += '<label class="ac-field ac-amt" style="flex:0 0 auto"><span class="ac-lbl">Amount</span>'
-        + '<span class="input-pair"><span class="unit">$</span><input type="text" inputmode="decimal" data-pay="amt" value="' + _payAmt + '" style="max-width:9ch"></span></label>';
-      // Latent shiro-full bug (found auditing the datalist color-scheme fix): the inline
-      // `color-scheme:dark` here was hardcoded regardless of theme, forcing this date input's
-      // native calendar-picker chrome dark even in shiro-full. Removed -- color-scheme is
-      // inherited from :root, which is already theme-aware (applyHaTheme's shiro-full branch
-      // flips it to light).
-      h += '<label class="ac-field" style="flex:0 0 auto"><span class="ac-lbl">Date</span>'
-        + '<input type="date" data-pay="date" value="' + _payDate + '"></label>';
       h += '</div>';
-      h += '<div class="ac-pay-earmark">';
-      h += '<label class="ac-field"><span class="ac-lbl">Paid from</span>'
-        + '<select data-pay="from">' + _fromOpts + '</select></label>';
-      h += '<label class="ac-field"><span class="ac-lbl ac-lbl-strong">Apply payment to</span>'
-        + '<select data-pay="cat">' + _catOpts + '</select></label>';
-      h += '</div>';
-      h += '<span class="ac-earmark-chip is-whole" data-pay-chip="' + card.accountId + '" aria-live="polite">→ applies to whole card balance</span>';
-      h += '<div class="ac-pay-actions">'
-        + '<button class="calc-btn" type="button" data-pay-submit="' + card.accountId + '">Record payment</button>'
-        + '<button class="ac-tool" type="button" data-pay-cancel="' + card.accountId + '">Cancel</button>'
-        + '</div>';
-      h += '</div>';
-
-      h += '</div></td></tr>';
+      if (owes) h += '<button type="button" class="yc-pay" data-card-pay="' + f.id + '" aria-expanded="false" aria-controls="ac_pay_form_' + f.id + '" aria-label="Pay ' + esc(f.name) + '">Pay <span class="yc-pay-arrow" aria-hidden="true">→</span></button>';
+      h += '<div class="yc-det" id="ac_card_det_' + f.id + '" style="display:none" role="group" aria-label="' + esc(f.name) + ' details">' + acCardDetailHtml(f) + '</div></li>';
     };
 
-    // Grouped cards sit together under their group's name, each keeping its own row, and the group
-    // gets a subtotal row below them (same rules as the grand total). The group appears where its
-    // first member would have; cards in no group follow in their usual order.
-    const byId = {}; accounts.forEach(c => { byId[String(c.accountId)] = c; });
+    // Grouped cards sit together in a bordered section named for the group; the group appears where its first member
+    // would have (highest Owed first), and cards in no group follow in the same order.
     const shown = new Set();
-    const subtotalCell = (owed, credit) => credit > EPS
-      ? '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span><br><span class="ac-pay-credit">' + acAmt(credit) + ' credit</span></td>'
-      : (owed < EPS ? '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span></td>'
-                    : '<td class="num ac-col-total"><b>' + acAmt(owed) + '</b></td>');
-    accounts.forEach(card => {
-      if (shown.has(String(card.accountId))) return;
-      const g = acCardGroupOf(card.accountId);
-      const members = g ? (g.ids || []).map(i => byId[String(i)]).filter(Boolean) : [];
-      if (!g || members.length < 1) { shown.add(String(card.accountId)); renderCard(card); return; }
-      h += '<tr class="ac-group-head"><td class="ac-col-name" colspan="2"><b>' + esc(g.name) + '</b>'
-        + ' <button class="ac-tool" type="button" data-card-group-rename="' + esc(g.id) + '" title="Rename this group">Rename</button>'
-        + '<span data-card-group-rename-form="' + esc(g.id) + '" hidden style="display:none;gap:6px;align-items:center;margin-left:6px">'
-        +   '<input type="text" maxlength="40" value="' + esc(g.name) + '" aria-label="Group name" data-card-group-rename-input="' + esc(g.id) + '" style="min-height:36px">'
-        +   '<button class="ac-tool" type="button" data-card-group-rename-save="' + esc(g.id) + '">Save</button></span></td></tr>';
-      members.forEach(m => { shown.add(String(m.accountId)); renderCard(m); });
-      const gOwed = members.reduce((a, m) => a + (m.runningRemaining || 0), 0);
-      const gCredit = members.reduce((a, m) => a + (m.runningCredit || 0), 0);
-      h += '<tr class="total ac-group-sub"><td class="ac-col-name">' + esc(g.name) + ' total</td>' + subtotalCell(gOwed, gCredit) + '</tr>';
+    let run = false;
+    const closeRun = () => { if (run) { h += '</ul>'; run = false; } };
+    facts.forEach(f => {
+      if (shown.has(f.id)) return;
+      const g = acCardGroupOf(f.id);
+      const members = g ? (g.ids || []).map(i => byId[String(i)]).filter(Boolean).sort((a, b) => b.owedC - a.owedC || a.name.localeCompare(b.name)) : [];
+      if (!g || !members.length) {
+        shown.add(f.id);
+        if (!run) { h += '<ul class="cp-list yc-list" role="list">'; run = true; }
+        renderCard(f); return;
+      }
+      closeRun();
+      const gOwedC = members.reduce((n, m) => n + m.rrC, 0), gOwing = members.filter(m => m.rrC > 0).length, gid = esc(g.id);
+      h += '<section class="yc-group" aria-labelledby="yc_g_' + gid + '"><div class="yc-group-head"><span class="yc-gtile" aria-hidden="true"></span><h3 id="yc_g_' + gid + '">' + esc(g.name) + '</h3>'
+        + (g.tag ? '<span class="yc-tag" data-card-group-tag="' + gid + '">' + esc(g.tag) + '</span>' : '')
+        + (gOwing === 1 ? '' : '<span class="yc-group-total" data-card-group-total="' + gid + '">' + (gOwedC > 0 ? 'Owed ' + acAmt(gOwedC / 100) + ' across ' + gOwing + ' cards' : '✓ Nothing owed') + '</span>')
+        + '<div class="yc-menu"><button class="yc-kebab" type="button" data-card-group-menu="' + gid + '" aria-haspopup="menu" aria-expanded="false" aria-controls="yc_gm_' + gid + '" aria-label="Actions for group ' + esc(g.name) + '"><span class="yc-kebab-dots" aria-hidden="true"></span></button>'
+        +   '<div class="yc-menu-pop" id="yc_gm_' + gid + '" role="menu" aria-label="Group actions" hidden><button class="yc-menu-item" type="button" role="menuitem" data-card-group-rename="' + gid + '" aria-label="Rename group ' + esc(g.name) + '">Rename</button>'
+        +   '<button class="yc-menu-item" type="button" role="menuitem" data-card-group-tag-edit="' + gid + '" aria-label="Edit tag for group ' + esc(g.name) + '">Edit tag</button></div></div>'
+        + '<span data-card-group-rename-form="' + gid + '" hidden style="display:none;gap:6px;align-items:center">'
+        +   '<input type="text" maxlength="40" value="' + esc(g.name) + '" aria-label="Group name" data-card-group-rename-input="' + gid + '">'
+        +   '<button class="ac-tool" type="button" data-card-group-rename-save="' + gid + '">Save</button></span>'
+        + '<span data-card-group-tag-form="' + gid + '" hidden style="display:none;gap:6px;align-items:center">'
+        +   '<input type="text" maxlength="' + AC_TAG_MAX + '" value="' + esc(g.tag || '') + '" placeholder="Tag, e.g. Personal" aria-label="Group tag" data-card-group-tag-input="' + gid + '">'
+        +   '<button class="ac-tool" type="button" data-card-group-tag-save="' + gid + '">Save</button></span></div>'
+        + '<ul class="cp-list yc-list" role="list">';
+      members.forEach(m => { shown.add(m.id); renderCard(m); });
+      h += '</ul></section>';
     });
-
-    // Grand total row
-    h += '<tr class="total"><td class="ac-col-name">Grand total</td>';
-    if (grandCredit > EPS) {
-      h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span><br><span class="ac-pay-credit">' + acAmt(grandCredit) + ' credit</span></td>';
-    } else if (grandOwed < EPS) {
-      h += '<td class="num ac-col-total"><span class="ac-pay-paidoff">✓ Paid off</span></td>';
-    } else {
-      h += '<td class="num ac-col-total"><b>' + acAmt(grandOwed) + '</b></td>'; // backend guarantees runningRemaining >= 0
-    }
-    h += '</tr></tbody></table></div>';
+    closeRun();
 
     el.innerHTML = h;
+    acCardsMonth = ACT.month;
+
+    // Put back what was open: panels, an unsent payment form with what was typed, and focus.
+    snap.open.forEach(id => { const d = $('ac_card_det_' + id), t = el.querySelector('[data-card-toggle="' + id + '"]'); if (d) d.style.display = ''; if (t) t.setAttribute('aria-expanded', 'true'); });
+    Object.keys(snap.forms).forEach(id => {
+      const fm = $('ac_pay_form_' + id), s = snap.forms[id]; if (!fm) return;
+      fm.hidden = false; const tr = el.querySelector('[data-card-pay="' + id + '"]'); if (tr) tr.setAttribute('aria-expanded', 'true');
+      const d = $('ac_card_det_' + id); if (d) d.style.display = '';
+      Object.keys(s.v).forEach(k => { const i = fm.querySelector('[data-pay="' + k + '"]'); if (i) i.value = s.v[k]; });
+      if (s.manual) { const c = fm.querySelector('[data-pay="cat"]'); if (c) c.dataset.payManual = 'true'; }
+      acUpdateEarmarkChip(fm);
+    });
+    Object.keys(snap.tag).forEach(gid => {
+      const fm = el.querySelector('[data-card-group-tag-form="' + gid + '"]'), inp = fm && fm.querySelector('input'); if (!inp) return;
+      fm.hidden = false; fm.style.display = 'inline-flex'; inp.value = snap.tag[gid].v;
+      if (snap.focus && snap.focus.sel === '[data-card-group-tag-input="' + gid + '"]') snap.focus.pos = snap.tag[gid].pos;
+    });
+    Object.keys(snap.rename).forEach(gid => {
+      const fm = el.querySelector('[data-card-group-rename-form="' + gid + '"]'), inp = fm && fm.querySelector('input'); if (!inp) return;
+      fm.hidden = false; fm.style.display = 'inline-flex'; inp.value = snap.rename[gid].v;
+      if (snap.focus && snap.focus.sel === '[data-card-group-rename-input="' + gid + '"]') snap.focus.pos = snap.rename[gid].pos;
+    });
+    const live = $('ac_cards_live');
+    if (acCardsPaid) {
+      const p = acCardsPaid, f = byId[String(p.aid)]; acCardsPaid = null;
+      if (f) {
+        let msg = 'Payment of ' + acAmt(p.amount) + ' recorded. ' + f.name + (f.rcC > 0 ? ' now has a ' + acAmt(f.rcC / 100) + ' credit.' : f.rrC > 0 ? ' now owes ' + acAmt(f.rrC / 100) + '.' : ' is now paid off.');
+        if (live) { if (live.textContent === msg) msg += ' '; live.textContent = msg; }
+        const back = el.querySelector('[data-card-pay="' + f.id + '"]') || el.querySelector('[data-card-toggle="' + f.id + '"]'); if (back) back.focus();
+      }
+    } else if (snap.focus) {
+      let back = el.querySelector(snap.focus.sel);
+      if ((!back || back.offsetParent === null) && snap.focus.alt) back = el.querySelector(snap.focus.alt);
+      if (back) { back.focus(); if (snap.focus.pos && back.setSelectionRange) { try { back.setSelectionRange(snap.focus.pos[0], snap.focus.pos[1]); } catch (e) {} } }
+    }
   }
 
   // ---- Fund pace: is the reserve on course to hit the target by the date? Projects the reserve at
@@ -22634,11 +22845,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   function acIsCardTxn(t) { const a = (ACT.accounts || []).find(x => x.id === t.accountId); return !!(a && a.type === 'credit'); }
   function acLedgerTotals(list, card) {
     const c = x => Math.round((+x || 0) * 100);
-    let inC = 0, outC = 0, xfer = 0, xferC = 0, pend = 0, chargeC = 0, paidC = 0;
+    let inC = 0, outC = 0, xfer = 0, xferC = 0, pend = 0, chargeC = 0, paidC = 0, pendC = 0;
     (list || []).forEach(t => {
       if (t.status === 'pending') pend++;
       if (card) {
-        if (t.direction === 'in' || t.kind === 'refund') paidC += c(t.amount); else chargeC += c(t.amount);
+        const mag = c(t.amount), isPaid = t.direction === 'in' || t.kind === 'refund';
+        if (t.status === 'pending') { pendC += isPaid ? -mag : mag; return; }        // pending stays out of Charges and Paid
+        if (isPaid) paidC += mag; else chargeC += mag;
         return;
       }
       if (t.isTransfer) { xfer++; xferC += c(t.amount); return; }
@@ -22646,7 +22859,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       else if (t.kind === 'refund') outC -= c(t.amount);
       else outC += c(t.amount);
     });
-    return { inC: inC, outC: outC, netC: inC - outC, chargeC: chargeC, paidC: paidC, owedC: chargeC - paidC,
+    return { inC: inC, outC: outC, netC: inC - outC, chargeC: chargeC, paidC: paidC, owedC: chargeC - paidC, pendC: pendC,
              n: (list || []).length, xfer: xfer, xferC: xferC, pend: pend };
   }
   function acLedgerTotalsHtml(shown, all, filtered) {
@@ -22657,24 +22870,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     const line = (which, label, t) => {
       let body;
       if (card) body = cell('Charges', m(t.chargeC)) + cell('Paid', t.paidC > 0 ? '+' + m(t.paidC) : m(t.paidC), t.paidC > 0 ? 'good-text' : '')
-        + cell('Owed this month', m(t.owedC), t.owedC > 0 ? 'bad-text' : (t.owedC < 0 ? 'good-text' : ''));
+        + cell(t.owedLabel || 'Owed', m(t.owedC), t.owedC > 0 ? 'bad-text' : (t.owedC < 0 ? 'good-text' : ''))
+        + cell('Pending', m(t.pendC)) + cell('Owed with pending', m(t.owedC + t.pendC), t.owedC + t.pendC > 0 ? 'bad-text' : (t.owedC + t.pendC < 0 ? 'good-text' : ''));
       else body = cell('In', (t.inC > 0 ? '+' : '') + acAmt(t.inC / 100), t.inC > 0 ? 'good-text' : '')
         + cell('Out', m(t.outC)) + cell('Net', (t.netC > 0 ? '+' : '') + m(t.netC), t.netC < 0 ? 'bad-text' : (t.netC > 0 ? 'good-text' : ''));
       return '<div class="lt-line" data-lt="' + which + '"><span class="lt-k">' + label + ' ' + t.n + '</span>' + body + '</div>';
     };
     const a = acLedgerTotals(card ? cardRows : shown, card);
+    if (card) {
+      // Owed must be THE card's balance, the one the card list shows: carried-in + this month's settled charges
+      // less everything paid, from the same rollup. Pending is that card's pending, and Owed with pending adds them.
+      // The month-only arithmetic is the fallback until the rollup has loaded, and says so in its label.
+      const per = (window.__acLastRollup && window.__acLastRollup.perAccount) ? Object.values(window.__acLastRollup.perAccount) : [];
+      const ids = [...new Set(cardRows.map(t => String(t.accountId)))], accts = ids.map(id => per.find(x => String(x.accountId) === id));
+      if (accts.length && accts.every(Boolean)) {
+        const c = x => Math.round((+x || 0) * 100);
+        a.owedC = accts.reduce((n, x) => n + c(x.runningRemaining) - c(x.runningCredit), 0);
+        a.pendC = accts.reduce((n, x) => n + c(x.runningPending), 0);
+      } else a.owedLabel = 'Owed this month';
+    }
     const skipped = card ? shown.length - cardRows.length : 0;
     let h = '<div class="ac-led-totals" role="group" aria-label="Totals for the transactions shown" data-lt-mode="' + (card ? 'card' : 'cash') + '">' + line('shown', 'Showing', a);
-    if (filtered) {
-      // On a card the comparison is every CARD this month (paychecks have no place beside a card balance);
-      // otherwise it is the whole month.
-      if (card) { const cards = all.filter(acIsCardTxn); h += line('month', 'All cards', acLedgerTotals(cards, true)); }
-      else h += line('month', 'Whole month', acLedgerTotals(all, false));
-    }
+    // No comparison line (owner, 2026-10-23): the totals describe the rows shown, nothing else. `filtered` and `all`
+    // stay in the signature for the callers.
     const notes = [];
     if (!card && a.xfer) notes.push(a.xfer + ' transfer' + (a.xfer > 1 ? 's' : '') + ' (' + acAmt(a.xferC / 100) + ') not counted');
     if (skipped) notes.push(skipped + ' row' + (skipped > 1 ? 's' : '') + ' on non-card accounts not counted (paychecks, checking, savings)');
-    if (a.pend) notes.push(a.pend + ' pending included');
+    if (a.pend) notes.push(card ? a.pend + ' pending, not in Charges or Paid' : a.pend + ' pending included');
     if (notes.length) h += '<div class="lt-note">' + esc(notes.join(' · ')) + '</div>';
     return h + '</div>';
   }
@@ -23210,15 +23432,25 @@ document.addEventListener('DOMContentLoaded', async () => {
           await schRefresh(); return;
         } }
       // Card groups (see acCardGroups): rename, save a new group, and the picker's "new group" reveal.
+      const cgMenu = ev.target.closest('[data-card-group-menu]');
+      if (cgMenu) { ev.preventDefault(); acCardGroupMenu(cgMenu.dataset.cardGroupMenu, cgMenu.getAttribute('aria-expanded') !== 'true'); return; }
       const cgRen = ev.target.closest('[data-card-group-rename]');
-      if (cgRen) { ev.preventDefault(); const f = document.querySelector('[data-card-group-rename-form="' + cgRen.dataset.cardGroupRename + '"]'); if (f) { f.hidden = false; f.style.display = 'inline-flex'; const i = f.querySelector('input'); if (i) { i.focus(); i.select(); } } return; }
+      if (cgRen) { ev.preventDefault(); const gid = cgRen.dataset.cardGroupRename; acCardGroupMenu(gid, false, false); const f = document.querySelector('[data-card-group-rename-form="' + gid + '"]'); if (f) { f.hidden = false; f.style.display = 'inline-flex'; const i = f.querySelector('input'); if (i) { i.focus(); i.select(); } } return; }
+      const cgTag = ev.target.closest('[data-card-group-tag-edit]');
+      if (cgTag) { ev.preventDefault(); const gid = cgTag.dataset.cardGroupTagEdit; acCardGroupMenu(gid, false, false); acCardGroupTagOpen(gid); return; }
+      const cgTagSave = ev.target.closest('[data-card-group-tag-save]');
+      if (cgTagSave) { ev.preventDefault(); acCardGroupTagEnd(cgTagSave.dataset.cardGroupTagSave, true); return; }
       const cgRenSave = ev.target.closest('[data-card-group-rename-save]');
-      if (cgRenSave) { ev.preventDefault(); const gid = cgRenSave.dataset.cardGroupRenameSave; const i = document.querySelector('[data-card-group-rename-input="' + gid + '"]'); acRenameCardGroup(gid, i && i.value); if (window.__acLastRollup) acRenderCards(window.__acLastRollup); return; }
+      if (cgRenSave) { ev.preventDefault(); acCardGroupRenameEnd(cgRenSave.dataset.cardGroupRenameSave, true); return; }
       const cgSave = ev.target.closest('[data-card-group-save]');
       if (cgSave) { ev.preventDefault(); const aid = cgSave.dataset.cardGroupSave; const i = document.querySelector('[data-card-group-name="' + aid + '"]'); const nm = i && i.value.trim(); if (!nm) { if (i) i.focus(); return; } acSetCardGroup(aid, '__new', nm); acRerenderCardsKeepingOpen(aid); return; }
+      // "See Cash vs cards" under the Your cards summary: opens that sub-tab and lands on its tab button
+      const gcash = ev.target.closest('[data-cards-cash]');
+      if (gcash) { ev.preventDefault(); acSetSubtab('cash'); const tb = $('ac_tab_cash'); if (tb) { tb.scrollIntoView({ block: 'nearest' }); tb.focus(); } return; }
       // Card row expand/collapse
       const ct = ev.target.closest('[data-card-toggle]');
-      if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open)); } return; }
+      if (ct) { ev.preventDefault(); const aid = ct.dataset.cardToggle; const det = document.getElementById('ac_card_det_' + aid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ct.setAttribute('aria-expanded', String(!open));
+        if (open) { const pf = document.getElementById('ac_pay_form_' + aid); if (pf) pf.hidden = true; const pb = document.querySelector('[data-card-pay="' + aid + '"]'); if (pb) pb.setAttribute('aria-expanded', 'false'); } } return; }
       // Fund row expand/collapse (same pattern as the card rollup toggle above)
       const ft = ev.target.closest('[data-fund-toggle]');
       if (ft) { ev.preventDefault(); const fid = ft.dataset.fundToggle; const det = document.getElementById('ac_fund_det_' + fid); if (det) { const open = det.style.display !== 'none'; det.style.display = open ? 'none' : ''; ft.setAttribute('aria-expanded', String(!open)); } return; }
@@ -23385,14 +23617,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (pc) { ev.preventDefault(); const aid = pc.dataset.payCancel; const form = document.getElementById('ac_pay_form_' + aid); if (form) form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) { trig.setAttribute('aria-expanded', 'false'); trig.focus(); } return; }
       // Card payment submit: POST then refresh
       const ps = ev.target.closest('[data-pay-submit]');
-      if (ps) { ev.preventDefault(); if (acWriteGuard()) return; const aid = ps.dataset.paySubmit; const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; const amtRaw = (form.querySelector('[data-pay="amt"]') || {}).value || '0'; const amount = parseFloat(amtRaw.replace(/,/g, '')) || 0; const date = (form.querySelector('[data-pay="date"]') || {}).value || acToday(); const fromId = (form.querySelector('[data-pay="from"]') || {}).value || ''; const catKey = (form.querySelector('[data-pay="cat"]') || {}).value || ''; const body = { cardAccountId: aid, amount, date }; if (fromId) body.fromAccountId = fromId; if (catKey) body.applyToCategory = catKey; try { localStorage.setItem('ac_pay_from', fromId); } catch (e) {} (async () => { try { await post('/api/tracking/card-payment', body); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) trig.setAttribute('aria-expanded', 'false'); showToast('Payment recorded'); acRefresh(); } catch (e) { showToast('Could not record payment'); } })(); return; }
+      if (ps) { ev.preventDefault(); if (acWriteGuard()) return; const aid = ps.dataset.paySubmit; const form = document.getElementById('ac_pay_form_' + aid); if (!form) return; if (form.dataset.busy === '1') return; const amtRaw = (form.querySelector('[data-pay="amt"]') || {}).value || '0'; const amount = parseFloat(amtRaw.replace(/,/g, '')) || 0; if (!(amount > 0)) { showToast('Enter an amount above $0.00'); return; } const date = (form.querySelector('[data-pay="date"]') || {}).value || acToday(); const fromId = (form.querySelector('[data-pay="from"]') || {}).value || ''; const catKey = (form.querySelector('[data-pay="cat"]') || {}).value || ''; const body = { cardAccountId: aid, amount, date }; if (fromId) body.fromAccountId = fromId; if (catKey) body.applyToCategory = catKey; try { localStorage.setItem('ac_pay_from', fromId); } catch (e) {} form.dataset.busy = '1'; ps.disabled = true;   // a second click while the POST is in flight must not record a second payment
+      (async () => { try { await post('/api/tracking/card-payment', body); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) trig.setAttribute('aria-expanded', 'false'); acCardsPaid = { aid: aid, amount: amount }; showToast('Payment recorded'); acRefresh(); } catch (e) { showToast('Could not record payment'); } finally { form.dataset.busy = ''; ps.disabled = false; } })(); return; }
     });
-    function acUpdateEarmarkChip(form) {
-      const cat = form.querySelector('[data-pay="cat"]'); const chip = form.querySelector('.ac-earmark-chip');
-      if (!cat || !chip) return;
-      if (cat.value) { chip.textContent = '→ applies to ' + cat.options[cat.selectedIndex].text; chip.classList.add('is-cat'); chip.classList.remove('is-whole'); }
-      else { chip.textContent = '→ applies to whole card balance'; chip.classList.add('is-whole'); chip.classList.remove('is-cat'); }
-    }
     // TODO-284: typing in a facet's search box re-renders its list. `input`, not `change`, so it
     // filters as you type — 53 categories is why the box exists.
     if (panel) panel.addEventListener('input', async ev => {
@@ -23481,12 +23708,28 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
     });
+    // A group's kebab menu closes on an outside click (Escape is handled in the keydown listener below).
+    document.addEventListener('click', ev => { if (!ev.target.closest('.yc-menu')) acCardGroupMenusClose(); });
     // Card payment form keyboard: Esc closes + restores focus; Enter in amount submits
     if (panel) panel.addEventListener('keydown', ev => {
       // TODO-284 replaced the single roving-listbox popover with six checkbox menus, so the old
       // Arrow/Enter handler for `#ac_filter_popup` is gone with the element it drove. Checkboxes
       // are natively keyboard-operable (Tab to reach, Space to tick) and the search box takes
       // typing directly — there is no roving state left to manage.
+      const rin = ev.target.closest('[data-card-group-rename-input]');
+      if (rin && (ev.key === 'Enter' || ev.key === 'Escape')) { ev.preventDefault(); acCardGroupRenameEnd(rin.dataset.cardGroupRenameInput, ev.key === 'Enter'); return; }
+      const tin = ev.target.closest('[data-card-group-tag-input]');
+      if (tin && (ev.key === 'Enter' || ev.key === 'Escape')) { ev.preventDefault(); acCardGroupTagEnd(tin.dataset.cardGroupTagInput, ev.key === 'Enter'); return; }
+      const gpop = ev.target.closest('.yc-menu-pop');
+      if (gpop) {
+        const gid = gpop.id.replace('yc_gm_', '');
+        if (ev.key === 'Escape') { ev.preventDefault(); acCardGroupMenu(gid, false, true); }
+        else if (ev.key === 'Tab') { ev.preventDefault(); acCardGroupMenu(gid, false, true); }
+        else if (/^(ArrowDown|ArrowUp|Home|End)$/.test(ev.key)) { ev.preventDefault(); const items = [...gpop.querySelectorAll('[role="menuitem"]')], i = items.indexOf(document.activeElement);
+          const n = ev.key === 'Home' ? 0 : ev.key === 'End' ? items.length - 1 : (i + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length; if (items[n]) items[n].focus(); }
+        return;
+      }
+      if (ev.key === 'Escape' && ev.target.closest('[data-card-group-menu]')) { acCardGroupMenusClose(); return; }
       const form = ev.target.closest('.ac-pay-form');
       if (!form) return;
       if (ev.key === 'Escape') { ev.preventDefault(); const aid = form.id.replace('ac_pay_form_', ''); form.hidden = true; const trig = document.querySelector('[data-card-pay="' + aid + '"]'); if (trig) { trig.setAttribute('aria-expanded', 'false'); trig.focus(); } }

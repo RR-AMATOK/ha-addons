@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.10.7
+
+**Fixed: card groups (and other changes) could disappear after an update or when you used a second device**
+
+A device left open on an old copy of your plan, such as the Home Assistant app in the background, could save
+that old copy over a newer one. Just opening Budget on it counted as a change. Opening the app again then pulled
+the older copy, and the card groups were gone. Now an identical re-save is not treated as an edit, and a device
+that comes back to the foreground checks for newer data first. Open the app once on every device after updating.
+If your groups are already gone you will need to set them again once.
+
+**New look: "Your cards"**
+
+- Each card that owes money is a rounded panel: the card name, the Owed amount large underneath, then
+  "Carried in + Charges - Paid" so you can see where the number comes from without opening anything.
+- What is still owed in each bucket (Need, Want...) sits on the right, only for buckets that owe money, and adds
+  up to the card's Owed. Cards that are paid off are a plain, compact line.
+- Pay is a clear button on every card. A group is one rounded card with a menu (Rename, Edit tag) and an optional
+  tag such as "Personal".
+- Open a card for the statement (carried in, charges, paid, owed, pending, owed with pending) and its payments.
+  One word, "Owed", is used everywhere.
+- A card in credit no longer makes a group or the total say "Paid off" while money is still owed.
+- Fixed: clicking Record payment twice quickly recorded two payments. An amount of $0 now says why it was refused.
+
+**Ledger totals**
+
+- For a card the line now reads Charges (settled only), Paid, Owed (the card's own balance, the same number the
+  card list shows), Pending and Owed with pending. The "All cards" and "Whole month" comparison lines are gone.
+
+**Cash vs cards (from 0.10.6)** keeps its results first, with the rules for each account behind Edit.
 ## 0.10.6
 
 **New: Actuals "Sinking funds" card becomes three tabs, and "Cash vs cards" tells you whether you can pay every card**
